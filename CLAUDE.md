@@ -107,6 +107,14 @@ Ship blockers (before any tester build): backend proxy (Hono on Cloudflare Worke
 
 Tooling: no Mac, so Swift only compiles in the cloud. Plan: GitHub Actions macOS job (`expo prebuild`, `pod install`, unsigned simulator `xcodebuild`) to catch Swift errors without spending an EAS build; `eas-build-pre-install` runs typecheck. Apple's simulator can't emulate Pencil input; use `allowFingerDrawing` for any automated UI test. Skip agent teams and Spec Kit; write short `specs/<feature>.md` with a "native? Y/N" line.
 
+## Assignment parsing (measured, keep it that way)
+
+- Output is STRUCTURED (`src/problems/`): per problem a title, the setup stored ONCE (`context`), lettered `parts` with `subparts` and `hint`, `closing` text for all parts, `notes` for non-problem text. `flatten()` derives the flat `Problem[]` ("6a", "1b.ii") that the tutor, part picker, ladder and snapshots key on; `formatGroups()` shows the tutor each setup once. Labels go through `normalizeProblemLabel/PartLabel`.
+- Pipeline in `ClaudeProvider.parseAssignment`: strict tool schema -> `sanitizeParsed` -> `validateGroups` (letter gaps, empty parts, repeated setup, LaTeX health) -> ONE repair pass if there are errors -> remaining issues are shown in the Problems tab. Prompt: `src/ai/parsePrompt.ts`. Default parse model is Opus 5.5 (Sonnet 5.5 misread a figure's angle axis; judge-verified), effort high.
+- Large PDFs are never sent whole: the student gives a page range and `slicePdf` (pure-JS pdf-lib) cuts it on-device; the sliced PDF is the re-parse source. Assignment stores `sourcePages`, `sourceOnly`, `activePart`.
+- Figure text `[Figure: ...]` is machine-written and may be wrong: the UI labels it "auto-described" and TUTOR_RULES tells the tutor never to rely on it.
+- EVAL LOOP lives OUTSIDE the repo in `Penquire/evals-private/parse/` (gold files quote real course PSets; this repo is PUBLIC, so never commit them or real problem text; committed tests use invented text). Build: `npx --yes esbuild run.ts --bundle --platform=node --format=esm --outfile=dist/run.mjs`; run from that folder: `node dist/run.mjs --sets pset0,pset1,m51_ch3 --variant new --label X [--model M --effort E --repeat N]`; `--rescore <out dir>` re-grades saved output free; `judge.ts` runs a stronger independent model over page images. Scorer: `src/problems/score.ts`. Baseline (old flat parser) 65.2% -> structured parser 99.7% over 6 runs. Change the prompt/schema only with a before/after run.
+
 ## Working agreement
 
 - Read `BACKLOG.md`, pick the top unchecked item unless told otherwise, and keep changes scoped to it.
