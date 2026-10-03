@@ -61,6 +61,37 @@ Conventions that matter:
 - **The event log is append-only** (`Assignment.events`). Every check or reply records the help level used.
 - Style: TypeScript strict, functional React components, `StyleSheet`, colors from `src/theme.ts`. Small files, no new state library.
 
+## Build discipline (EAS builds are scarce: ~15 free iOS/month; user approved running the CLI, but ASK FIRST)
+
+- Default to JS-only. Before any native change, check whether JS, `app.json`/config plugin, or an existing native API can do it.
+- Batch native work. Pending for the NEXT build (not yet done): `exportImage` crop + JPEG/file-URI output, honor `maskedPathRanges`, `pageId`/`revision` on events, `expo-updates` + fingerprint `runtimeVersion`, `ios.privacyManifests`, all-four-orientations if the full-screen claim holds. Don't spend a build on one of these alone.
+- Gate every build: `npm run typecheck`, `npm test`, `npx expo-doctor`, `npx expo export --platform ios --output-dir dist-check` (then delete `dist-check`). Re-read new Swift against `node_modules/expo-modules-core/ios`. Confirm native files are tracked (`git ls-files modules`) and committed before building: EAS packs from git.
+- Say "NATIVE CHANGE: needs rebuild" in the commit and the reply. Never start a build without the user's yes.
+
+## Research digest (details and sources in `../research/*.md`; tags [V]/[S]/[U] mark confidence; re-verify numbers)
+
+Accuracy and pedagogy (the product's core risk):
+- A false ✓ is the worst bug. Most grading errors are *transcription* errors, skewed toward "correct" (arXiv 2605.19043, not tested on Claude); models also silently "fix" the student's mistakes when reading. Every line needs a transcription + legibility field; `unreadable` and `needs_review` are normal verdicts, not failures.
+- Target pipeline (backend phase): blind transcription with line IDs, independent second read (cheaper model), grade on the transcript, SymPy check that can only DOWNGRADE, refute-every-✓ verifier, student confirms the transcript. Best-of-N only on borderline cases.
+- Hint ladder (user decision): one-tap escalation within `HELP_LEVELS` and the course policy ceiling. Pure questioning loses users (Khanmigo); unguarded answers hurt learning (Bastani PNAS). Never exceed `policyMaxLevel`.
+- Answer-leak guards for any hint text: CAS check on contents, cross-family judge, templated fallback hint, adversarial-student suite in CI. Keyword filters alone miss adversarial leaks.
+- Evals run on Windows: seed from feedback exports (`src/store/evals.ts`), code graders for false-valid rate (hard gate 0) and leakage, score with pass^k, log cache hits.
+
+Claude API (verify with the `claude-api` skill before changing `src/ai/claude.ts`):
+- Forced `tool_choice` (`any`/`tool`) is a 400 on Sonnet 5.5, Opus 5.5, Fable 5.1: use `auto` + explicit instruction + retry (`callTool`). Adding `strict: true` needs `additionalProperties: false` in every schema.
+- Image tokens = ceil(w/28)*ceil(h/28); cap 2576 px on 4.7+ models, 1568 px older. Images go BEFORE text. Crop blank page, avoid recompression. Cached prefix reads are ~0.1x; keep the system prompt and tool list byte-stable.
+- Always check `stop_reason` (`refusal`, `max_tokens`) before using content. Never put the key in a shipped build.
+
+iPad / PencilKit:
+- Never let a failed load blank a page that autosave can then persist (`setDrawing` throws; `loadedPageRef` guards saves). Erased strokes are masked, not removed (`maskedPathRanges`). `PKStroke` IDs are stable only on newer iOS: use `#available`.
+- [U] iPadOS 27 may stop honoring `UIRequiresFullScreen` (re-read Apple TN3192). Prefer a fixed logical page size and compute line boxes, marks and exports in page points, not `canvas.bounds`. Without `requireFullScreen`, all four iPad orientations are needed (ITMS-90474).
+- Keep marks as RN views with `pointerEvents="box-none"`; Skia adds a transparent Metal layer that hurts Pencil latency. PDF backgrounds: render under one canvas. Vision `VNRecognizeTextRequest` is unsuitable for math; Mathpix is an optional second reader.
+- Marks need accessibility labels and 44 pt touch targets.
+
+Ship blockers (before any tester build): backend proxy (Hono on Cloudflare Workers, key only as a Worker secret, App Attest + Durable Object spend caps, Anthropic workspace limit), AI consent screen naming Anthropic (App Store 5.1.2(i)), in-app account deletion, privacy policy + reviewer demo account, `PrivacyInfo.xcprivacy` via `ios.privacyManifests`, 13+ age screen, no ink content in analytics. The repo is PUBLIC (user decision): never commit secrets, and expect prompts to be visible.
+
+Tooling: no Mac, so Swift only compiles in the cloud. Plan: GitHub Actions macOS job (`expo prebuild`, `pod install`, unsigned simulator `xcodebuild`) to catch Swift errors without spending an EAS build; `eas-build-pre-install` runs typecheck. Apple's simulator can't emulate Pencil input; use `allowFingerDrawing` for any automated UI test. Skip agent teams and Spec Kit; write short `specs/<feature>.md` with a "native? Y/N" line.
+
 ## Working agreement
 
 - Read `BACKLOG.md`, pick the top unchecked item unless told otherwise, and keep changes scoped to it.
