@@ -20,6 +20,14 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Select the newest installed Xcode (EAS builds with Swift 6.2; the default here is older)
+        run: |
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then echo "No Xcode 26+ on this runner image; need a newer macos image"; exit 1; fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+          swift --version
       - uses: actions/setup-node@v4
         with:
           node-version: 22
