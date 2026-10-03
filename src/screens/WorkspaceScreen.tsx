@@ -57,13 +57,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const pageId = a?.pageIds[pageIndex] ?? '';
   const pageIdRef = React.useRef(pageId);
   pageIdRef.current = pageId;
+  /** page whose saved drawing is currently loaded; never autosave a page that failed to load */
+  const loadedPageRef = React.useRef('');
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- persistence -------------------------------------------------------
   const savePage = React.useCallback(async () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     const id = pageIdRef.current;
-    if (!id || !canvasRef.current) return;
+    if (!id || !canvasRef.current || loadedPageRef.current !== id) return;
     writePage(id, await canvasRef.current.getDrawing());
   }, []);
 
@@ -74,10 +76,16 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     (async () => {
       const c = canvasRef.current;
       if (!c) return;
+      loadedPageRef.current = '';
       await c.setDrawing(readPage(pageId));
+      if (cancelled) return;
+      loadedPageRef.current = pageId;
       const strokes = await c.getStrokes();
       if (!cancelled) setStrokeCount(strokes.length);
-    })().catch((e) => console.warn('load page failed', e));
+    })().catch((e) => {
+      console.warn('load page failed', e);
+      Alert.alert('Could not open this page', 'The saved drawing could not be read. It was left untouched and will not be overwritten.');
+    });
     return () => {
       cancelled = true;
     };
