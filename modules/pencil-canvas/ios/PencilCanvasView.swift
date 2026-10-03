@@ -2,12 +2,19 @@ import ExpoModulesCore
 import PencilKit
 import UIKit
 
-// MARK: - Paper background (grid / lined / blank). Not included in exported images.
+// MARK: - Paper background (grid / lined / blank), drawn in page space and clipped to what is visible.
+//
+// The page is a fixed logical size (pageSize). Only the visible part of it gets a view, so zooming in
+// never allocates a giant backing store. Not included in exported images.
 
 final class PaperView: UIView {
   var style: String = "grid" {
     didSet { setNeedsDisplay() }
   }
+  /// screen points per page point
+  var scale: CGFloat = 1
+  /// where the page origin sits in this view's own coordinates (negative when the page is cut off)
+  var pageOffset: CGPoint = .zero
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -24,21 +31,27 @@ final class PaperView: UIView {
 
   override func draw(_ rect: CGRect) {
     guard style != "blank", let ctx = UIGraphicsGetCurrentContext() else { return }
-    let spacing: CGFloat = 32
+    let step = 32 * scale
+    guard step > 4 else { return } // too dense to be useful
     ctx.setStrokeColor(UIColor(red: 0.82, green: 0.87, blue: 0.95, alpha: 1).cgColor)
     ctx.setLineWidth(0.6)
-    var y = spacing
-    while y < bounds.height {
-      ctx.move(to: CGPoint(x: 0, y: y))
-      ctx.addLine(to: CGPoint(x: bounds.width, y: y))
-      y += spacing
+
+    var y = pageOffset.y + ceil((rect.minY - pageOffset.y) / step) * step
+    while y <= rect.maxY {
+      if y > pageOffset.y + 0.5 {
+        ctx.move(to: CGPoint(x: rect.minX, y: y))
+        ctx.addLine(to: CGPoint(x: rect.maxX, y: y))
+      }
+      y += step
     }
     if style == "grid" {
-      var x = spacing
-      while x < bounds.width {
-        ctx.move(to: CGPoint(x: x, y: 0))
-        ctx.addLine(to: CGPoint(x: x, y: bounds.height))
-        x += spacing
+      var x = pageOffset.x + ceil((rect.minX - pageOffset.x) / step) * step
+      while x <= rect.maxX {
+        if x > pageOffset.x + 0.5 {
+          ctx.move(to: CGPoint(x: x, y: rect.minY))
+          ctx.addLine(to: CGPoint(x: x, y: rect.maxY))
+        }
+        x += step
       }
     }
     ctx.strokePath()
@@ -55,8 +68,17 @@ private struct LineBox: Decodable {
   let h: Double
 }
 
+private struct ToolSpec: Decodable {
+  let kind: String // "ink" | "eraser" | "lasso"
+  let ink: String? // pen | marker | pencil | monoline | fountain | watercolor | crayon
+  let color: String? // "#RRGGBB" or "#RRGGBBAA"
+  let width: Double?
+  let eraser: String? // vector | bitmap | fixed
+  let eraserWidth: Double?
+}
+
 /// Thrown instead of silently showing a blank page: an autosave would overwrite the saved drawing.
-final class InvalidDrawingException: Exception {
+final class InvalidDrawingException: Exception, @unchecked Sendable {
   override var reason: String {
     "The saved drawing could not be decoded; the canvas was left unchanged"
   }
@@ -71,22 +93,64 @@ private func jsonString(_ object: Any) -> String {
   return str
 }
 
+private func parseColor(_ hex: String?) -> UIColor {
+  guard var h = hex?.trimmingCharacters(in: .whitespaces), !h.isEmpty else { return .black }
+  if h.hasPrefix("#") { h.removeFirst() }
+  guard h.count == 6 || h.count == 8, let value = UInt64(h, radix: 16) else { return .black }
+  let hasAlpha = h.count == 8
+  let r = CGFloat((value >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
+  let g = CGFloat((value >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
+  let b = CGFloat((value >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
+  let a = hasAlpha ? CGFloat(value & 0xFF) / 255 : 1
+  return UIColor(red: r, green: g, blue: b, alpha: a)
+}
+
+private func inkType(_ name: String?) -> PKInk.InkType {
+  switch name {
+  case "marker": return .marker
+  case "pencil": return .pencil
+  default: break
+  }
+  if #available(iOS 17.0, *) {
+    switch name {
+    case "monoline": return .monoline
+    case "fountain": return .fountainPen
+    case "watercolor": return .watercolor
+    case "crayon": return .crayon
+    default: break
+    }
+  }
+  return .pen
+}
+
 // MARK: - Canvas view
 
-final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
+final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractionDelegate {
   let canvas = PKCanvasView()
   let paper = PaperView(frame: .zero)
   let onDrawingChanged = EventDispatcher()
+  let onViewportChanged = EventDispatcher()
+  let onPencilDoubleTap = EventDispatcher()
 
   private var toolPicker: PKToolPicker?
-  private var wantsToolPicker = true
+  private var wantsToolPicker = false
   private var suppressChangeEvents = false
   private var pendingChange: Task<Void, Never>?
+
+  /// Fixed logical page, in the same units as stroke coordinates (page space). Never changes with zoom or rotation.
+  private var pageSize = CGSize(width: 816, height: 1056)
+  private var userHasZoomed = false
+  private var lastBoundsSize = CGSize.zero
+  private var isAdjusting = false
+  private var lastViewportSend: CFTimeInterval = 0
+  private var settleTask: Task<Void, Never>?
+  private var offsetObservation: NSKeyValueObservation?
+  private var zoomObservation: NSKeyValueObservation?
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     clipsToBounds = true
-    backgroundColor = .white
+    backgroundColor = UIColor(white: 0.90, alpha: 1) // the surround, like a desk behind the page
     // Keep ink black-on-white regardless of system dark mode (also keeps exports consistent).
     overrideUserInterfaceStyle = .light
 
@@ -95,20 +159,41 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
     canvas.backgroundColor = .clear
     canvas.isOpaque = false
     canvas.drawingPolicy = .pencilOnly
-    canvas.isScrollEnabled = false
-    canvas.minimumZoomScale = 1
-    canvas.maximumZoomScale = 1
+    canvas.isScrollEnabled = true
+    canvas.bounces = true
+    canvas.bouncesZoom = true
+    canvas.showsVerticalScrollIndicator = true
+    canvas.showsHorizontalScrollIndicator = true
     canvas.contentInsetAdjustmentBehavior = .never
-    canvas.alwaysBounceVertical = false
-    canvas.tool = PKInkingTool(.pen, color: .black, width: 2.5)
+    canvas.alwaysBounceVertical = true
+    canvas.alwaysBounceHorizontal = true
+    canvas.contentSize = pageSize
+    canvas.minimumZoomScale = 0.25
+    canvas.maximumZoomScale = 8
+    canvas.tool = PKInkingTool(.pen, color: .black, width: 3)
     canvas.delegate = self
     addSubview(canvas)
+
+    // Redundant on purpose: the delegate may not forward every scroll callback of PKCanvasView.
+    offsetObservation = canvas.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+      Task { @MainActor [weak self] in self?.viewportDidChange() }
+    }
+    zoomObservation = canvas.observe(\.zoomScale, options: [.new]) { [weak self] _, _ in
+      Task { @MainActor [weak self] in self?.viewportDidChange() }
+    }
+
+    let pencil = UIPencilInteraction()
+    pencil.delegate = self
+    addInteraction(pencil)
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    paper.frame = bounds
     canvas.frame = bounds
+    if bounds.size != lastBoundsSize, bounds.width > 1, bounds.height > 1 {
+      lastBoundsSize = bounds.size
+      refit(forceFit: false)
+    }
   }
 
   override func didMoveToWindow() {
@@ -116,7 +201,101 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
     updateToolPicker()
   }
 
+  // MARK: Page geometry
+
+  /// Zoom limits and (unless the user zoomed by hand) fit-to-width. Runs when the view's size changes: rotation, Split View.
+  private func refit(forceFit: Bool) {
+    guard bounds.width > 1, bounds.height > 1, pageSize.width > 1 else { return }
+    isAdjusting = true
+    let fitW = bounds.width / pageSize.width
+    let fitH = bounds.height / pageSize.height
+    let minZoom = max(0.1, min(fitW, fitH) * 0.85)
+    let maxZoom: CGFloat = 8
+    canvas.minimumZoomScale = minZoom
+    canvas.maximumZoomScale = maxZoom
+    if forceFit || !userHasZoomed {
+      userHasZoomed = false
+      canvas.setZoomScale(min(max(fitW, minZoom), maxZoom), animated: false)
+      updateInsets()
+      canvas.setContentOffset(CGPoint(x: -canvas.contentInset.left, y: -canvas.contentInset.top), animated: false)
+    } else {
+      canvas.setZoomScale(min(max(canvas.zoomScale, minZoom), maxZoom), animated: false)
+      updateInsets()
+    }
+    isAdjusting = false
+    updatePaper()
+    sendViewport()
+  }
+
+  /// When the page is smaller than the view (zoomed out, or a wide window), centre it.
+  private func updateInsets() {
+    let z = canvas.zoomScale
+    let ix = max(0, (bounds.width - pageSize.width * z) / 2)
+    let iy = max(0, (bounds.height - pageSize.height * z) / 2)
+    let inset = UIEdgeInsets(top: iy, left: ix, bottom: iy, right: ix)
+    if canvas.contentInset != inset { canvas.contentInset = inset }
+  }
+
+  private func updatePaper() {
+    let z = canvas.zoomScale
+    let pageRect = CGRect(x: -canvas.contentOffset.x, y: -canvas.contentOffset.y, width: pageSize.width * z, height: pageSize.height * z)
+    let visible = pageRect.intersection(bounds)
+    if visible.isNull || visible.isEmpty || visible.width < 1 || visible.height < 1 {
+      paper.isHidden = true
+      return
+    }
+    paper.isHidden = false
+    paper.frame = visible
+    paper.scale = z
+    paper.pageOffset = CGPoint(x: pageRect.minX - visible.minX, y: pageRect.minY - visible.minY)
+    paper.setNeedsDisplay()
+  }
+
+  private func viewportDidChange() {
+    guard !isAdjusting else { return }
+    updateInsets()
+    updatePaper()
+    if CACurrentMediaTime() - lastViewportSend >= 0.033 { sendViewport() }
+    // Trailing event: always report the final, settled viewport (interacting = false).
+    settleTask?.cancel()
+    settleTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 160_000_000)
+      guard let self = self, !Task.isCancelled else { return }
+      self.sendViewport()
+    }
+  }
+
+  private func viewportDict() -> [String: Any] {
+    let interacting = canvas.isTracking || canvas.isDragging || canvas.isDecelerating || canvas.isZooming || canvas.isZoomBouncing
+    return [
+      "scale": Double(canvas.zoomScale),
+      "tx": Double(-canvas.contentOffset.x),
+      "ty": Double(-canvas.contentOffset.y),
+      "viewWidth": Double(bounds.width),
+      "viewHeight": Double(bounds.height),
+      "interacting": interacting,
+    ]
+  }
+
+  private func sendViewport() {
+    lastViewportSend = CACurrentMediaTime()
+    onViewportChanged(viewportDict())
+  }
+
   // MARK: Props
+
+  func setPageSize(width: Double?, height: Double?) {
+    let w = CGFloat(width ?? Double(pageSize.width))
+    let h = CGFloat(height ?? Double(pageSize.height))
+    guard w > 1, h > 1, CGSize(width: w, height: h) != pageSize else { return }
+    pageSize = CGSize(width: w, height: h)
+    isAdjusting = true
+    canvas.setZoomScale(1, animated: false) // contentSize is defined at zoom 1
+    canvas.contentSize = pageSize
+    isAdjusting = false
+    userHasZoomed = false
+    refit(forceFit: true)
+  }
 
   func setAllowFingerDrawing(_ allow: Bool) {
     canvas.drawingPolicy = allow ? .anyInput : .pencilOnly
@@ -133,21 +312,65 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
 
   private func updateToolPicker() {
     guard window != nil else { return }
+    if !wantsToolPicker {
+      // The app draws its own toolbar. A picker observing the canvas would overwrite canvas.tool.
+      toolPicker?.setVisible(false, forFirstResponder: canvas)
+      if let picker = toolPicker {
+        picker.removeObserver(canvas)
+        toolPicker = nil
+      }
+      return
+    }
     if toolPicker == nil {
       let picker = PKToolPicker()
       picker.addObserver(canvas)
       toolPicker = picker
     }
-    toolPicker?.setVisible(wantsToolPicker, forFirstResponder: canvas)
-    if wantsToolPicker {
-      Task { @MainActor [weak self] in
-        _ = self?.canvas.becomeFirstResponder()
-      }
+    toolPicker?.setVisible(true, forFirstResponder: canvas)
+    Task { @MainActor [weak self] in
+      _ = self?.canvas.becomeFirstResponder()
     }
   }
 
   func focusCanvas() {
     updateToolPicker()
+  }
+
+  // MARK: Tools (the toolbar UI lives in JS; native only applies a small generic spec)
+
+  func setToolJSON(_ json: String) -> Bool {
+    guard let data = json.data(using: .utf8), let spec = try? JSONDecoder().decode(ToolSpec.self, from: data) else {
+      return false
+    }
+    switch spec.kind {
+    case "eraser":
+      switch spec.eraser {
+      case "bitmap":
+        canvas.tool = PKEraserTool(.bitmap)
+      case "fixed":
+        canvas.tool = PKEraserTool(.fixedWidthBitmap, width: CGFloat(spec.eraserWidth ?? 16))
+      default:
+        canvas.tool = PKEraserTool(.vector)
+      }
+    case "lasso":
+      canvas.tool = PKLassoTool()
+    default:
+      let type = inkType(spec.ink)
+      canvas.tool = PKInkingTool(type, color: parseColor(spec.color), width: CGFloat(spec.width ?? 3))
+    }
+    return true
+  }
+
+  func setRulerActive(_ active: Bool) {
+    canvas.isRulerActive = active
+  }
+
+  func fitToWidth() {
+    refit(forceFit: true)
+  }
+
+  func viewportJSON() -> String {
+    return jsonString(viewportDict())
   }
 
   // MARK: PKCanvasViewDelegate
@@ -168,6 +391,24 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
       guard let self = self, !Task.isCancelled else { return }
       self.onDrawingChanged(["strokeCount": self.canvas.drawing.strokes.count])
     }
+  }
+
+  func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+    userHasZoomed = true
+  }
+
+  func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    viewportDidChange()
+  }
+
+  func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    viewportDidChange()
+  }
+
+  // MARK: UIPencilInteractionDelegate (Apple Pencil double-tap; JS decides what it does)
+
+  func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+    onPencilDoubleTap([:])
   }
 
   // MARK: Functions
@@ -225,10 +466,10 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate {
     canvas.undoManager?.redo()
   }
 
-  /// Renders the ink on white with a left gutter containing line labels (L1, L2, ...)
-  /// and faint dashed boxes, so the model can refer to lines by ID.
+  /// Renders the PAGE (fixed logical size, independent of zoom and window) on white with a left gutter
+  /// containing line labels (L1, L2, ...) and faint dashed boxes, so the model can refer to lines by ID.
   func exportImageJSON(linesJSON: String, maxDimension: Double) -> String {
-    let size = canvas.bounds.size
+    let size = pageSize
     guard size.width > 1, size.height > 1 else { return "null" }
 
     var lines: [LineBox] = []

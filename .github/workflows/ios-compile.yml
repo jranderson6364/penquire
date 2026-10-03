@@ -15,9 +15,6 @@ jobs:
   compile:
     runs-on: macos-15
     timeout-minutes: 45
-    # Experimental: first run failed in Expo's ExpoModulesJSI script ("Could not resolve package dependencies"),
-    # not in PencilCanvas. Don't trust a green or red result until that is fixed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Select the newest installed Xcode (EAS builds with Swift 6.2; the default here is older)
