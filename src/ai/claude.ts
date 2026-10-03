@@ -1,4 +1,5 @@
 import { TUTOR_RULES, contextBlock, levelBlock } from './prompts';
+import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
 import { sanitizeCheck } from './sanitize';
 import type {
   CheckInput,
@@ -133,38 +134,73 @@ const PARSE_TOOL: Tool = {
   },
 };
 
-export type ClaudeOptions = { apiKey: string; checkModel: string; parseModel: string };
+export type UsageKind = 'check' | 'reply' | 'parse';
+export type ClaudeOptions = {
+  apiKey: string;
+  checkModel: string;
+  parseModel: string;
+  /** called once per API response that was billed, including truncated ones */
+  onUsage?: (e: { kind: UsageKind; model: string; usage: Usage }) => void;
+};
+
+/** Vision + thinking can legitimately take a while; beyond this the request is abandoned. */
+const REQUEST_TIMEOUT_MS = 180_000;
 
 export class ClaudeProvider implements TutorProvider {
   readonly id = 'anthropic';
   constructor(private opts: ClaudeOptions) {}
 
-  private async call(body: Record<string, unknown>): Promise<ApiResponse> {
+  private async call(body: Record<string, unknown>, kind: UsageKind): Promise<ApiResponse> {
     if (!this.opts.apiKey) throw new Error('No Anthropic API key. Add one in Settings or .env.');
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': this.opts.apiKey,
-        'anthropic-version': API_VERSION,
-      },
-      body: JSON.stringify(body),
+    const res = await withRetry(() => this.post(body), {
+      onRetry: (n, delay, e) => console.warn(`Claude API retry ${n} in ${delay} ms:`, e instanceof Error ? e.message : e),
     });
-    if (!res.ok) {
-      let detail = await res.text();
+    const usage = ClaudeProvider.usage(res);
+    if (usage) {
       try {
-        detail = JSON.parse(detail)?.error?.message ?? detail;
-      } catch {}
-      throw new Error(`Claude API ${res.status}: ${detail}`);
+        this.opts.onUsage?.({ kind, model: res.model, usage });
+      } catch (e) {
+        console.warn('usage recording failed', e); // metering must never break a check
+      }
     }
-    return (await res.json()) as ApiResponse;
+    return res;
+  }
+
+  private async post(body: Record<string, unknown>): Promise<ApiResponse> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.opts.apiKey,
+          'anthropic-version': API_VERSION,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let detail = await res.text();
+        try {
+          detail = JSON.parse(detail)?.error?.message ?? detail;
+        } catch {}
+        throw new HttpError(res.status, `Claude API ${res.status}: ${detail}`, parseRetryAfter(res.headers.get('retry-after')));
+      }
+      return (await res.json()) as ApiResponse;
+    } catch (e) {
+      if (controller.signal.aborted) throw new TimeoutError(REQUEST_TIMEOUT_MS);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
    * Forced tool_choice ('tool'/'any') is a 400 on Sonnet 5.5, Opus 5.5 and Fable 5.1, so ask for the tool by
    * name (tool_choice auto) and retry once if the model answers in prose instead.
    */
-  private async callTool<T>(body: Record<string, unknown>, tool: Tool, instruction: string): Promise<{ res: ApiResponse; out: T }> {
+  private async callTool<T>(body: Record<string, unknown>, tool: Tool, instruction: string, kind: UsageKind): Promise<{ res: ApiResponse; out: T }> {
     const messages = (body.messages as Message[]).map((m, i, all) => {
       if (i !== all.length - 1 || typeof m.content === 'string') return m;
       return { ...m, content: [...m.content, { type: 'text', text: instruction } as ContentBlock] };
@@ -172,7 +208,7 @@ export class ClaudeProvider implements TutorProvider {
     const req = { ...body, messages, tools: [tool], tool_choice: { type: 'auto' } };
     let last: ApiResponse | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
-      last = await this.call(req);
+      last = await this.call(req, kind);
       // Retrying a truncated or refused request would fail identically; only retry a prose answer.
       if (last.stop_reason === 'max_tokens') throw new Error('The answer was cut off before it finished. Try again, or check fewer lines at once.');
       if (last.stop_reason === 'refusal') throw new Error(`The model declined this request${last.stop_details?.category ? ` (${last.stop_details.category})` : ''}.`);
@@ -211,7 +247,8 @@ export class ClaudeProvider implements TutorProvider {
     const { out } = await this.callTool<{ course?: string; problems: Array<{ label: string; text: string; asks_for: string[] }> }>(
       { model: this.opts.parseModel, max_tokens: MAX_TOKENS, output_config: { effort: 'low' }, messages: [{ role: 'user', content }] },
       PARSE_TOOL,
-      `Respond only by calling the ${PARSE_TOOL.name} tool.`
+      `Respond only by calling the ${PARSE_TOOL.name} tool.`,
+      'parse'
     );
     return {
       course: out.course,
@@ -263,7 +300,8 @@ Check my work. Label every line, report part status (including parts the page sh
       ],
       },
       CHECK_TOOL,
-      `Respond only by calling the ${CHECK_TOOL.name} tool.`
+      `Respond only by calling the ${CHECK_TOOL.name} tool.`,
+      'check'
     );
 
     return sanitizeCheck(out as unknown as Record<string, unknown>, res.model, ClaudeProvider.usage(res));
@@ -295,16 +333,23 @@ Check my work. Label every line, report part status (including parts the page sh
     });
     messages.push({ role: 'user', content: finalContent });
 
-    const res = await this.call({
-      model: this.opts.checkModel,
-      max_tokens: 1200,
-      system: this.system(),
-      messages,
-    });
-    return res.content
+    const res = await this.call(
+      {
+        model: this.opts.checkModel,
+        max_tokens: MAX_TOKENS,
+        output_config: { effort: 'low' },
+        system: this.system(),
+        messages,
+      },
+      'reply'
+    );
+    if (res.stop_reason === 'refusal') throw new Error(`The model declined this request${res.stop_details?.category ? ` (${res.stop_details.category})` : ''}.`);
+    const text = res.content
       .filter((b) => b.type === 'text')
       .map((b) => b.text ?? '')
       .join('\n')
       .trim();
+    if (!text) throw new Error(res.stop_reason === 'max_tokens' ? 'The reply was cut off before it finished. Try again.' : 'The model returned an empty reply. Try again.');
+    return text;
   }
 }

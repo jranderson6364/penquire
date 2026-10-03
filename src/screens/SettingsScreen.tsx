@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
 import { ENV } from '../config';
-import { getSettings, saveSettings } from '../store/db';
+import { getSettings, getUsage, saveSettings } from '../store/db';
+import { formatUSD, monthTotal } from '../store/usageRecords';
 import { feedbackStats } from '../store/evalRecords';
 import { loadEvals, writeExport } from '../store/evals';
 import type { Settings } from '../store/types';
@@ -58,6 +59,14 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         autoCapitalize="none"
         autoCorrect={false}
       />
+
+      <Text style={styles.section}>Usage (estimate)</Text>
+      <Text style={styles.label}>
+        {(() => {
+          const t = monthTotal(getUsage());
+          return `This month: ${formatUSD(t.costUSD)} over ${t.calls} call${t.calls === 1 ? '' : 's'}${t.unpriced ? ` (${t.unpriced} with unknown price)` : ''}`;
+        })()}
+      </Text>
 
       <Text style={styles.section}>Accuracy feedback</Text>
       <Text style={styles.label}>

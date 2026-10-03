@@ -10,7 +10,7 @@ import { HelpLevelPicker } from '../components/HelpLevelPicker';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { groupLines, type Line } from '../ink/lines';
-import { getAssignment, getSettings, newId, readPage, subscribe, updateAssignment, writePage } from '../store/db';
+import { getAssignment, getSettings, newId, readPage, recordUsage, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { readSource } from '../store/sources';
@@ -32,7 +32,7 @@ const tutorContext = (a: Assignment): TutorContext => ({
 
 const providerFromSettings = () => {
   const s = getSettings();
-  return getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel });
+  return getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel, onUsage: recordUsage });
 };
 
 export function WorkspaceScreen({ assignmentId, onBack }: Props) {

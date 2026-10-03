@@ -1,6 +1,7 @@
 import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Ladder } from '../tutor/ladder';
+import type { UsageRecord } from './usageRecords';
 
 export type StoredCheck = {
   /** stable id for accuracy feedback (missing on checks saved before it existed) */
@@ -54,4 +55,6 @@ export type DB = {
   version: 1;
   assignments: Assignment[];
   settings: Settings;
+  /** one entry per billed API call (see Settings > Usage) */
+  usage?: UsageRecord[];
 };

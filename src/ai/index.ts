@@ -1,9 +1,15 @@
 import { ENV } from '../config';
-import { ClaudeProvider } from './claude';
+import { ClaudeProvider, type ClaudeOptions } from './claude';
 import { applyAlgebraGuard, applyLeakGuard, applyReplyLeakGuard } from '../verify/guard';
 import type { TutorProvider } from './types';
 
-export type ProviderSettings = { provider: 'anthropic'; apiKey?: string; checkModel?: string; parseModel?: string };
+export type ProviderSettings = {
+  provider: 'anthropic';
+  apiKey?: string;
+  checkModel?: string;
+  parseModel?: string;
+  onUsage?: ClaudeOptions['onUsage'];
+};
 
 /** Single place to swap providers. Add Gemini/OpenAI implementations of TutorProvider here. */
 export function getProvider(settings?: Partial<ProviderSettings>): TutorProvider {
@@ -11,6 +17,7 @@ export function getProvider(settings?: Partial<ProviderSettings>): TutorProvider
     apiKey: settings?.apiKey || ENV.anthropicApiKey,
     checkModel: settings?.checkModel || ENV.checkModel,
     parseModel: settings?.parseModel || ENV.parseModel,
+    onUsage: settings?.onUsage,
   });
   return guarded(inner);
 }

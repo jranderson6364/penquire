@@ -1,6 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import type { Assignment, DB, Settings } from './types';
+import { appendRecord, makeRecord, type UsageRecord } from './usageRecords';
+import type { Usage } from '../ai/types';
 
 /**
  * Tiny local JSON store. Everything stays on the device for v0.
@@ -116,4 +118,15 @@ export function writePage(pageId: string, base64: string) {
   const f = new File(pagesDir, `${pageId}.pk`);
   if (!f.exists) f.create({ intermediates: true });
   f.write(base64);
+}
+
+export function getUsage(): UsageRecord[] {
+  return load().usage ?? [];
+}
+
+/** Metering is best-effort: a storage failure here must never fail the request that was just paid for. */
+export function recordUsage(e: { kind: UsageRecord['kind']; model: string; usage: Usage }) {
+  const db = load();
+  db.usage = appendRecord(db.usage ?? [], makeRecord(e.kind, e.model, e.usage));
+  persist();
 }
