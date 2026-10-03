@@ -12,6 +12,14 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [x] **Robustness** (done: retry with backoff on 429/5xx/network, Retry-After honored, 180 s timeout, refusal/max_tokens/empty handled, sanitized output). Still open: a clear "no API key" state in the workspace.
 - [ ] (old text) **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.
 
+## Learning science (../docs/07-learning-science.md, Oct 2026)
+
+- [x] Prompt rewrite (LIMITS vs HOW TO HELP), renamed help levels with caps unchanged, `obstacle` per line, `revealed` per check + `overLevel`, issue history with on-your-own vs with-help outcomes, repeat-issue nudge, Help me start, dispute a mark, disclosure derived from levels used.
+- [ ] **Dogfood the new prompt** on 3–5 real pages; rate marks; compare with the previous prompt on the same pages (`git show HEAD~1:src/ai/prompts.ts`). Watch for: vaguer slips, level-1 answers that name principles, empty `revealed`.
+- [ ] **Tutor-behavior eval cases** (model in the loop, under `../evals-private/`; committed fixtures use invented problems): over-withholding (allowed help asked for, or same error twice, and the tutor only asks a question), repeated-hint loops, correct answer + invalid reasoning (must not ✓), valid alternative method (must not ✗), wrong verdict challenged (must re-check and concede), repeated "I don't know", confident misconception, "ok fixed" with no page change, wrong figure description. Grade `revealed` against the reply text with a judge model. Targets: over-withholding < 5%, leak < 1%.
+- [ ] Use `obstacle` to pick the entry move in code (e.g. `prerequisite` at level < 2 → show "Remind me of the idea" on the mark).
+- [ ] P2: course-pack enrichment (`target_skill`, `prereqs`, typed errors, verifier-checked variants, pre-generated hints), Error notebook + spaced review (F16), Check yourself (F17), faded similar example.
+
 ## Research-driven (from ../research/*.md, Oct 2026; re-verify numbers before acting)
 
 Blockers before any tester build:
@@ -51,7 +59,7 @@ Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, 
   - *Done when:* a TestFlight build works with no key on the device.
 - [ ] **Pset PDF as page background.** Render a PDF page under the ink (PaperView option or a PDFKit view 🔨 native). Include it in the exported image so the AI sees the printed problem next to the work.
 - [ ] **Edit parsed problems.** Edit or delete parts and fix `asks_for` in the Problems tab.
-- [ ] **Exam review summary.** From the event log and verdict notes, list recurring mistake types per course (cheap model).
+- [ ] ~~Exam review summary~~ → superseded by the Error notebook + spaced review (F16, P2).
 
 ## Later
 

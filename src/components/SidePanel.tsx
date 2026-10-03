@@ -14,7 +14,7 @@ import {
 
 import { HELP_LEVELS } from '../ai/prompts';
 import type { PartStatus } from '../ai/types';
-import { disclosureSummary } from '../log';
+import { disclosureSummary, issueOutcomes } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { C, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
@@ -32,6 +32,8 @@ type Props = {
   draft: string;
   onDraft: (s: string) => void;
   onSend: (message: string, attachPage: boolean) => void;
+  /** "Help me start": a first move for the active part, no attempt required */
+  onHelpStart: () => void;
   sending: boolean;
   onReparse: () => void;
   reparsing: boolean;
@@ -76,11 +78,33 @@ export function SidePanel(p: Props) {
   );
 }
 
-function FeedbackTab({ check, stale }: Props) {
+const REVEAL_LABEL: Record<string, string> = {
+  location: 'where to look',
+  principle: 'a principle',
+  example: 'a similar example',
+  subgoal: 'the next goal',
+  step: 'a step',
+};
+
+function StartButton({ activePart, onHelpStart, sending }: Props) {
+  return (
+    <Button
+      small
+      title={`Not sure how to start${activePart ? ` ${activePart}` : ''}?`}
+      loading={sending}
+      onPress={onHelpStart}
+      style={{ alignSelf: 'flex-start' }}
+    />
+  );
+}
+
+function FeedbackTab(p: Props) {
+  const { check, stale } = p;
   if (!check) {
     return (
-      <View style={styles.empty}>
+      <View style={[styles.empty, { gap: 12 }]}>
         <Text style={styles.emptyText}>Write your work, then tap Check. Feedback for this page shows up here and as marks in the margin.</Text>
+        <StartButton {...p} />
       </View>
     );
   }
@@ -146,6 +170,12 @@ function FeedbackTab({ check, stale }: Props) {
       <View style={styles.section}>
         <Markdown text={r.feedback} />
       </View>
+      {!!r.revealed?.length && (
+        <Text style={styles.meta}>
+          This feedback showed: {[...new Set(r.revealed.map((x) => REVEAL_LABEL[x.kind] ?? x.kind))].join(', ')}
+          {r.overLevel?.length ? ' (more than your help level allows; logged)' : ''}
+        </Text>
+      )}
       <Text style={styles.meta}>
         {new Date(check.at).toLocaleTimeString()} · {r.model}
         {r.usage ? ` · ${r.usage.inputTokens + r.usage.cacheReadTokens} in / ${r.usage.outputTokens} out` : ''}
@@ -154,7 +184,8 @@ function FeedbackTab({ check, stale }: Props) {
   );
 }
 
-function ChatTab({ assignment, draft, onDraft, onSend, sending, onInputFocus, onInputBlur }: Props) {
+function ChatTab(p: Props) {
+  const { assignment, draft, onDraft, onSend, sending, onInputFocus, onInputBlur } = p;
   const [attach, setAttach] = React.useState(true);
   const scrollRef = React.useRef<ScrollView>(null);
   return (
@@ -169,6 +200,7 @@ function ChatTab({ assignment, draft, onDraft, onSend, sending, onInputFocus, on
             Ask a question, push back on feedback, or describe a fix in words ("I changed L4 to 26/7 − 3").
           </Text>
         )}
+        {assignment.chat.length === 0 && <StartButton {...p} />}
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
             {m.role === 'user' ? <Text style={styles.userText}>{m.text}</Text> : <Markdown text={m.text} />}
@@ -208,8 +240,16 @@ function ChatTab({ assignment, draft, onDraft, onSend, sending, onInputFocus, on
 
 function LogTab({ assignment }: Props) {
   const summary = disclosureSummary(assignment);
+  const o = issueOutcomes(assignment);
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
+      {o.unaided + o.helped + o.open > 0 && (
+        <View style={styles.countRow}>
+          <Text style={[styles.count, { color: C.valid, backgroundColor: C.validSoft }]}>{o.unaided} on your own</Text>
+          <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.helped} with help</Text>
+          <Text style={[styles.count, { color: C.unknown, backgroundColor: C.unknownSoft }]}>{o.open} open</Text>
+        </View>
+      )}
       <Text style={styles.sectionTitle}>AI use disclosure</Text>
       <View style={styles.disclosure}>
         <Text style={styles.disclosureText}>{summary}</Text>
@@ -222,6 +262,8 @@ function LogTab({ assignment }: Props) {
           {e.page ? ` · p${e.page}` : ''}
           {e.level !== undefined ? ` · ${HELP_LEVELS[e.level].name}` : ''}
           {e.detail ? ` · ${e.detail}` : ''}
+          {e.revealed?.length ? ` · showed ${e.revealed.join('/')}` : ''}
+          {e.overLevel?.length ? ` · ⚠ above level: ${e.overLevel.join('/')}` : ''}
         </Text>
       ))}
     </ScrollView>

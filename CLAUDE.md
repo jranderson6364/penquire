@@ -1,8 +1,8 @@
 # Penquire: guide for Claude Code
 
-Penquire is an iPad app where a student handwrites STEM homework with Apple Pencil and an AI tutor gives **Socratic** feedback: it marks each line ✓ / ~ / ✗ / ? and asks one guiding question, **never giving answers**. It's built for courses whose policy allows AI only for checking reasoning.
+Penquire is an iPad app where a student handwrites STEM homework with Apple Pencil and an AI tutor checks it: it marks each line ✓ / ~ / ✗ / ?, diagnoses the obstacle, and gives the one push that fits it (a pointer, a question, or the missing idea), **never giving answers**. The goal is understanding the student can use without the tutor. It's built for courses whose policy allows AI only for checking reasoning.
 
-Product and strategy docs live one level up in `../docs/` (01 market, 02 strategy, 03 features F1–F15, 04 architecture, 05 roadmap, 06 risks). Read `../docs/03-features.md` before building a new feature.
+Product and strategy docs live one level up in `../docs/` (01 market, 02 strategy, 03 features F1–F17, 04 architecture, 05 roadmap, 06 risks, 07 learning science → product). Read `../docs/07-learning-science.md` before changing tutor behavior. Read `../docs/03-features.md` before building a new feature.
 
 ## Hard constraints (read first)
 
@@ -14,6 +14,8 @@ Product and strategy docs live one level up in `../docs/` (01 market, 02 strateg
   - Install packages with `npx expo install <pkg>`.
   - `expo-file-system` uses the **new** class API (`File`, `Directory`, `Paths`), not the legacy functions.
 - **Pedagogy is a product requirement, not a style choice.** The tutor must never output final answers, corrected expressions, or multi-step derivations unless the help level and course policy allow it. A false ✓ (calling wrong or unreadable work valid) is the worst bug. Rules live in `src/ai/prompts.ts`; change them deliberately.
+  - `TUTOR_RULES` has two kinds of rule: LIMITS (policy: what may be revealed, also enforced in code) and HOW TO HELP (teaching: diagnose, then choose the move). Don't turn a teaching preference into a limit or the reverse.
+  - **Never widen a help level.** Stored `policyMaxLevel` values depend on each level's meaning. `ALLOWED_REVEALS` (`src/tutor/revealed.ts`) must match the "Allowed in revealed" line of each `HELP_LEVELS` rule (a test enforces it).
 - **The API key is on the device (dev only).** `EXPO_PUBLIC_ANTHROPIC_API_KEY` from `.env` is bundled into the app. Never commit `.env`. Tester builds need the backend proxy (see the backlog).
 
 ## Commands
@@ -52,6 +54,8 @@ src/components/                 MarksOverlay, SidePanel (Feedback|Chat|Problems|
 src/verify/expr.ts            deterministic math checker (parser, sampling equivalence, step relations); no deps
 src/verify/leak.ts             answer-leak detector: judges the MATH in hint text with the checker (not keywords)
 src/tutor/ladder.ts           per-issue hint rungs, clamped to policy in code, pruned when fixed
+src/tutor/issues.ts           issue history per page: most help each open issue had; resolved on your own (<= level 1) vs with help
+src/tutor/revealed.ts         reveal kinds allowed per level; overLevel() flags reported reveals above the level (logged, not hidden)
 src/verify/guard.ts           downgrade-only algebra guard on check results; wired in src/ai/index.ts (guarded())
 src/log.ts                      deterministic AI-use disclosure from the event log
 ```
@@ -64,7 +68,8 @@ Conventions that matter:
 - **Swift is compile-checked for free:** `.github/workflows/ios-compile.yml` builds the app on `macos-26` (Xcode 26.3's Swift rejects a header that EAS's newer toolchain only warns about, so macos-15 fails). Treat it as a gate before any EAS build; write Swift only with the Write/Edit tools (the shell eats `\(`).
 - **The AI never outputs pixel coordinates.** It refers to line IDs (`L4`) drawn in the exported image's left gutter. Keep that contract for future annotation features (F10).
 - **Providers are pluggable.** Add a new model or provider by implementing `TutorProvider`; screens call only `getProvider()`.
-- **The event log is append-only** (`Assignment.events`). Every check or reply records the help level used.
+- **The event log is append-only** (`Assignment.events`). Every check or reply records the help level used. Event types: check, reply, start, dispute, resolved (level = most help the issue had), level_change, parse. The disclosure (`src/log.ts`) is derived from these; never hard-code claims there that the levels don't guarantee.
+- **Reply intents:** buttons send `ReplyInput.intent` (`start` = Help me start, `dispute` = I think this is right, `more_help` = hint ladder); `intentBlock()` adds the matching instructions.
 - Style: TypeScript strict, functional React components, `StyleSheet`, colors from `src/theme.ts`. Small files, no new state library.
 
 ## Build discipline (EAS builds are scarce: ~15 free iOS/month; user approved running the CLI, but ASK FIRST)

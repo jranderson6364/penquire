@@ -1,7 +1,8 @@
 import { ENV } from '../config';
 import { ClaudeProvider, type ClaudeOptions } from './claude';
 import { applyAlgebraGuard, applyLeakGuard, applyReplyLeakGuard } from '../verify/guard';
-import type { TutorProvider } from './types';
+import { overLevel } from '../tutor/revealed';
+import type { CheckResult, HelpLevel, TutorProvider } from './types';
 
 export type ProviderSettings = {
   provider: 'anthropic';
@@ -40,13 +41,19 @@ export function guarded(inner: TutorProvider): TutorProvider {
       const r = await inner.check(i);
       // A guard bug must never lose a check the student already paid for: fall back to the model's own result.
       try {
-        return applyLeakGuard({ ...r, lines: applyAlgebraGuard(r.lines) }, i.helpLevel);
+        return withRevealCheck(applyLeakGuard({ ...r, lines: applyAlgebraGuard(r.lines) }, i.helpLevel), i.helpLevel);
       } catch (e) {
         console.warn('verification guards failed; returning the unguarded check', e);
         return r;
       }
     },
   };
+}
+
+/** Record reveal kinds the model reported beyond the help level (logged and disclosed, not hidden). */
+export function withRevealCheck(r: CheckResult, level: HelpLevel): CheckResult {
+  const over = overLevel(r.revealed, level);
+  return over.length ? { ...r, overLevel: over } : r;
 }
 
 export * from './types';

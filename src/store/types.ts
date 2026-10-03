@@ -1,6 +1,7 @@
 import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Ladder } from '../tutor/ladder';
+import type { Issues } from '../tutor/issues';
 import type { ParseIssue, ProblemGroup } from '../problems/types';
 import type { UsageRecord } from './usageRecords';
 
@@ -18,10 +19,18 @@ export type StoredCheck = {
 
 export type LogEvent = {
   t: number;
-  type: 'parse' | 'check' | 'reply' | 'level_change';
+  /**
+   * resolved = a flagged issue is no longer flagged (level = most help it had); dispute = "I think this is right";
+   * start = "Help me start" on a part
+   */
+  type: 'parse' | 'check' | 'reply' | 'level_change' | 'resolved' | 'dispute' | 'start';
   page?: number;
   level?: HelpLevel;
   detail?: string;
+  /** what the tutor revealed in this check/reply (reveal kinds; see src/tutor/revealed.ts) */
+  revealed?: string[];
+  /** reveal kinds the tutor reported beyond the help level used */
+  overLevel?: string[];
 };
 
 export type Assignment = {
@@ -53,6 +62,8 @@ export type Assignment = {
   checks: Record<string, StoredCheck>;
   /** hint-ladder rung per open issue (see src/tutor/ladder.ts); absent on older assignments */
   ladder?: Ladder;
+  /** open issues with the most help each has had (src/tutor/issues.ts); absent on older assignments */
+  issues?: Issues;
   /** append-only hint/session log (integrity disclosure) */
   events: LogEvent[];
   createdAt: number;

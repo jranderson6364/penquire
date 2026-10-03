@@ -17,7 +17,11 @@ type Props = {
   onAsk: (v: LineVerdict) => void;
   /** raise the hint rung for this issue and ask again */
   onMoreHelp: (v: LineVerdict) => void;
-  /** label of the rung currently in force for this issue, e.g. "Socratic" */
+  /** "I think this is right": the tutor re-checks the line against the page */
+  onDispute: (v: LineVerdict) => void;
+  /** the same issue was still flagged on a later check (time to change the kind of help) */
+  repeats: (v: LineVerdict) => boolean;
+  /** label of the rung currently in force for this issue, e.g. "Nudge" */
   rungName: (v: LineVerdict) => string;
   feedbackFor: (lineId: string) => MarkFeedback | undefined;
   onRate: (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => void;
@@ -33,13 +37,13 @@ const CORRECT_VERDICTS: { v: Verdict; label: string }[] = [
 
 const MARK = 26;
 const POPOVER_W = 300;
-const POPOVER_H = 290;
+const POPOVER_H = 340;
 
 /**
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, rungName, feedbackFor, onRate, onInputBlur }: Props) {
+export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, rungName, feedbackFor, onRate, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
@@ -112,6 +116,21 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
             </Text>
           )}
           <Text style={styles.note}>{latexToUnicode(active.v.note)}</Text>
+          {active.v.verdict !== 'valid' && repeats(active.v) && (
+            <Text style={styles.repeat}>Still flagged after another check. Try More help for a different kind of hint.</Text>
+          )}
+          {(active.v.verdict === 'incorrect' || active.v.verdict === 'partial') && (
+            <Pressable
+              onPress={() => {
+                onDispute(active.v);
+                setOpen(null);
+              }}
+              style={styles.dispute}
+              accessibilityLabel="I think this line is right. Ask the tutor to re-check it."
+            >
+              <Text style={styles.disputeText}>I think this is right · re-check</Text>
+            </Pressable>
+          )}
           <FeedbackRow
             verdict={active.v}
             saved={feedbackFor(active.v.id)}
@@ -243,5 +262,8 @@ const styles = StyleSheet.create({
   popTitle: { fontSize: 13, fontWeight: '700', color: C.sub },
   reading: { fontFamily: 'Menlo', fontSize: 12, color: C.sub },
   note: { fontSize: 15, lineHeight: 21, color: C.ink },
+  repeat: { fontSize: 13, lineHeight: 18, color: C.partial, fontWeight: '600' },
+  dispute: { alignSelf: 'flex-start', paddingVertical: 4 },
+  disputeText: { fontSize: 13, color: C.primary, fontWeight: '600' },
   popActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
 });

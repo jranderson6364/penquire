@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
-import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
+import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
 import { AiFab } from '../components/AiFab';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
@@ -23,6 +23,7 @@ import { applyParse } from '../store/parseApply';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { readSource } from '../store/sources';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
+import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
 import type { Assignment } from '../store/types';
 import { C } from '../theme';
@@ -321,22 +322,43 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         console.warn('saving check image failed', e);
       }
       const counts = result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
-      const openKeys = result.lines.filter((l) => l.verdict !== 'valid' && l.verdict !== 'context').map((l) => issueKey(l.part, l.reading));
-      updateAssignment(a.id, (x) => ({
-        ...x,
-        ladder: pruneLadder(x.ladder ?? {}, openKeys),
-        checks: { ...x.checks, [pageId]: { id: newId('c_'), at: Date.now(), result, lines, strokeCount: strokes, space: modern ? 'page-v2' : undefined } },
-        events: [
-          ...x.events,
-          {
-            t: Date.now(),
-            type: 'check',
-            page: pageIndex + 1,
-            level: tutorContext(x).helpLevel,
-            detail: `✓${counts.valid ?? 0} ~${counts.partial ?? 0} ✗${counts.incorrect ?? 0} ?${counts.unreadable ?? 0}`,
-          },
-        ],
-      }));
+      const flagged = result.lines.filter((l) => l.verdict !== 'valid' && l.verdict !== 'context');
+      const openKeys = flagged.map((l) => issueKey(l.part, l.reading));
+      updateAssignment(a.id, (x) => {
+        const now = Date.now();
+        const base = tutorContext(x).helpLevel;
+        // Most help in force for each open issue: the default level, or a rung raised by "More help".
+        const open = flagged.map((l) => {
+          const key = issueKey(l.part, l.reading);
+          return { key, part: l.part, reading: l.reading, obstacle: l.obstacle, level: rungFor(x.ladder ?? {}, key, base, x.policyMaxLevel) };
+        });
+        const { issues, resolved } = recordCheck(x.issues ?? {}, pageId, open, now);
+        return {
+          ...x,
+          ladder: pruneLadder(x.ladder ?? {}, openKeys),
+          issues,
+          checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, space: modern ? 'page-v2' : undefined } },
+          events: [
+            ...x.events,
+            ...resolved.map((r) => ({
+              t: now,
+              type: 'resolved' as const,
+              page: pageIndex + 1,
+              level: r.record.maxLevel,
+              detail: [r.record.part, r.record.obstacle].filter(Boolean).join(' · ') || undefined,
+            })),
+            {
+              t: now,
+              type: 'check',
+              page: pageIndex + 1,
+              level: base,
+              detail: `✓${counts.valid ?? 0} ~${counts.partial ?? 0} ✗${counts.incorrect ?? 0} ?${counts.unreadable ?? 0}`,
+              revealed: result.revealed?.length ? [...new Set(result.revealed.map((r) => r.kind))] : undefined,
+              overLevel: result.overLevel,
+            },
+          ],
+        };
+      });
       setShowMarks(true);
       setTab('feedback');
       setPanelOpen(true);
@@ -347,7 +369,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     }
   };
 
-  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel) => {
+  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent) => {
     setSending(true);
     setDraft('');
     try {
@@ -361,11 +383,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
+        intent,
+        part: activePart,
       });
+      const type = intent === 'start' ? 'start' : intent === 'dispute' ? 'dispute' : 'reply';
       updateAssignment(a.id, (x) => ({
         ...x,
         chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply }],
-        events: [...x.events, { t: Date.now(), type: 'reply', page: pageIndex + 1, level, detail: levelOverride !== undefined ? 'hint ladder' : undefined }],
+        events: [
+          ...x.events,
+          { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : undefined },
+        ],
       }));
     } catch (e) {
       setDraft(message);
@@ -419,11 +447,28 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       Alert.alert('Highest help for this course', `${HELP_LEVELS[a.policyMaxLevel].name} is the most this course's AI policy allows. Try the Chat tab to talk it through.`);
       return;
     }
-    updateAssignment(a.id, (x) => ({ ...x, ladder: esc.ladder }));
+    updateAssignment(a.id, (x) => ({ ...x, ladder: esc.ladder, issues: noteHelp(x.issues ?? {}, pageId, key, esc.level) }));
     setTab('chat');
     setPanelOpen(true);
-    await send(`I'm still stuck on ${v.id} ("${v.reading}"). Give me the next level of hint, without giving the answer.`, true, esc.level);
+    await send(`I'm still stuck on ${v.id} ("${v.reading}"). Give me the next level of help.`, true, esc.level, 'more_help');
   };
+
+  /** "I think this is right": recorded as accuracy feedback and re-checked by the tutor against the actual page. */
+  const dispute = async (v: LineVerdict) => {
+    rateMark({ lineId: v.id, rating: 'wrong', comment: 'student disputed the mark' });
+    setTab('chat');
+    setPanelOpen(true);
+    await send(`I think the mark on ${v.id} ("${v.reading}") is wrong. Can you re-check it?`, true, undefined, 'dispute');
+  };
+
+  /** "Help me start": no attempt needed; a policy-capped first move for the active part. */
+  const helpStart = async () => {
+    setTab('chat');
+    setPanelOpen(true);
+    await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, undefined, 'start');
+  };
+
+  const repeats = (v: LineVerdict) => isRepeat(getIssue(a.issues, pageId, issueKey(v.part, v.reading)));
 
   const rungName = (v: LineVerdict) => HELP_LEVELS[rungFor(a.ladder ?? {}, issueKey(v.part, v.reading), tutorContext(a).helpLevel, a.policyMaxLevel)].name;
 
@@ -512,6 +557,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               stale={stale}
               onAsk={askAbout}
               onMoreHelp={moreHelp}
+              onDispute={dispute}
+              repeats={repeats}
               rungName={rungName}
               feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
               onRate={rateMark}
@@ -551,6 +598,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               draft={draft}
               onDraft={setDraft}
               onSend={send}
+              onHelpStart={helpStart}
               sending={sending}
               onReparse={reparse}
               reparsing={reparsing}

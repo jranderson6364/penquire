@@ -1,4 +1,4 @@
-import { TUTOR_RULES, contextBlock, levelBlock } from './prompts';
+import { TUTOR_RULES, contextBlock, intentBlock, levelBlock } from './prompts';
 import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
 import { flatten } from '../problems/flatten';
@@ -74,7 +74,13 @@ const CHECK_TOOL: Tool = {
             },
             note: {
               type: 'string',
-              description: 'One short clause: why it is valid, or WHERE the problem is (as a question if possible). Never the corrected expression.',
+              description: 'One short clause: what is right about it, or WHERE the problem is. Never the corrected expression (below help level 4).',
+            },
+            obstacle: {
+              type: 'string',
+              enum: ['slip', 'method', 'notation', 'prerequisite', 'misconception', 'no_work', 'incomplete', 'alt_path', 'unclear'],
+              description:
+                'Only for lines that are not valid/context: the kind of obstacle the work shows (slip = sound plan, local error; method = inapplicable method; notation; prerequisite = missing earlier skill; misconception = coherent wrong idea; no_work = correct result without reasoning; incomplete = missing deliverable; alt_path = valid but unexpected approach; unclear = the work does not tell these apart).',
             },
           },
           required: ['id', 'reading', 'verdict', 'note'],
@@ -98,11 +104,23 @@ const CHECK_TOOL: Tool = {
         description:
           'Short markdown summary in the tutor format: per part, the key steps with **valid** / **partially valid** / **incorrect** and why; missing pieces; one line on presentation if relevant. Keep it tight.',
       },
-      question: { type: 'string', description: 'Exactly ONE guiding question that moves the student to the next micro-step.' },
+      question: { type: 'string', description: 'Exactly ONE question or next action for the most important (earliest) issue, chosen to fit its obstacle.' },
+      revealed: {
+        type: 'array',
+        description: 'Everything the feedback, notes and question gave away beyond the student\'s own work. [] if you only marked lines.',
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['location', 'principle', 'example', 'subgoal', 'step'] },
+            what: { type: 'string', description: 'A few words, e.g. "error is in L4", "energy conservation".' },
+          },
+          required: ['kind', 'what'],
+        },
+      },
       fixed_since_last: { type: 'array', items: { type: 'string' }, description: 'Previously open issues that are now fixed' },
       still_open: { type: 'array', items: { type: 'string' }, description: 'Issues that remain open (short phrases, reused next round)' },
     },
-    required: ['lines', 'parts', 'feedback', 'question', 'fixed_since_last', 'still_open'],
+    required: ['lines', 'parts', 'feedback', 'question', 'revealed', 'fixed_since_last', 'still_open'],
   },
 };
 
@@ -344,7 +362,7 @@ ${lineList}
 
 ${previous}
 
-Check my work. Label every line, report part status (including parts the page should address but doesn't), and ask one guiding question about the most important issue.`,
+Check my work. Label every line, diagnose the obstacle on each line that isn't valid, report part status (including parts the page should address but doesn't), give one question or next action for the earliest issue that matters, and list what you revealed.`,
             },
           ],
         },
@@ -380,7 +398,7 @@ Check my work. Label every line, report part status (including parts the page sh
     }
     finalContent.push({
       type: 'text',
-      text: `${levelBlock(input)}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of markdown. If they describe a fix in words, check it. One question max.)`,
+      text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of markdown. If they describe a fix in words, check it. One question max.)`,
     });
     messages.push({ role: 'user', content: finalContent });
 
