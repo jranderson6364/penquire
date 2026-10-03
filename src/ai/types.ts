@@ -77,6 +77,8 @@ export type ReplyInput = TutorContext & {
   /** attach the current page when the student asks about their work */
   image?: PageImage;
   lastCheck?: { feedback: string; stillOpen: string[] };
+  /** the latest check's transcribed lines, so the leak guard can judge the reply against the student's work */
+  lines?: { id: string; reading: string; verdict: string }[];
 };
 
 export type ParseInput = {

@@ -14,6 +14,10 @@ type Props = {
   verdicts: LineVerdict[];
   stale: boolean;
   onAsk: (v: LineVerdict) => void;
+  /** raise the hint rung for this issue and ask again */
+  onMoreHelp: (v: LineVerdict) => void;
+  /** label of the rung currently in force for this issue, e.g. "Socratic" */
+  rungName: (v: LineVerdict) => string;
   feedbackFor: (lineId: string) => MarkFeedback | undefined;
   onRate: (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => void;
   onInputBlur?: () => void;
@@ -34,7 +38,7 @@ const POPOVER_H = 290;
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, feedbackFor, onRate, onInputBlur }: Props) {
+export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, rungName, feedbackFor, onRate, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
@@ -120,6 +124,16 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, fee
           />
           <View style={styles.popActions}>
             <Button small kind="ghost" title="Close" onPress={() => setOpen(null)} />
+            {active.v.verdict !== 'valid' && (
+              <Button
+                small
+                title={`More help (${rungName(active.v)})`}
+                onPress={() => {
+                  onMoreHelp(active.v);
+                  setOpen(null);
+                }}
+              />
+            )}
             <Button
               small
               kind="primary"

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractMath, findLeak, scrubText, type LeakContext } from './leak.ts';
-import { applyLeakGuard } from './guard.ts';
+import { applyLeakGuard, applyReplyLeakGuard } from './guard.ts';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder.ts';
 import type { CheckResult, LineVerdict } from '../ai/types.ts';
 
@@ -94,4 +94,17 @@ test('ladder: per-issue rungs, clamped to policy, reset when fixed', () => {
   // fixed issues are pruned
   assert.deepEqual(pruneLadder(e.ladder, []), {});
   assert.equal(issueKey('1a', '2x=10'), issueKey('1a', '2x = 10'));
+});
+
+test('chat replies are guarded too: leaking sentence removed, clean reply untouched', () => {
+  const lines = [
+    { id: 'L1', reading: '2x + 3 = 7', verdict: 'valid' },
+    { id: 'L2', reading: '2x = 10', verdict: 'incorrect' },
+  ];
+  assert.equal(applyReplyLeakGuard('Look at L2 again. The answer is x = 2.', lines, 1), 'Look at L2 again.');
+  const clean = 'What did you do to both sides between L1 and L2?';
+  assert.equal(applyReplyLeakGuard(clean, lines, 1), clean);
+  assert.match(applyReplyLeakGuard('x = 2.', lines, 1), /L2/);
+  // no transcribed lines (no check yet): nothing to compare against, reply passes through
+  assert.equal(applyReplyLeakGuard('x = 2.', [], 1), 'x = 2.');
 });

@@ -14,6 +14,8 @@ import { getAssignment, getSettings, newId, readPage, subscribe, updateAssignmen
 import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { readSource } from '../store/sources';
+import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
+import { HELP_LEVELS } from '../ai/prompts';
 import type { Assignment } from '../store/types';
 import { C } from '../theme';
 
@@ -158,8 +160,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         console.warn('saving check image failed', e);
       }
       const counts = result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
+      const openKeys = result.lines.filter((l) => l.verdict !== 'valid' && l.verdict !== 'context').map((l) => issueKey(l.part, l.reading));
       updateAssignment(a.id, (x) => ({
         ...x,
+        ladder: pruneLadder(x.ladder ?? {}, openKeys),
         checks: { ...x.checks, [pageId]: { id: newId('c_'), at: Date.now(), result, lines, strokeCount: strokes } },
         events: [
           ...x.events,
@@ -182,13 +186,16 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     }
   };
 
-  const send = async (message: string, attachPage: boolean) => {
+  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel) => {
     setSending(true);
     setDraft('');
     try {
       const image = attachPage ? (await capture()).image : null;
+      const level = levelOverride ?? tutorContext(a).helpLevel;
       const reply = await providerFromSettings().reply({
         ...tutorContext(a),
+        helpLevel: level,
+        lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
         history: a.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
@@ -197,7 +204,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       updateAssignment(a.id, (x) => ({
         ...x,
         chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply }],
-        events: [...x.events, { t: Date.now(), type: 'reply', page: pageIndex + 1, level: tutorContext(x).helpLevel }],
+        events: [...x.events, { t: Date.now(), type: 'reply', page: pageIndex + 1, level, detail: levelOverride !== undefined ? 'hint ladder' : undefined }],
       }));
     } catch (e) {
       setDraft(message);
@@ -246,6 +253,22 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setTab('chat');
     setPanelOpen(true);
   };
+
+  const moreHelp = async (v: LineVerdict) => {
+    const base = tutorContext(a).helpLevel;
+    const key = issueKey(v.part, v.reading);
+    const esc = escalate(a.ladder ?? {}, key, base, a.policyMaxLevel);
+    if (esc.atCeiling) {
+      Alert.alert('Highest help for this course', `${HELP_LEVELS[a.policyMaxLevel].name} is the most this course's AI policy allows. Try the Chat tab to talk it through.`);
+      return;
+    }
+    updateAssignment(a.id, (x) => ({ ...x, ladder: esc.ladder }));
+    setTab('chat');
+    setPanelOpen(true);
+    await send(`I'm still stuck on ${v.id} ("${v.reading}"). Give me the next level of hint, without giving the answer.`, true, esc.level);
+  };
+
+  const rungName = (v: LineVerdict) => HELP_LEVELS[rungFor(a.ladder ?? {}, issueKey(v.part, v.reading), tutorContext(a).helpLevel, a.policyMaxLevel)].name;
 
   const rateMark = (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => {
     if (!check) return;
@@ -332,6 +355,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             verdicts={check.result.lines}
             stale={stale}
             onAsk={askAbout}
+            onMoreHelp={moreHelp}
+            rungName={rungName}
             feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
             onRate={rateMark}
             onInputBlur={() => canvasRef.current?.focus()}

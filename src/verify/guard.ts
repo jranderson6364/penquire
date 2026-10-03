@@ -68,3 +68,14 @@ export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
   if (blocked.length === 0) return r;
   return { ...r, lines, feedback, question, leaksBlocked: blocked.map((b) => ({ fragment: b.fragment, why: b.why })) };
 }
+
+/** Same protection for chat replies: withhold leaking sentences; if nothing is left, ask a content-free question. */
+export function applyReplyLeakGuard(reply: string, lines: { id: string; reading: string; verdict: string }[], level: HelpLevel): string {
+  if (lines.length === 0) return reply;
+  const { text, leaks } = scrubText(reply, { level, lines });
+  if (leaks.length === 0) return reply;
+  if (text) return text;
+  const ordered = [...lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
+  const idx = ordered.findIndex((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+  return fallbackQuestion(level, idx >= 0 ? ordered[idx].id : undefined, idx > 0 ? ordered[idx - 1].id : undefined);
+}

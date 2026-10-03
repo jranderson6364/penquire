@@ -1,5 +1,6 @@
 import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
+import type { Ladder } from '../tutor/ladder';
 
 export type StoredCheck = {
   /** stable id for accuracy feedback (missing on checks saved before it existed) */
@@ -33,6 +34,8 @@ export type Assignment = {
   chat: ChatTurn[];
   /** latest check per page id */
   checks: Record<string, StoredCheck>;
+  /** hint-ladder rung per open issue (see src/tutor/ladder.ts); absent on older assignments */
+  ladder?: Ladder;
   /** append-only hint/session log (integrity disclosure) */
   events: LogEvent[];
   createdAt: number;
