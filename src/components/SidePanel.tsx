@@ -18,6 +18,7 @@ import { disclosureSummary } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { C, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
+import { latexToUnicode } from '../ui/mathText';
 import { Markdown } from './Markdown';
 
 export type Tab = 'feedback' | 'problems' | 'chat' | 'log';
@@ -215,9 +216,9 @@ function ProblemsTab({ assignment, onReparse, reparsing }: Props) {
       )}
       {assignment.problems.map((pr) => (
         <View key={pr.label} style={styles.problem}>
-          <Text style={styles.problemLabel}>{pr.label}</Text>
-          <Text style={styles.problemText}>{pr.text}</Text>
-          {pr.asksFor.length > 0 && <Text style={styles.asks}>Needs: {pr.asksFor.join(' · ')}</Text>}
+          <Text style={styles.problemLabel}>{latexToUnicode(pr.label)}</Text>
+          <Text style={styles.problemText}>{latexToUnicode(pr.text)}</Text>
+          {pr.asksFor.length > 0 && <Text style={styles.asks}>Needs: {pr.asksFor.map(latexToUnicode).join(' · ')}</Text>}
         </View>
       ))}
     </ScrollView>

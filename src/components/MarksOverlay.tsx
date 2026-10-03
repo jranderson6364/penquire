@@ -5,6 +5,7 @@ import type { LineVerdict, Verdict } from '../ai/types';
 import type { MarkFeedback, Rating } from '../store/evalRecords';
 import type { Line } from '../ink/lines';
 import { C, VERDICT_STYLE } from '../theme';
+import { latexToUnicode } from '../ui/mathText';
 import { Button } from './Button';
 
 type Props = {
@@ -108,7 +109,7 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
               read as: {active.v.reading}
             </Text>
           )}
-          <Text style={styles.note}>{active.v.note}</Text>
+          <Text style={styles.note}>{latexToUnicode(active.v.note)}</Text>
           <FeedbackRow
             verdict={active.v}
             saved={feedbackFor(active.v.id)}

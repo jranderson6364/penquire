@@ -2,6 +2,7 @@ import * as React from 'react';
 import { StyleSheet, Text, View, type TextStyle } from 'react-native';
 
 import { C } from '../theme';
+import { latexToUnicode } from '../ui/mathText';
 
 /** Minimal markdown: paragraphs, "- " bullets, **bold**, `code`. Enough for tutor feedback. */
 function inline(text: string, base: TextStyle) {
@@ -23,7 +24,7 @@ function inline(text: string, base: TextStyle) {
     }
     return (
       <Text key={i} style={base}>
-        {p}
+        {latexToUnicode(p)}
       </Text>
     );
   });
