@@ -47,6 +47,8 @@ jobs:
           status=$?
           if [ $status -ne 0 ]; then
             echo "=== errors ==="; grep -E "error:" build.log | sort -u | head -40
+            echo "=== context around the first error ==="; n=$(grep -n -m1 "error:" build.log | cut -d: -f1); sed -n "$((n>45?n-45:1)),$((n+6))p" build.log | cut -c1-260
+            echo "=== our module ==="; grep -n "PencilCanvas" build.log | grep -iE "error|warning" | cut -c1-260 | head -20
             echo "=== package resolution detail ==="; grep -A25 "Could not resolve package dependencies" build.log | cut -c1-300 | head -60
             echo "=== failed commands ==="; grep -A15 "The following build commands failed" build.log | cut -c1-300
           fi
