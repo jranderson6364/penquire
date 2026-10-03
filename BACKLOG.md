@@ -7,7 +7,7 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [x] **Accuracy feedback loop.** Add 👍/👎 and "this mark is wrong" on each mark popover. Store the page image, the line verdicts and the correction under `Documents/penquire/evals/`. Add a Settings button to export them (share sheet, zip or JSON).
   - *Done when:* corrections persist across restarts and export to Files.
 - [x] **Cost/usage meter.** (done: per-call records in db.json, prices in src/ai/pricing.ts, month total in Settings; prices need re-verifying) Record token usage per check and reply (already returned in `CheckResult.usage`). Show this month's estimated cost in Settings, with per-model price constants in one file.
-- [ ] **Check only the active part.** Add a toolbar picker for the current part (from `assignment.problems`) and pass `focusPart`. Feedback emphasizes that part while still flagging missing ones.
+- [x] **Check only the active part.** (done: toolbar PartPicker -> focusPart; plus a no-API-key banner and alert) Add a toolbar picker for the current part (from `assignment.problems`) and pass `focusPart`. Feedback emphasizes that part while still flagging missing ones.
 - [ ] **Faster checks.** Shrink the image (JPEG option in `exportImage` 🔨 native, or crop to the written area). Target median under 6 s. Show elapsed time in the feedback footer.
 - [x] **Robustness** (done: retry with backoff on 429/5xx/network, Retry-After honored, 180 s timeout, refusal/max_tokens/empty handled, sanitized output). Still open: a clear "no API key" state in the workspace.
 - [ ] (old text) **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.

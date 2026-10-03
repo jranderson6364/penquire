@@ -7,6 +7,8 @@ import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
+import { PartPicker } from '../components/PartPicker';
+import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { groupLines, type Line } from '../ink/lines';
@@ -53,6 +55,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [tab, setTab] = React.useState<Tab>('feedback');
   const [draft, setDraft] = React.useState('');
   const [showMarks, setShowMarks] = React.useState(true);
+  const [activePart, setActivePart] = React.useState<string | undefined>(undefined);
+  const hasKey = !!(settings.apiKey || ENV.anthropicApiKey);
   const [evals, setEvals] = React.useState(loadEvals);
   React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
 
@@ -138,6 +142,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   // ---- actions -----------------------------------------------------------
   const runCheck = async () => {
+    if (!hasKey) {
+      Alert.alert('No API key', 'Add your Anthropic API key in Settings (or .env) to check your work.');
+      return;
+    }
     setChecking(true);
     try {
       await savePage();
@@ -152,6 +160,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         image: { base64: image.base64, mediaType: 'image/png' },
         lines: lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
         pageNumber: pageIndex + 1,
+        focusPart: activePart && a.problems.some((p) => p.label === activePart) ? activePart : undefined,
         previous: prev ? { feedback: prev.result.feedback, stillOpen: prev.result.stillOpen } : undefined,
       });
       try {
@@ -332,6 +341,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         </View>
         <Button small kind="ghost" title="↶" onPress={() => canvasRef.current?.undo()} />
         <Button small kind="ghost" title="↷" onPress={() => canvasRef.current?.redo()} />
+        <PartPicker parts={a.problems} value={activePart} onChange={setActivePart} />
         <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
         <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
         <Button small title={panelOpen ? 'Close tutor' : 'Tutor'} onPress={() => setPanelOpen((v) => !v)} />
@@ -361,6 +371,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             onRate={rateMark}
             onInputBlur={() => canvasRef.current?.focus()}
           />
+        )}
+        {!hasKey && (
+          <View pointerEvents="none" style={styles.keyBanner}>
+            <Text style={styles.keyBannerText}>No API key: add one in Settings to check your work</Text>
+          </View>
         )}
         {stale && showMarks && (
           <View pointerEvents="none" style={styles.staleTag}>
@@ -423,6 +438,8 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: -4, height: 0 },
   },
+  keyBanner: { position: 'absolute', top: 8, alignSelf: 'center', backgroundColor: C.incorrectSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  keyBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 12 },
   staleTag: { position: 'absolute', top: 8, left: 8, backgroundColor: C.partialSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   staleText: { color: C.partial, fontWeight: '700', fontSize: 12 },
 });

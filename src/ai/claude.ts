@@ -287,7 +287,7 @@ export class ClaudeProvider implements TutorProvider {
               type: 'text',
               text: `${levelBlock(input)}
 
-This is page ${input.pageNumber} of the student's work.${input.focusPart ? ` The student is currently working on ${input.focusPart}.` : ''}
+This is page ${input.pageNumber} of the student's work.${input.focusPart ? ` The student is currently working on part ${input.focusPart}: put your detailed feedback and your one question there, but still report the status of every part (including parts the page should address but does not).` : ''}
 Detected lines (boxes in page points; labels are drawn in the gutter):
 ${lineList}
 
