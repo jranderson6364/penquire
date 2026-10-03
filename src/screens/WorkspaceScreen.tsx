@@ -1,18 +1,21 @@
 import * as React from 'react';
-import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
+import { DrawingToolbar } from '../components/DrawingToolbar';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
 import { PartPicker } from '../components/PartPicker';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { groupLines, type Line } from '../ink/lines';
-import { getAssignment, getSettings, newId, readPage, recordUsage, subscribe, updateAssignment, writePage } from '../store/db';
+import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
+import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
+import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { readSource } from '../store/sources';
@@ -57,8 +60,39 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [showMarks, setShowMarks] = React.useState(true);
   const [activePart, setActivePart] = React.useState<string | undefined>(undefined);
   const hasKey = !!(settings.apiKey || ENV.anthropicApiKey);
+  /** apiVersion >= 2: fixed page, zoom/pan, native tool spec. An older binary keeps the previous behavior. */
+  const modern = nativeApiVersion >= 2;
+  const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
+  const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
+  const prevToolRef = React.useRef<ToolKind>('pen');
   const [evals, setEvals] = React.useState(loadEvals);
   React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
+
+  // Tools: the toolbar is JS; the native canvas only receives a small generic spec.
+  React.useEffect(() => {
+    if (!modern) return;
+    const c = canvasRef.current;
+    if (!c) return;
+    c.setTool(toNativeSpec(toolState)).catch((e) => console.warn('setTool failed', e));
+    c.setRulerActive(toolState.ruler).catch((e) => console.warn('setRulerActive failed', e));
+    saveSettings({ toolState });
+  }, [modern, toolState]);
+
+  const onViewportChanged = React.useCallback((e: ViewportEvent) => {
+    setViewport((prev) => {
+      const next = parseViewport(e, prev);
+      return sameViewport(prev, next) ? prev : next;
+    });
+  }, []);
+
+  // Apple Pencil double-tap: flip to the eraser and back
+  const onPencilDoubleTap = React.useCallback(() => {
+    setToolState((s) => {
+      const r = toggleEraser(s, prevToolRef.current);
+      prevToolRef.current = r.previous;
+      return r.state;
+    });
+  }, []);
 
   const pageId = a?.pageIds[pageIndex] ?? '';
   const pageIdRef = React.useRef(pageId);
@@ -151,6 +185,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const check = a.checks[pageId];
   const stale = !!check && strokeCount !== null && strokeCount !== check.strokeCount;
   const checkId = check ? (check.id ?? `${pageId}-${check.at}`) : '';
+  // Marks are positioned from line boxes saved at check time. Boxes saved before the fixed-page canvas are in the
+  // old view-sized space and cannot be mapped onto the page, so they are not drawn (run Check again).
+  const marksUsable = !!check && (!modern || check.space === 'page-v2');
+  const oldCheck = !!check && modern && check.space !== 'page-v2';
+  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToScreen(l, viewport) })) : check.lines) : [];
 
   // ---- actions -----------------------------------------------------------
   const runCheck = async () => {
@@ -185,7 +224,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       updateAssignment(a.id, (x) => ({
         ...x,
         ladder: pruneLadder(x.ladder ?? {}, openKeys),
-        checks: { ...x.checks, [pageId]: { id: newId('c_'), at: Date.now(), result, lines, strokeCount: strokes } },
+        checks: { ...x.checks, [pageId]: { id: newId('c_'), at: Date.now(), result, lines, strokeCount: strokes, space: modern ? 'page-v2' : undefined } },
         events: [
           ...x.events,
           {
@@ -324,7 +363,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.toolbar, { paddingTop: insets.top + 6 }]}>
+      <View style={[styles.toolbar, { paddingTop: insets.top + 6, paddingLeft: Math.max(10, insets.left), paddingRight: Math.max(10, insets.right) }]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolbarRow} keyboardShouldPersistTaps="handled">
         <Button
           small
           kind="ghost"
@@ -351,13 +391,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             <Text style={styles.pagerArrow}>＋</Text>
           </Pressable>
         </View>
-        <Button small kind="ghost" title="↶" onPress={() => canvasRef.current?.undo()} />
-        <Button small kind="ghost" title="↷" onPress={() => canvasRef.current?.redo()} />
+        {!modern && <Button small kind="ghost" title="↶" onPress={() => canvasRef.current?.undo()} />}
+        {!modern && <Button small kind="ghost" title="↷" onPress={() => canvasRef.current?.redo()} />}
         <PartPicker parts={a.problems} value={activePart} onChange={setActivePart} />
         <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
         <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
         <Button small title={panelOpen ? 'Close tutor' : 'Tutor'} onPress={() => setPanelOpen((v) => !v)} />
         <Button small kind="primary" title={checking ? 'Checking…' : 'Check'} loading={checking} onPress={runCheck} />
+        </ScrollView>
       </View>
 
       <View style={styles.page} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
@@ -366,14 +407,16 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           style={StyleSheet.absoluteFill}
           paper={settings.paper}
           allowFingerDrawing={settings.allowFingerDrawing}
-          showToolPicker
+          showToolPicker={!modern}
           onDrawingChanged={onDrawingChanged}
+          {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
         />
-        {check && showMarks && size.w > 0 && (
+        {check && marksUsable && showMarks && size.w > 0 && (
+          <View pointerEvents={viewport.interacting ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0 : 1 }]}>
           <MarksOverlay
             width={size.w}
             height={size.h}
-            lines={check.lines}
+            lines={markLines}
             verdicts={check.result.lines}
             stale={stale}
             onAsk={askAbout}
@@ -382,6 +425,22 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
             onRate={rateMark}
             onInputBlur={() => canvasRef.current?.focus()}
+          />
+          </View>
+        )}
+        {oldCheck && showMarks && (
+          <View pointerEvents="none" style={styles.staleTag}>
+            <Text style={styles.staleText}>Marks from an older version · Check again</Text>
+          </View>
+        )}
+        {modern && (
+          <DrawingToolbar
+            state={toolState}
+            onChange={setToolState}
+            onUndo={() => canvasRef.current?.undo()}
+            onRedo={() => canvasRef.current?.redo()}
+            onFit={() => canvasRef.current?.fitToWidth()}
+            zoomPercent={Math.round(viewport.scale * 100)}
           />
         )}
         {!hasKey && (
@@ -422,16 +481,13 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
     paddingBottom: 6,
     backgroundColor: C.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: C.line,
   },
-  title: { flex: 1, fontSize: 16, fontWeight: '700', color: C.ink },
+  toolbarRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  title: { minWidth: 120, maxWidth: 280, fontSize: 16, fontWeight: '700', color: C.ink },
   pager: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 6 },
   pagerArrow: { fontSize: 22, color: C.primary, fontWeight: '600' },
   pagerText: { fontSize: 14, color: C.sub, fontVariant: ['tabular-nums'] },

@@ -60,7 +60,9 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
       const y = Math.max(4, line.y + line.h / 2 - MARK / 2);
       return { v, line, x, y };
     })
-    .filter((p): p is NonNullable<typeof p> => p !== null);
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+    // zoomed or panned away: no mark for a line that is outside the view
+    .filter((p) => p.line.x + p.line.w > 0 && p.line.x < width && p.line.y + p.line.h > 0 && p.line.y < height);
 
   const active = placed.find((p) => p.v.id === open);
 

@@ -11,6 +11,8 @@ export type StoredCheck = {
   /** line boxes as they were at check time (marks are positioned from these) */
   lines: Line[];
   strokeCount: number;
+  /** 'page-v2': line boxes are in fixed-page space (apiVersion >= 2). Absent: the old view-sized canvas space. */
+  space?: 'page-v2';
 };
 
 export type LogEvent = {
@@ -49,6 +51,8 @@ export type Settings = {
   parseModel: string;
   paper: 'grid' | 'lined' | 'blank';
   allowFingerDrawing: boolean;
+  /** persisted pen/eraser toolbar state (see src/tools.ts); validated on load */
+  toolState?: unknown;
 };
 
 export type DB = {

@@ -3,7 +3,7 @@
     "name": "Penquire",
     "slug": "penquire",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -11,8 +11,7 @@
       "bundleIdentifier": "com.jander.penquire",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "requireFullScreen": true
+      }
     },
     "plugins": [
       "expo-dev-client"
