@@ -1,0 +1,480 @@
+/**
+ * Deterministic math checker: parses a transcribed line (plain text or light LaTeX) and tests algebra
+ * between consecutive lines by evaluating at pseudo-random points. Independent of any model, so it is a
+ * redundant check on the tutor's verdicts. It may only DOWNGRADE trust; it never proves a step "right".
+ * Pure TypeScript, no dependencies (runs under `node --test`).
+ */
+
+export type Node =
+  | { t: 'num'; v: number }
+  | { t: 'var'; name: string }
+  | { t: 'neg'; a: Node }
+  | { t: 'bin'; op: '+' | '-' | '*' | '/' | '^'; a: Node; b: Node }
+  | { t: 'call'; fn: string; a: Node };
+
+export type Parsed = { ok: true; ast: Node } | { ok: false; reason: string };
+
+const FUNCS = new Set(['sin', 'cos', 'tan', 'exp', 'ln', 'log', 'sqrt', 'abs', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh']);
+/** Prose in a transcription means the line is not pure math; refuse to guess rather than read "or" as o*r. */
+const PROSE = new Set(['or', 'and', 'if', 'then', 'so', 'is', 'are', 'for', 'when', 'where', 'thus', 'hence', 'since', 'because', 'with', 'by', 'to', 'of', 'at', 'the', 'not', 'no', 'yes', 'let', 'any', 'all', 'such', 'that', 'unit', 'units']);
+const CONSTS: Record<string, number> = { pi: Math.PI, e: Math.E };
+
+// ---------------------------------------------------------------- normalization
+
+/** LaTeX-ish / unicode text -> plain ASCII the tokenizer understands. */
+export function normalize(src: string): string {
+  let s = src;
+  s = s.replace(/\\left|\\right|\\,|\\;|\\!|\\ |\$/g, '');
+  s = s.replace(/\\cdot|\\times|[×·⋅]/g, '*').replace(/[−–—]/g, '-').replace(/÷/g, '/');
+  s = s.replace(/\\pi|π/g, ' pi ').replace(/\\(sin|cos|tan|exp|ln|log|arcsin|arccos|arctan|sinh|cosh|tanh)/g, ' $1 ');
+  s = s.replace(/arcsin/g, 'asin').replace(/arccos/g, 'acos').replace(/arctan/g, 'atan');
+  s = s.replace(/²/g, '^2').replace(/³/g, '^3').replace(/√\s*\(/g, 'sqrt(');
+  // \frac{a}{b} and \sqrt{a}, repeatedly (handles nesting from the inside out)
+  for (let i = 0; i < 12; i++) {
+    const before = s;
+    s = s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
+    s = s.replace(/\^\s*\{([^{}]*)\}/g, '^($1)');
+    s = s.replace(/_\s*\{([^{}]*)\}/g, (_m, g: string) => '_' + g.replace(/[^A-Za-z0-9]/g, ''));
+    if (s === before) break;
+  }
+  return s.replace(/\{/g, '(').replace(/\}/g, ')');
+}
+
+// ---------------------------------------------------------------- tokenizer
+
+type Tok = { k: 'num' | 'id' | 'op' | 'lp' | 'rp'; s: string; v?: number };
+
+function tokenize(s: string): Tok[] | string {
+  const out: Tok[] = [];
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (/\s/.test(c)) {
+      i++;
+    } else if (/[0-9.]/.test(c)) {
+      const m = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(s.slice(i));
+      if (!m) return `bad number at ${i}`;
+      out.push({ k: 'num', s: m[0], v: Number(m[0]) });
+      i += m[0].length;
+    } else if (/[A-Za-z]/.test(c)) {
+      // a word: known function/constant, or letters (implicit product of single-letter variables), with _subscript
+      const m = /^[A-Za-z]+(_[A-Za-z0-9]+)?/.exec(s.slice(i))!;
+      let word = m[0];
+      i += word.length;
+      if (PROSE.has(word.toLowerCase())) return `prose word "${word}"`;
+      if (word.includes('_')) {
+        out.push({ k: 'id', s: word });
+        continue;
+      }
+      while (word.length) {
+        const fn = [...FUNCS].filter((f) => word.startsWith(f)).sort((a, b) => b.length - a.length)[0];
+        if (fn) {
+          out.push({ k: 'id', s: fn });
+          word = word.slice(fn.length);
+        } else if (word.startsWith('pi')) {
+          out.push({ k: 'id', s: 'pi' });
+          word = word.slice(2);
+        } else {
+          out.push({ k: 'id', s: word[0] });
+          word = word.slice(1);
+        }
+      }
+    } else if ('+-*/^'.includes(c)) {
+      out.push({ k: 'op', s: c });
+      i++;
+    } else if (c === '(' || c === '[') {
+      out.push({ k: 'lp', s: '(' });
+      i++;
+    } else if (c === ')' || c === ']') {
+      out.push({ k: 'rp', s: ')' });
+      i++;
+    } else {
+      return `unsupported character "${c}"`;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- parser (recursive descent)
+
+class Parser {
+  private p = 0;
+  private toks: Tok[];
+  constructor(toks: Tok[]) {
+    this.toks = toks;
+  }
+  private peek = () => this.toks[this.p];
+  private startsPrimary(t?: Tok): boolean {
+    return !!t && (t.k === 'num' || t.k === 'id' || t.k === 'lp');
+  }
+  parse(): Node {
+    const n = this.additive();
+    if (this.p < this.toks.length) throw new Error(`unexpected "${this.peek().s}"`);
+    return n;
+  }
+  private additive(): Node {
+    let a = this.term();
+    for (let t = this.peek(); t?.k === 'op' && (t.s === '+' || t.s === '-'); t = this.peek()) {
+      this.p++;
+      a = { t: 'bin', op: t.s as '+' | '-', a, b: this.term() };
+    }
+    return a;
+  }
+  private term(): Node {
+    let a = this.unary();
+    for (;;) {
+      const t = this.peek();
+      if (t?.k === 'op' && (t.s === '*' || t.s === '/')) {
+        this.p++;
+        a = { t: 'bin', op: t.s as '*' | '/', a, b: this.unary() };
+      } else if (this.startsPrimary(t)) {
+        a = { t: 'bin', op: '*', a, b: this.unary() }; // implicit multiplication: 2x, x(y+1), (a)(b)
+      } else return a;
+    }
+  }
+  private unary(): Node {
+    const t = this.peek();
+    if (t?.k === 'op' && (t.s === '-' || t.s === '+')) {
+      this.p++;
+      const a = this.unary();
+      return t.s === '-' ? { t: 'neg', a } : a;
+    }
+    return this.power();
+  }
+  private power(): Node {
+    const base = this.primary();
+    const t = this.peek();
+    if (t?.k === 'op' && t.s === '^') {
+      this.p++;
+      return { t: 'bin', op: '^', a: base, b: this.unary() }; // right-associative, allows x^-2
+    }
+    return base;
+  }
+  private primary(): Node {
+    const t = this.toks[this.p++];
+    if (!t) throw new Error('unexpected end');
+    if (t.k === 'num') return { t: 'num', v: t.v! };
+    if (t.k === 'lp') {
+      const n = this.additive();
+      if (this.toks[this.p]?.k !== 'rp') throw new Error('missing )');
+      this.p++;
+      return n;
+    }
+    if (t.k === 'id') {
+      if (FUNCS.has(t.s)) {
+        // sin(x) or sin x ; sin^2 x is not supported
+        const next = this.peek();
+        if (!this.startsPrimary(next)) throw new Error(`${t.s} needs an argument`);
+        // sin(x)^2 means (sin x)^2 : a parenthesized argument binds tighter than ^ ; sin x^2 means sin(x^2)
+        return { t: 'call', fn: t.s, a: next!.k === 'lp' ? this.primary() : this.power() };
+      }
+      if (t.s in CONSTS) return { t: 'num', v: CONSTS[t.s] };
+      return { t: 'var', name: t.s };
+    }
+    throw new Error(`unexpected "${t.s}"`);
+  }
+}
+
+export function parseExpr(src: string): Parsed {
+  const toks = tokenize(normalize(src));
+  if (typeof toks === 'string') return { ok: false, reason: toks };
+  if (toks.length === 0) return { ok: false, reason: 'empty' };
+  try {
+    return { ok: true, ast: new Parser(toks).parse() };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ---------------------------------------------------------------- evaluation
+
+export function evaluate(n: Node, env: Record<string, number>): number {
+  switch (n.t) {
+    case 'num':
+      return n.v;
+    case 'var':
+      return n.name in env ? env[n.name] : NaN;
+    case 'neg':
+      return -evaluate(n.a, env);
+    case 'bin': {
+      const a = evaluate(n.a, env);
+      const b = evaluate(n.b, env);
+      switch (n.op) {
+        case '+':
+          return a + b;
+        case '-':
+          return a - b;
+        case '*':
+          return a * b;
+        case '/':
+          return b === 0 ? NaN : a / b;
+        case '^':
+          return a < 0 && !Number.isInteger(b) ? NaN : Math.pow(a, b);
+      }
+      return NaN;
+    }
+    case 'call': {
+      const x = evaluate(n.a, env);
+      switch (n.fn) {
+        case 'sqrt':
+          return x < 0 ? NaN : Math.sqrt(x);
+        case 'ln':
+        case 'log':
+          return x <= 0 ? NaN : Math.log(x);
+        case 'asin':
+        case 'acos':
+          return Math.abs(x) > 1 ? NaN : n.fn === 'asin' ? Math.asin(x) : Math.acos(x);
+        default: {
+          const f = (Math as unknown as Record<string, (v: number) => number>)[n.fn];
+          return f ? f(x) : NaN;
+        }
+      }
+    }
+  }
+}
+
+export function variablesOf(n: Node, acc = new Set<string>()): string[] {
+  if (n.t === 'var') acc.add(n.name);
+  else if (n.t === 'neg' || n.t === 'call') variablesOf(n.a, acc);
+  else if (n.t === 'bin') {
+    variablesOf(n.a, acc);
+    variablesOf(n.b, acc);
+  }
+  return [...acc].sort();
+}
+
+export function substitute(n: Node, name: string, repl: Node): Node {
+  switch (n.t) {
+    case 'var':
+      return n.name === name ? repl : n;
+    case 'neg':
+      return { t: 'neg', a: substitute(n.a, name, repl) };
+    case 'call':
+      return { t: 'call', fn: n.fn, a: substitute(n.a, name, repl) };
+    case 'bin':
+      return { t: 'bin', op: n.op, a: substitute(n.a, name, repl), b: substitute(n.b, name, repl) };
+    default:
+      return n;
+  }
+}
+
+// ---------------------------------------------------------------- sampling
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const SAMPLES = 40;
+const MIN_VALID = 8;
+const close = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
+
+/** Deterministic sample points over positive reals (physics quantities), so results are reproducible. */
+function points(vars: string[]): Array<Record<string, number>> {
+  const rnd = mulberry32(0x9e3779b9);
+  return Array.from({ length: SAMPLES }, () => Object.fromEntries(vars.map((v) => [v, 0.35 + rnd() * 2.9])));
+}
+
+export type Equiv = 'equivalent' | 'different' | 'inconclusive';
+
+/** Are two expressions equal as functions? (positive-real sampling) */
+export function exprEquivalent(a: Node, b: Node, tol = 1e-9): Equiv {
+  const vars = variablesOf({ t: 'bin', op: '+', a, b });
+  let valid = 0;
+  for (const env of points(vars)) {
+    const x = evaluate(a, env);
+    const y = evaluate(b, env);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    valid++;
+    if (!close(x, y, tol)) return 'different';
+  }
+  return valid >= MIN_VALID ? 'equivalent' : 'inconclusive';
+}
+
+// ---------------------------------------------------------------- lines and steps
+
+export type StepKind =
+  | 'equivalent' // same expression / same equation (up to a nonzero constant multiple)
+  | 'solution' // next is a solved form that satisfies the previous equation
+  | 'implied' // every solution of the previous equation satisfies the next (e.g. squaring both sides)
+  | 'inconsistent' // next contradicts the previous line
+  | 'unrelated' // can't relate them with simple algebra (e.g. squaring, new information)
+  | 'unparsed'; // could not read one of the lines as math
+
+export type StepRelation = { kind: StepKind; detail: string };
+
+type Line = { eq: [Node, Node] | null; expr: Node | null };
+
+function splitEq(src: string): string[] {
+  // '=' that is not part of <=, >=, !=, ==, or an arrow
+  return normalize(src)
+    .replace(/\\approx|≈/g, '=')
+    .replace(/\\neq|≠|\\le|\\ge|≤|≥|<=|>=|!=|==/g, ' ?? ')
+    .split('=')
+    .map((x) => x.trim());
+}
+
+function parseLine(src: string): Line | string {
+  const parts = splitEq(src);
+  if (parts.some((p) => p.includes('??'))) return 'inequality or relation not supported';
+  if (parts.length === 1) {
+    const p = parseExpr(parts[0]);
+    return p.ok ? { eq: null, expr: p.ast } : p.reason;
+  }
+  const asts: Node[] = [];
+  for (const part of parts) {
+    const p = parseExpr(part);
+    if (!p.ok) return p.reason;
+    asts.push(p.ast);
+  }
+  if (asts.length === 2) return { eq: [asts[0], asts[1]], expr: null };
+  return 'chain';
+}
+
+const residual = (eq: [Node, Node]): Node => ({ t: 'bin', op: '-', a: eq[0], b: eq[1] });
+
+/** a = b = c ... : every adjacent pair must be identically equal. Returns null if the line isn't a chain. */
+export function checkChain(src: string): StepRelation | null {
+  const parts = splitEq(src);
+  if (parts.length < 3 || parts.some((p) => p.includes('??'))) return null;
+  const asts: Node[] = [];
+  for (const part of parts) {
+    const p = parseExpr(part);
+    if (!p.ok) return { kind: 'unparsed', detail: p.reason };
+    asts.push(p.ast);
+  }
+  for (let i = 0; i + 1 < asts.length; i++) {
+    // approximate ("≈") chains would need a loose tolerance; only exact chains are judged
+    if (/\\approx|≈/.test(src)) return { kind: 'unrelated', detail: 'approximate chain not judged' };
+    const r = exprEquivalent(asts[i], asts[i + 1]);
+    if (r === 'different') return { kind: 'inconsistent', detail: `link ${i + 1} of the chain is not an identity` };
+  }
+  return { kind: 'equivalent', detail: 'every link of the chain is an identity' };
+}
+
+/** Does the step prev -> next follow by simple algebra? Conservative: 'unrelated' is not an accusation. */
+export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
+  const prev = parseLine(prevSrc);
+  const next = parseLine(nextSrc);
+  if (typeof prev === 'string' || typeof next === 'string') {
+    return { kind: 'unparsed', detail: typeof prev === 'string' ? `prev: ${prev}` : `next: ${next as string}` };
+  }
+  const loose = /\\approx|≈/.test(prevSrc + nextSrc);
+  const tol = loose ? 2e-2 : 1e-9;
+
+  if (prev.expr && next.expr) {
+    const r = exprEquivalent(prev.expr, next.expr, tol);
+    if (r === 'equivalent') return { kind: 'equivalent', detail: 'same expression' };
+    if (r === 'different') return { kind: 'inconsistent', detail: 'expression changed value' };
+    return { kind: 'unrelated', detail: 'too few valid sample points' };
+  }
+  if (!prev.eq || !next.eq) return { kind: 'unrelated', detail: 'expression vs equation' };
+
+  const r1 = residual(prev.eq);
+  const r2 = residual(next.eq);
+  const vars = variablesOf({ t: 'bin', op: '+', a: r1, b: r2 });
+
+  // 1. residuals proportional by a nonzero constant: same equation (2x+3=7 -> x=2, x^2-1=0 -> (x-1)(x+1)=0)
+  let c: number | undefined;
+  let valid = 0;
+  let proportional = true;
+  for (const env of points(vars)) {
+    const a = evaluate(r1, env);
+    const b = evaluate(r2, env);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const scale = Math.max(Math.abs(evaluate(prev.eq[0], env)), Math.abs(evaluate(prev.eq[1], env)), 1e-12);
+    if (Math.abs(a) < 1e-9 * scale) continue; // no information when r1 ~ 0
+    const ratio = b / a;
+    valid++;
+    if (c === undefined) c = ratio;
+    else if (!close(c, ratio, tol)) {
+      proportional = false;
+      break;
+    }
+  }
+  if (proportional && valid >= MIN_VALID && c !== undefined && Math.abs(c) > 1e-12) {
+    return { kind: 'equivalent', detail: `same equation (factor ${Number(c.toPrecision(6))})` };
+  }
+
+  // 2. next is a solved form  v = expr  (or expr = v) : substitute into the previous equation
+  const solved = (['0', '1'] as const)
+    .map((i) => {
+      const lhs = next.eq![Number(i)];
+      const rhs = next.eq![1 - Number(i)];
+      return lhs.t === 'var' && !variablesOf(rhs).includes(lhs.name) ? { name: lhs.name, rhs } : null;
+    })
+    .find(Boolean);
+  if (solved && variablesOf(r1).includes(solved.name)) {
+    const sub = substitute(r1, solved.name, solved.rhs);
+    const rest = variablesOf(sub);
+    let ok = 0;
+    let bad = 0;
+    for (const env of points(rest)) {
+      const v = evaluate(sub, env);
+      if (!Number.isFinite(v)) continue;
+      const scale = Math.max(
+        Math.abs(evaluate(substitute(prev.eq[0], solved.name, solved.rhs), env)),
+        Math.abs(evaluate(substitute(prev.eq[1], solved.name, solved.rhs), env)),
+        1
+      );
+      if (Math.abs(v) <= tol * scale + (loose ? 0 : 1e-9)) ok++;
+      else bad++;
+    }
+    if (ok >= MIN_VALID && bad === 0) return { kind: 'solution', detail: `${solved.name} satisfies the previous equation` };
+    if (bad >= MIN_VALID && ok === 0) return { kind: 'inconsistent', detail: `${solved.name} does not satisfy the previous equation` };
+  }
+
+  // 3. one unknown: find the real roots of the previous equation and test them against the next one
+  if (vars.length === 1) {
+    const v = vars[0];
+    const roots = realRoots(r1, v);
+    if (roots.length > 0) {
+      const holds = roots.filter((x) => {
+        const val = evaluate(r2, { [v]: x });
+        const scale = Math.max(Math.abs(evaluate(next.eq![0], { [v]: x })), Math.abs(evaluate(next.eq![1], { [v]: x })), 1);
+        return Number.isFinite(val) && Math.abs(val) <= (loose ? 5e-2 : 1e-6) * scale;
+      });
+      if (holds.length === roots.length) return { kind: 'implied', detail: 'every solution of the previous line satisfies this line' };
+      if (holds.length === 0) return { kind: 'inconsistent', detail: 'no solution of the previous line satisfies this line' };
+    }
+  }
+
+  return { kind: 'unrelated', detail: 'not a simple rearrangement of the previous equation' };
+}
+
+/** Real roots of f(v)=0 on [-20,20] by sign-change scan + bisection (misses tangent roots; fine as evidence). */
+export function realRoots(f: Node, v: string, lo = -20, hi = 20, steps = 4000): number[] {
+  const roots: number[] = [];
+  const g = (x: number) => evaluate(f, { [v]: x });
+  let x0 = lo;
+  let g0 = g(x0);
+  for (let i = 1; i <= steps; i++) {
+    const x1 = lo + ((hi - lo) * i) / steps;
+    const g1 = g(x1);
+    if (Number.isFinite(g0) && Number.isFinite(g1)) {
+      if (g1 === 0) roots.push(x1);
+      else if (g0 * g1 < 0) {
+        let a = x0;
+        let b = x1;
+        for (let k = 0; k < 60; k++) {
+          const m = (a + b) / 2;
+          if (g(a) * g(m) <= 0) b = m;
+          else a = m;
+        }
+        const r = (a + b) / 2;
+        // a sign change at a pole (1/x) is not a root
+        if (Math.abs(g(r)) < 1e-6 * Math.max(1, Math.abs(g0), Math.abs(g1))) roots.push(r);
+      }
+    }
+    x0 = x1;
+    g0 = g1;
+  }
+  return roots.filter((r, i) => i === 0 || Math.abs(r - roots[i - 1]) > 1e-6);
+}

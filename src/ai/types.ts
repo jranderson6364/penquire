@@ -17,6 +17,8 @@ export type LineVerdict = {
   reading: string; // how the model read the line (LaTeX/plain)
   verdict: Verdict;
   note: string; // one clause: why / what to look at (never the fix)
+  /** set when a deterministic guard (not the model) lowered this verdict */
+  guard?: 'algebra';
 };
 
 export type PartStatus = {
