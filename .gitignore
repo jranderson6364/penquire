@@ -6,3 +6,4 @@ android/
 .env
 *.log
 .DS_Store
+dist-check/
