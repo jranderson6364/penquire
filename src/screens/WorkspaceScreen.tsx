@@ -106,8 +106,21 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     const id = pageIdRef.current;
     if (!id || !canvasRef.current || loadedPageRef.current !== id) return;
-    writePage(id, await canvasRef.current.getDrawing());
+    try {
+      writePage(id, await canvasRef.current.getDrawing());
+    } catch (e) {
+      // the native view can be gone (screen closed or reloaded) by the time a timer fires
+      if (!String(e).includes('ViewNotFound')) throw e;
+    }
   }, []);
+
+  // A pending autosave must not fire against a view that no longer exists.
+  React.useEffect(
+    () => () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    },
+    []
+  );
 
   // Load the drawing whenever the page changes (and on first mount).
   React.useEffect(() => {
@@ -123,6 +136,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       const strokes = await c.getStrokes();
       if (!cancelled) setStrokeCount(strokes.length);
     })().catch((e) => {
+      // A reload, page switch or unmount while the call was in flight leaves a dead native view tag: not a real failure.
+      if (cancelled) return;
       console.warn('load page failed', e);
       Alert.alert('Could not open this page', 'The saved drawing could not be read. It was left untouched and will not be overwritten.');
     });
