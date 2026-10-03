@@ -30,8 +30,11 @@ jobs:
       - name: Build for simulator (unsigned)
         working-directory: ios
         run: |
-          xcodebuild -workspace Penquire.xcworkspace -scheme Penquire \
-            -sdk iphonesimulator -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO build | tail -n 200
-          exit ${PIPESTATUS[0]}
+          set +e
+          xcodebuild -workspace Penquire.xcworkspace -scheme Penquire             -sdk iphonesimulator -configuration Debug             -destination 'generic/platform=iOS Simulator'             CODE_SIGNING_ALLOWED=NO build > build.log 2>&1
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "=== errors ==="; grep -E "error:" build.log | sort -u | head -40
+            echo "=== failed commands ==="; grep -A15 "The following build commands failed" build.log | cut -c1-300
+          fi
+          exit $status
