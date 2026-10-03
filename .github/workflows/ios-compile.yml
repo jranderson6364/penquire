@@ -30,6 +30,10 @@ jobs:
       - name: Install pods
         working-directory: ios
         run: pod install
+      - name: Resolve Swift packages (diagnostic)
+        working-directory: ios
+        run: |
+          xcodebuild -resolvePackageDependencies -workspace Penquire.xcworkspace -scheme Penquire 2>&1 | tail -n 60 || true
       - name: Build for simulator (unsigned)
         working-directory: ios
         run: |
@@ -38,6 +42,7 @@ jobs:
           status=$?
           if [ $status -ne 0 ]; then
             echo "=== errors ==="; grep -E "error:" build.log | sort -u | head -40
+            echo "=== package resolution detail ==="; grep -A25 "Could not resolve package dependencies" build.log | cut -c1-300 | head -60
             echo "=== failed commands ==="; grep -A15 "The following build commands failed" build.log | cut -c1-300
           fi
           exit $status
