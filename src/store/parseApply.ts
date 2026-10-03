@@ -22,6 +22,7 @@ export function applyParse(a: Assignment, parsed: ParseResult, opts: { pages?: s
     sourceOnly: opts.only || a.sourceOnly,
     course: a.course || parsed.course || '',
     ladder: {},
+    activePart: undefined,
     events: [...a.events, { t: Date.now(), type: 'parse', detail: opts.pages ? `${detail} (pages ${opts.pages})` : detail }],
   };
 }

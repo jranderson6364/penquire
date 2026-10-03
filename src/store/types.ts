@@ -45,6 +45,8 @@ export type Assignment = {
   sourcePages?: string;
   /** the "only these problems" filter used when parsing, e.g. "3.8, 3.10, 3.12" */
   sourceOnly?: string;
+  /** flat label of the question the student is working on ("6b"); persists between sessions */
+  activePart?: string;
   pageIds: string[];
   chat: ChatTurn[];
   /** latest check per page id */
@@ -65,6 +67,8 @@ export type Settings = {
   allowFingerDrawing: boolean;
   /** persisted pen/eraser toolbar state (see src/tools.ts); validated on load */
   toolState?: unknown;
+  /** show the current-question banner under the top bar */
+  showQuestion?: boolean;
 };
 
 export type DB = {

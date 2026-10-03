@@ -1,14 +1,15 @@
 import * as React from 'react';
-import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
-import { DrawingToolbar } from '../components/DrawingToolbar';
+import { AiFab } from '../components/AiFab';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
-import { PartPicker } from '../components/PartPicker';
+import { QuestionBanner } from '../components/QuestionBanner';
+import { ContextStrip, TopBar } from '../components/TopBar';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
@@ -59,7 +60,19 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [tab, setTab] = React.useState<Tab>('feedback');
   const [draft, setDraft] = React.useState('');
   const [showMarks, setShowMarks] = React.useState(true);
-  const [activePart, setActivePart] = React.useState<string | undefined>(undefined);
+  const activePart = a?.activePart;
+  const setActivePart = React.useCallback(
+    (label: string | undefined) => {
+      updateAssignment(assignmentId, (x) => ({ ...x, activePart: label }));
+    },
+    [assignmentId]
+  );
+  const [showQuestion, setShowQuestion] = React.useState<boolean>(() => getSettings().showQuestion ?? true);
+  const toggleQuestion = () =>
+    setShowQuestion((v) => {
+      saveSettings({ showQuestion: !v });
+      return !v;
+    });
   const hasKey = !!(settings.apiKey || ENV.anthropicApiKey);
   /** apiVersion >= 2: fixed page, zoom/pan, native tool spec. An older binary keeps the previous behavior. */
   const modern = nativeApiVersion >= 2;
@@ -371,47 +384,40 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const setLevel = (l: HelpLevel) =>
     updateAssignment(a.id, (x) => ({ ...x, helpLevel: l, events: [...x.events, { t: Date.now(), type: 'level_change', level: l }] }));
 
-  const drawerWidth = Math.min(420, Math.max(320, size.w * 0.46));
+  const narrow = size.w > 0 && size.w < 700;
+  const drawerWidth = narrow ? Math.round(size.w * 0.94) : Math.min(560, Math.max(380, Math.round(size.w * 0.5)));
+  const counts = check?.result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
 
   return (
     <View style={styles.root}>
-      <View style={[styles.toolbar, { paddingTop: insets.top + 6, paddingLeft: Math.max(10, insets.left), paddingRight: Math.max(10, insets.right) }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolbarRow} keyboardShouldPersistTaps="handled">
-        <Button
-          small
-          kind="ghost"
-          title="‹ Back"
-          onPress={async () => {
-            await savePage();
-            onBack();
-          }}
-        />
-        <Text style={styles.title} numberOfLines={1}>
-          {a.title}
-        </Text>
-        <View style={styles.pager}>
-          <Pressable onPress={() => goToPage(pageIndex - 1)} hitSlop={8} disabled={pageIndex === 0}>
-            <Text style={[styles.pagerArrow, pageIndex === 0 && styles.disabled]}>‹</Text>
-          </Pressable>
-          <Text style={styles.pagerText}>
-            {pageIndex + 1}/{a.pageIds.length}
-          </Text>
-          <Pressable onPress={() => goToPage(pageIndex + 1)} hitSlop={8} disabled={pageIndex >= a.pageIds.length - 1}>
-            <Text style={[styles.pagerArrow, pageIndex >= a.pageIds.length - 1 && styles.disabled]}>›</Text>
-          </Pressable>
-          <Pressable onPress={addPage} hitSlop={8}>
-            <Text style={styles.pagerArrow}>＋</Text>
-          </Pressable>
-        </View>
-        {!modern && <Button small kind="ghost" title="↶" onPress={() => canvasRef.current?.undo()} />}
-        {!modern && <Button small kind="ghost" title="↷" onPress={() => canvasRef.current?.redo()} />}
-        <PartPicker parts={a.problems} value={activePart} onChange={setActivePart} />
-        <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
-        <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
-        <Button small title={panelOpen ? 'Close tutor' : 'Tutor'} onPress={() => setPanelOpen((v) => !v)} />
-        <Button small kind="primary" title={checking ? 'Checking…' : 'Check'} loading={checking} onPress={runCheck} />
-        </ScrollView>
-      </View>
+      <TopBar
+        title={a.title}
+        pageIndex={pageIndex}
+        pageCount={a.pageIds.length}
+        onBack={async () => {
+          await savePage();
+          onBack();
+        }}
+        onPrevPage={() => goToPage(pageIndex - 1)}
+        onNextPage={() => goToPage(pageIndex + 1)}
+        onAddPage={addPage}
+        modern={modern}
+        tool={toolState}
+        onToolChange={setToolState}
+        onUndo={() => canvasRef.current?.undo()}
+        onRedo={() => canvasRef.current?.redo()}
+        onFit={() => canvasRef.current?.fitToWidth()}
+        zoomPercent={Math.round(viewport.scale * 100)}
+        questionOn={showQuestion}
+        onToggleQuestion={toggleQuestion}
+        checking={checking}
+        onCheck={runCheck}
+        insetTop={insets.top}
+        insetLeft={insets.left}
+        insetRight={insets.right}
+      />
+      {modern && <ContextStrip tool={toolState} onChange={setToolState} insetLeft={insets.left} insetRight={insets.right} />}
+      {showQuestion && <QuestionBanner assignment={a} activePart={activePart} onChange={setActivePart} insetLeft={insets.left} insetRight={insets.right} />}
 
       <View style={styles.page} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         <PencilCanvas
@@ -425,35 +431,25 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         />
         {check && marksUsable && showMarks && size.w > 0 && (
           <View pointerEvents={viewport.interacting ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0 : 1 }]}>
-          <MarksOverlay
-            width={size.w}
-            height={size.h}
-            lines={markLines}
-            verdicts={check.result.lines}
-            stale={stale}
-            onAsk={askAbout}
-            onMoreHelp={moreHelp}
-            rungName={rungName}
-            feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
-            onRate={rateMark}
-            onInputBlur={() => canvasRef.current?.focus()}
-          />
+            <MarksOverlay
+              width={size.w}
+              height={size.h}
+              lines={markLines}
+              verdicts={check.result.lines}
+              stale={stale}
+              onAsk={askAbout}
+              onMoreHelp={moreHelp}
+              rungName={rungName}
+              feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
+              onRate={rateMark}
+              onInputBlur={() => canvasRef.current?.focus()}
+            />
           </View>
         )}
         {oldCheck && showMarks && (
           <View pointerEvents="none" style={styles.staleTag}>
             <Text style={styles.staleText}>Marks from an older version · Check again</Text>
           </View>
-        )}
-        {modern && (
-          <DrawingToolbar
-            state={toolState}
-            onChange={setToolState}
-            onUndo={() => canvasRef.current?.undo()}
-            onRedo={() => canvasRef.current?.redo()}
-            onFit={() => canvasRef.current?.fitToWidth()}
-            zoomPercent={Math.round(viewport.scale * 100)}
-          />
         )}
         {!hasKey && (
           <View pointerEvents="none" style={styles.keyBanner}>
@@ -465,8 +461,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             <Text style={styles.staleText}>Page changed · Check again</Text>
           </View>
         )}
+        {!panelOpen && <AiFab onPress={() => setPanelOpen(true)} counts={counts} stale={stale} insetRight={insets.right} insetBottom={insets.bottom} />}
         {panelOpen && (
-          <View style={[styles.drawer, { width: drawerWidth }]}>
+          <View style={[styles.drawer, { width: drawerWidth, paddingBottom: insets.bottom, paddingRight: insets.right }]}>
             <SidePanel
               assignment={a}
               check={check}
@@ -479,6 +476,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               sending={sending}
               onReparse={reparse}
               reparsing={reparsing}
+              activePart={activePart}
+              onSelectPart={setActivePart}
+              header={
+                <View style={styles.sideHeader}>
+                  <Button small kind="primary" title={checking ? 'Checking…' : 'Check this page'} loading={checking} onPress={runCheck} />
+                  <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
+                  <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
+                </View>
+              }
               onClose={() => setPanelOpen(false)}
               onInputBlur={() => canvasRef.current?.focus()}
             />
@@ -492,18 +498,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  toolbar: {
-    paddingBottom: 6,
-    backgroundColor: C.bg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: C.line,
-  },
-  toolbarRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  title: { minWidth: 120, maxWidth: 280, fontSize: 16, fontWeight: '700', color: C.ink },
-  pager: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 6 },
-  pagerArrow: { fontSize: 22, color: C.primary, fontWeight: '600' },
-  pagerText: { fontSize: 14, color: C.sub, fontVariant: ['tabular-nums'] },
-  disabled: { color: C.faint },
+  sideHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, flexWrap: 'wrap', backgroundColor: C.card, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   page: { flex: 1, overflow: 'hidden' },
   drawer: {
     position: 'absolute',

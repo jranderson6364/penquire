@@ -18,8 +18,8 @@ import { disclosureSummary } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { C, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
-import { latexToUnicode } from '../ui/mathText';
 import { Markdown } from './Markdown';
+import { ProblemsView } from './ProblemsView';
 
 export type Tab = 'feedback' | 'problems' | 'chat' | 'log';
 
@@ -35,6 +35,11 @@ type Props = {
   sending: boolean;
   onReparse: () => void;
   reparsing: boolean;
+  /** the part being worked on (flat label) and how to change it from the Problems tab */
+  activePart?: string;
+  onSelectPart: (label: string | undefined) => void;
+  /** rendered above the tabs: Check, help level, marks toggle */
+  header?: React.ReactNode;
   onClose: () => void;
   onInputFocus?: () => void;
   onInputBlur?: () => void;
@@ -50,6 +55,7 @@ const STATUS_STYLE: Record<PartStatus['status'], { color: string; bg: string; la
 export function SidePanel(p: Props) {
   return (
     <View style={styles.panel}>
+      {p.header}
       <View style={styles.tabs}>
         {(['feedback', 'chat', 'problems', 'log'] as Tab[]).map((t) => (
           <Pressable key={t} onPress={() => p.onTab(t)} style={[styles.tab, p.tab === t && styles.tabActive]}>
@@ -62,7 +68,9 @@ export function SidePanel(p: Props) {
       </View>
       {p.tab === 'feedback' && <FeedbackTab {...p} />}
       {p.tab === 'chat' && <ChatTab {...p} />}
-      {p.tab === 'problems' && <ProblemsTab {...p} />}
+      {p.tab === 'problems' && (
+        <ProblemsView assignment={p.assignment} activePart={p.activePart} onSelectPart={p.onSelectPart} onReparse={p.onReparse} reparsing={p.reparsing} />
+      )}
       {p.tab === 'log' && <LogTab {...p} />}
     </View>
   );
@@ -195,33 +203,6 @@ function ChatTab({ assignment, draft, onDraft, onSend, sending, onInputFocus, on
         </View>
       </View>
     </KeyboardAvoidingView>
-  );
-}
-
-function ProblemsTab({ assignment, onReparse, reparsing }: Props) {
-  return (
-    <ScrollView contentContainerStyle={styles.scroll}>
-      <Text style={styles.sectionTitle}>
-        {assignment.course ? `${assignment.course} · ` : ''}
-        {assignment.title}
-      </Text>
-      <Text style={styles.meta}>
-        Policy: {assignment.policy || '—'} (max help: {HELP_LEVELS[assignment.policyMaxLevel].name})
-      </Text>
-      {assignment.problems.length === 0 && (
-        <View style={styles.section}>
-          <Text style={styles.emptyText}>No problems loaded. The tutor will infer the task from your page.</Text>
-          <Button title="Retry parsing" onPress={onReparse} loading={reparsing} style={{ marginTop: 8 }} />
-        </View>
-      )}
-      {assignment.problems.map((pr) => (
-        <View key={pr.label} style={styles.problem}>
-          <Text style={styles.problemLabel}>{latexToUnicode(pr.label)}</Text>
-          <Text style={styles.problemText}>{latexToUnicode(pr.text)}</Text>
-          {pr.asksFor.length > 0 && <Text style={styles.asks}>Needs: {pr.asksFor.map(latexToUnicode).join(' · ')}</Text>}
-        </View>
-      ))}
-    </ScrollView>
   );
 }
 

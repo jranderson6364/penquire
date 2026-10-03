@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { Problem } from '../ai/types';
+import { latexToUnicode } from '../ui/mathText';
 import { C } from '../theme';
 
 type Props = {
-  parts: Problem[];
+  parts: { label: string; text: string }[];
   /** label of the part being worked on, or undefined for "all parts" */
   value: string | undefined;
   onChange: (label: string | undefined) => void;
@@ -37,7 +37,7 @@ export function PartPicker({ parts, value, onChange }: Props) {
                 <Pressable key={p.label} onPress={() => choose(p.label)} style={[styles.row, value === p.label && styles.rowActive]}>
                   <Text style={styles.rowTitle}>{p.label}</Text>
                   <Text style={styles.rowSub} numberOfLines={2}>
-                    {p.text}
+                    {latexToUnicode(p.text)}
                   </Text>
                 </Pressable>
               ))}
