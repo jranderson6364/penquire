@@ -7,6 +7,8 @@
  *  2. Stacked fractions (numerator / bar / denominator) are merged into one line.
  *  3. Small marks (sub/superscripts, dots) and tall glyphs attach to the line whose band contains them.
  *  4. Lines that still overlap heavily are merged.
+ *  5. A line is split at a wide horizontal gap (margin labels, side calculations, two-column work), and
+ *     groups at the same height are numbered left to right.
  */
 
 export type Box = { x: number; y: number; w: number; h: number };
@@ -139,8 +141,47 @@ export function groupLines(strokes: StrokeLike[]): Line[] {
     }
   }
 
-  return groups
-    .sort((a, b) => a.y - b.y)
+  // Pass 4: split at wide horizontal gaps. Words in one equation are close; a gap of several character
+  // heights means separate material that merely sits at the same height.
+  const byIndex = new Map(strokes.map((s) => [s.i, s]));
+  const gapLimit = Math.max(120, hMed * 8);
+  const split: Group[] = [];
+  for (const g of groups) {
+    const members = g.strokes.map((i) => byIndex.get(i)!).sort((a, b) => a.x - b.x);
+    let run: StrokeLike[] = [];
+    let right = -Infinity;
+    const flush = () => {
+      if (run.length === 0) return;
+      const box = run.slice(1).reduce<Box>((acc, m) => union(acc, m), run[0]);
+      split.push({ ...box, strokes: run.map((m) => m.i), core: box });
+      run = [];
+    };
+    for (const m of members) {
+      if (run.length && m.x - right > gapLimit) {
+        flush();
+        right = -Infinity;
+      }
+      run.push(m);
+      right = Math.max(right, m.x + m.w);
+    }
+    flush();
+  }
+  groups.length = 0;
+  groups.push(...split);
+
+  // Order: top to bottom; within a run at (nearly) the same height, left to right.
+  groups.sort((a, b) => a.y - b.y);
+  const ordered: Group[] = [];
+  for (let k = 0; k < groups.length; ) {
+    const row = [groups[k]];
+    const cy0 = groups[k].y + groups[k].h / 2;
+    let j = k + 1;
+    while (j < groups.length && Math.abs(groups[j].y + groups[j].h / 2 - cy0) < hMed * 0.6) row.push(groups[j++]);
+    ordered.push(...row.sort((a, b) => a.x - b.x));
+    k = j;
+  }
+
+  return ordered
     .map((g, idx) => ({
       id: `L${idx + 1}`,
       x: g.x,

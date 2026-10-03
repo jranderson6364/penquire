@@ -39,7 +39,7 @@ modules/pencil-canvas/          local Expo module (autolinked from ./modules)
                                   AsyncFunctions: getStrokes, getDrawing, setDrawing, clear,
                                   undo, redo, focus, exportImage(linesJSON, maxDim)
   src/PencilCanvasView.tsx        typed component + ref handle (PencilCanvasHandle)
-src/ink/lines.ts                stroke boxes → lines L1..Ln (pure, unit-tested heuristics)
+src/ink/lines.ts                stroke boxes → lines L1..Ln, reading order (pure; property-tested in lines.property.test.ts; splits at wide horizontal gaps)
 src/ai/types.ts                 TutorProvider interface (parseAssignment, check, reply)
 src/ai/claude.ts                Anthropic Messages API via fetch; forced tool output
                                 (report_check, report_problems); prompt caching on rules + context

@@ -64,5 +64,5 @@ Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, 
 ## Known issues
 
 - Fixed: forced `tool_choice` returned a 400 on Sonnet 5.5 / Opus 5.5 / Fable 5.1; `claude.ts` now uses `auto` + instruction + one retry. Not yet tested against the live API.
-- Line grouping can split or merge lines on cramped or diagonal writing (`src/ink/lines.ts`). Add a failing test case for each real example you hit.
+- Line grouping (`src/ink/lines.ts`) is property-tested on synthetic pages (level to 36 pt spacing, tilt to ~3 degrees, subscripts, shuffled input) and splits side-by-side work at wide gaps. Synthetic data is not real handwriting: add a failing test for each real example you hit (export strokes boxes from a bad page).
 - Portrait only by design for now.
