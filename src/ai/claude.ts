@@ -1,5 +1,9 @@
 import { TUTOR_RULES, contextBlock, levelBlock } from './prompts';
+import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
+import { flatten } from '../problems/flatten';
+import { sanitizeParsed } from '../problems/sanitize';
+import { hasErrors, validateGroups } from '../problems/validate';
 import { sanitizeCheck } from './sanitize';
 import type {
   CheckInput,
@@ -28,7 +32,7 @@ type Message = { role: 'user' | 'assistant'; content: string | ContentBlock[] };
 const MAX_TOKENS = 16000;
 const CHECK_EFFORT = 'medium';
 
-type Tool = { name: string; description: string; input_schema: Record<string, unknown> };
+type Tool = { name: string; description: string; input_schema: Record<string, unknown>; strict?: boolean };
 
 type ApiResponse = {
   content: Array<{ type: string; text?: string; name?: string; input?: unknown }>;
@@ -102,35 +106,59 @@ const CHECK_TOOL: Tool = {
   },
 };
 
+const SUBPART_SCHEMA = {
+  type: 'object',
+  properties: {
+    label: { type: 'string', description: 'Roman numeral as printed without parentheses: "i", "ii".' },
+    text: { type: 'string', description: 'Verbatim text of this sub-part, math in LaTeX.' },
+    hint: { type: 'string', description: 'Hint that follows this sub-part, or "".' },
+  },
+  required: ['label', 'text', 'hint'],
+  additionalProperties: false,
+};
+
+const PART_SCHEMA = {
+  type: 'object',
+  properties: {
+    label: { type: 'string', description: 'Letter as printed without parentheses: "a", "b" ("A" if printed as a capital).' },
+    text: { type: 'string', description: "This part's own wording only (its lead-in if it has sub-parts). Never the problem setup." },
+    hint: { type: 'string', description: 'Hint that belongs to this part, or "".' },
+    asks_for: { type: 'array', items: { type: 'string' }, description: 'Every distinct deliverable of this part.' },
+    subparts: { type: 'array', items: SUBPART_SCHEMA, description: 'Roman-numeral items under this part, or [].' },
+  },
+  required: ['label', 'text', 'hint', 'asks_for', 'subparts'],
+  additionalProperties: false,
+};
+
 const PARSE_TOOL: Tool = {
   name: 'report_problems',
-  description: 'Report the problems in the assignment, split into the smallest gradable parts.',
+  description: 'Report the assignment as structured problems: setup once, then parts, sub-parts, hints and closing text.',
+  strict: true,
   input_schema: {
     type: 'object',
     properties: {
-      course: { type: 'string', description: 'Course name/number if stated' },
+      course: { type: 'string', description: 'Course name or number if stated, else "".' },
+      notes: { type: 'array', items: { type: 'string' }, description: 'Assignment-level text that is not a problem (reading, logistics, policies).' },
       problems: {
         type: 'array',
         items: {
           type: 'object',
           properties: {
-            label: { type: 'string', description: 'e.g. "3.10c" or "2b". Combine problem number and part letter.' },
-            text: {
-              type: 'string',
-              description: 'Verbatim problem text for this part, math in LaTeX. Include the shared problem stem for each part so parts stand alone.',
-            },
-            asks_for: {
-              type: 'array',
-              items: { type: 'string' },
-              description:
-                'Every distinct thing a complete answer must contain, including the required final form and any "explain/justify" requirement.',
-            },
+            label: { type: 'string', description: 'Problem number as printed without the word "Problem": "6", "3.10".' },
+            title: { type: 'string', description: 'Printed title, or "".' },
+            context: { type: 'string', description: 'The problem setup before the first part, verbatim, stored once. Figures as [Figure: ...].' },
+            parts: { type: 'array', items: PART_SCHEMA, description: 'Lettered parts, or [] if the problem has none.' },
+            closing: { type: 'string', description: 'Text after the last part that applies to all parts, or "".' },
+            hint: { type: 'string', description: 'A hint for the whole problem, or "".' },
+            asks_for: { type: 'array', items: { type: 'string' }, description: 'Deliverables of the whole problem (main use: problems with no parts).' },
           },
-          required: ['label', 'text', 'asks_for'],
+          required: ['label', 'title', 'context', 'parts', 'closing', 'hint', 'asks_for'],
+          additionalProperties: false,
         },
       },
     },
-    required: ['problems'],
+    required: ['course', 'notes', 'problems'],
+    additionalProperties: false,
   },
 };
 
@@ -139,6 +167,8 @@ export type ClaudeOptions = {
   apiKey: string;
   checkModel: string;
   parseModel: string;
+  /** thinking effort for assignment parsing (a one-time cost per assignment, so quality wins over speed) */
+  parseEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** called once per API response that was billed, including truncated ones */
   onUsage?: (e: { kind: UsageKind; model: string; usage: Usage }) => void;
 };
@@ -238,22 +268,43 @@ export class ClaudeProvider implements TutorProvider {
       content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: input.pdfBase64 } });
     }
     if (input.text?.trim()) content.push({ type: 'text', text: `ASSIGNMENT TEXT:\n${input.text.trim()}` });
-    content.push({
-      type: 'text',
-      text: `Extract the problems from this assignment ("${input.title}").${
-        input.onlyProblems?.trim() ? ` Only include these problems: ${input.onlyProblems.trim()}.` : ''
-      } Split into the smallest gradable parts (a, b, c...). Copy wording verbatim; math in LaTeX. For asks_for, list every distinct deliverable, especially bundled asks ("is it valid? if not, give a minimal fix") and required forms ("find the cosine of the angle").`,
-    });
-    const { out } = await this.callTool<{ course?: string; problems: Array<{ label: string; text: string; asks_for: string[] }> }>(
-      { model: this.opts.parseModel, max_tokens: MAX_TOKENS, output_config: { effort: 'low' }, messages: [{ role: 'user', content }] },
-      PARSE_TOOL,
-      `Respond only by calling the ${PARSE_TOOL.name} tool.`,
-      'parse'
-    );
-    return {
-      course: out.course,
-      problems: (out.problems ?? []).map((p) => ({ label: p.label, text: p.text, asksFor: p.asks_for ?? [] })),
+    content.push({ type: 'text', text: parseTask(input.title, input.onlyProblems) });
+
+    const call = async (messages: Message[]) => {
+      const { out } = await this.callTool<Record<string, unknown>>(
+        { model: this.opts.parseModel, max_tokens: MAX_TOKENS, output_config: { effort: this.opts.parseEffort ?? 'high' }, system: PARSE_RULES, messages },
+        PARSE_TOOL,
+        `Respond only by calling the ${PARSE_TOOL.name} tool.`,
+        'parse'
+      );
+      return out;
     };
+
+    let raw = await call([{ role: 'user', content }]);
+    let parsed = sanitizeParsed(raw);
+    let issues = validateGroups(parsed.groups);
+
+    // One repair pass: show the model its own answer and exactly what the checker found. Keep whichever is better.
+    if (hasErrors(issues)) {
+      try {
+        const messages: Message[] = [
+          { role: 'user', content },
+          { role: 'user', content: [{ type: 'text', text: repairTask(JSON.stringify(raw), issues.filter((i) => i.severity === 'error').map((i) => i.message)) }] },
+        ];
+        const fixedRaw = await call(messages);
+        const fixed = sanitizeParsed(fixedRaw);
+        const fixedIssues = validateGroups(fixed.groups);
+        if (fixedIssues.filter((i) => i.severity === 'error').length <= issues.filter((i) => i.severity === 'error').length) {
+          raw = fixedRaw;
+          parsed = fixed;
+          issues = fixedIssues;
+        }
+      } catch (e) {
+        console.warn('parse repair pass failed; keeping the first parse', e);
+      }
+    }
+
+    return { course: parsed.course, problems: flatten(parsed.groups), groups: parsed.groups, notes: parsed.notes, issues };
   }
 
   async check(input: CheckInput): Promise<CheckResult> {

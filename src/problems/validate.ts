@@ -1,10 +1,11 @@
-import { latexToUnicode } from '../ui/mathText.ts';
+import { asciiScripts, latexToUnicode } from '../ui/mathText.ts';
 import { compareProblemLabels, missingInSequence } from './labels.ts';
 import type { ParseIssue, ProblemGroup } from './types.ts';
 
 /** Compare text loosely: no markup, case, spacing or punctuation. */
 export function squash(s: string): string {
-  return latexToUnicode(s)
+  return asciiScripts(latexToUnicode(s))
+    .replace(/[_^]/g, '')
     .normalize('NFD')
     .replace(/[̀-ͯ⃗]/g, '')
     .toLowerCase()

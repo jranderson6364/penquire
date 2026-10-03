@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latexToUnicode as t } from './mathText.ts';
+import { asciiScripts, latexToUnicode as t } from './mathText.ts';
 
 test('vectors get a real arrow over the letter, and bold works too', () => {
   assert.equal(t('\\vec{w}'), 'w⃗');
@@ -65,4 +65,27 @@ test('hostile input terminates quickly', () => {
   t('\\vec{'.repeat(200));
   t('^'.repeat(5000));
   assert.ok(Date.now() - t0 < 1500);
+});
+
+test('unit vectors: \\hat{\\imath} and \\hat{\\jmath} render as i-hat and j-hat', () => {
+  assert.equal(t('\\hat{\\imath} + 2\\hat{\\jmath}'), 'î + 2ĵ');
+  assert.equal(t('\\vec{v} = v_x\\hat{\\imath} - v_y\\hat{\\jmath}'), 'v⃗ = vₓî - v_yĵ');
+});
+
+test('an operator directly before a vector command does not glue to the vector letter', () => {
+  assert.equal(t('\\vec{A}\\times\\vec{B}'), 'A⃗×B⃗');
+  assert.equal(t('-\\vec{r}\\cdot\\vec{r} + 5\\,\\text{m}^2'), '-r⃗·r⃗ + 5 m²');
+  assert.equal(t('(\\vec{A}\\times\\vec{B})\\times\\vec{C}'), '(A⃗×B⃗)×C⃗');
+  assert.equal(t('\\sin\\vec{x}'), 'sinx⃗');
+  assert.ok(!t('\\pm\\hat{k}').includes('\\'));
+});
+
+test('degrees: ^\\circ is the degree sign', () => {
+  assert.equal(t('30^\\circ\\text{-}60^{\\circ}'), '30°-60°');
+  assert.equal(t('45^\\circ'), '45°');
+});
+
+test('asciiScripts maps Unicode sub/superscripts back for loose comparison', () => {
+  assert.equal(asciiScripts('vₓ + v² + x₁₀'), 'vx + v2 + x10');
+  assert.equal(asciiScripts('plain'), 'plain');
 });

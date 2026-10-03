@@ -89,7 +89,17 @@ export type ParseInput = {
   onlyProblems?: string;
 };
 
-export type ParseResult = { course?: string; problems: Problem[] };
+export type ParseResult = {
+  course?: string;
+  /** flat per-part problems (labels like "6a"); derived from `groups` and used by the tutor, part picker and snapshots */
+  problems: Problem[];
+  /** structured problems: setup once, then parts, sub-parts, hints and closing text */
+  groups?: import('../problems/types').ProblemGroup[];
+  /** assignment-level text that is not a problem */
+  notes?: string[];
+  /** what the validator still found wrong after the repair pass, to show the student */
+  issues?: import('../problems/types').ParseIssue[];
+};
 
 export interface TutorProvider {
   readonly id: string;

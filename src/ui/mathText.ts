@@ -13,15 +13,22 @@ const GREEK: Record<string, string> = {
 };
 
 const SYMBOLS: Record<string, string> = {
-  cdot: '·', times: '×', div: '÷', pm: '±', mp: '∓', leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠', approx: '≈',
+  imath: 'i', jmath: 'j', cdot: '·', times: '×', div: '÷', pm: '±', mp: '∓', leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠', approx: '≈',
   sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝', infty: '∞', partial: '∂', nabla: '∇', int: '∫', iint: '∬',
   iiint: '∭', oint: '∮', sum: '∑', prod: '∏', to: '→', rightarrow: '→', leftarrow: '←', leftrightarrow: '↔',
   Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', implies: '⟹', iff: '⟺', mapsto: '↦', in: '∈', notin: '∉',
   subset: '⊂', subseteq: '⊆', cup: '∪', cap: '∩', emptyset: '∅', forall: '∀', exists: '∃', neg: '¬', land: '∧', lor: '∨',
   cdots: '⋯', ldots: '…', dots: '…', vdots: '⋮', ddots: '⋱', degree: '°', circ: '∘', bullet: '•', angle: '∠', perp: '⊥',
   parallel: '∥', hbar: 'ℏ', ell: 'ℓ', prime: '′', langle: '⟨', rangle: '⟩', lVert: '‖', rVert: '‖', ll: '≪', gg: '≫',
-  star: '⋆', oplus: '⊕', otimes: '⊗', dagger: '†', hat: '^',
+  star: '⋆', oplus: '⊕', otimes: '⊗', dagger: '†',
 };
+
+const FUNCTION_NAMES = /^(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|sinh|cosh|tanh|ln|log|exp|lim|max|min|det|dim|ker|sup|inf|Pr|gcd)$/;
+
+/** A command that is just a character or a word (no arguments): Greek, symbols, function names. */
+function plainName(name: string): string | undefined {
+  return GREEK[name] ?? SYMBOLS[name] ?? (FUNCTION_NAMES.test(name) ? name : undefined);
+}
 
 const SUP: Record<string, string> = {
   '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻',
@@ -33,6 +40,15 @@ const SUB: Record<string, string> = {
   '=': '₌', '(': '₍', ')': '₎', a: 'ₐ', e: 'ₑ', h: 'ₕ', i: 'ᵢ', j: 'ⱼ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', o: 'ₒ', p: 'ₚ', r: 'ᵣ',
   s: 'ₛ', t: 'ₜ', u: 'ᵤ', v: 'ᵥ', x: 'ₓ',
 };
+
+const REVERSE_SCRIPTS: Record<string, string> = {};
+for (const [k, v] of Object.entries(SUP)) REVERSE_SCRIPTS[v] = k;
+for (const [k, v] of Object.entries(SUB)) REVERSE_SCRIPTS[v] = k;
+
+/** Unicode sub/superscript characters back to plain ASCII (for loose comparison: v_x, vₓ and vx are the same quantity). */
+export function asciiScripts(s: string): string {
+  return [...s].map((c) => REVERSE_SCRIPTS[c] ?? c).join('');
+}
 
 const COMBINING: Record<string, string> = {
   vec: '⃗', overrightarrow: '⃗', hat: '̂', widehat: '̂', bar: '̄', overline: '̄', dot: '̇',
@@ -93,6 +109,13 @@ export function latexToUnicode(input: string): string {
   s = s.replace(/\\(left|right|big|Big|bigg|Bigg)(?![A-Za-z])\s*/g, '');
   s = s.replace(/\\(quad|qquad)(?![A-Za-z])/g, '  ').replace(/\\[,;:! ]/g, ' ').replace(/\\\\/g, '\n');
 
+  // Degrees: 30^\circ and 30^{\circ} are the degree sign, not a superscript.
+  s = s.replace(/\^\s*\{\s*\\circ\s*\}|\^\s*\\circ(?![A-Za-z])/g, '°');
+
+  // Symbols, Greek letters and function names FIRST. If an argument command were expanded first, its result could land
+  // right after a command name and glue to it (\times + \vec{B} -> "\timesB").
+  s = s.replace(/\\([A-Za-z]+)/g, (m, name: string) => plainName(name) ?? m);
+
   // commands that take arguments: scan left to right, splice each result in place (arguments recurse)
   let from = 0;
   for (let guard = 0; guard < 400; guard++) {
@@ -110,7 +133,7 @@ export function latexToUnicode(input: string): string {
   }
 
   // plain symbols and Greek
-  s = s.replace(/\\([A-Za-z]+)/g, (m, name: string) => GREEK[name] ?? SYMBOLS[name] ?? (/^(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|sinh|cosh|tanh|ln|log|exp|lim|max|min|det|dim|ker|sup|inf|Pr|gcd)$/.test(name) ? name : m));
+  s = s.replace(/\\([A-Za-z]+)/g, (m, name: string) => plainName(name) ?? m);
 
   // sub/superscripts, then drop leftover braces
   for (let pass = 0; pass < 10; pass++) {
