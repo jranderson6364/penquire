@@ -1,4 +1,4 @@
-import { requireNativeView } from 'expo';
+import { requireNativeView, requireOptionalNativeModule } from 'expo';
 import * as React from 'react';
 import type { NativeSyntheticEvent } from 'react-native';
 
@@ -20,7 +20,13 @@ type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged'> & {
   onDrawingChanged?: (e: NativeSyntheticEvent<{ strokeCount: number }>) => void;
 };
 
-const NativeView: React.ComponentType<NativeProps> = requireNativeView('PencilCanvas');
+/**
+ * False when the installed app binary was built without the Swift module (an old dev build, or the module was not
+ * packaged). Screens must check this instead of rendering the canvas, which would fail with an unhelpful warning.
+ */
+export const nativeCanvasAvailable = requireOptionalNativeModule('PencilCanvas') != null;
+
+const NativeView: React.ComponentType<NativeProps> | null = nativeCanvasAvailable ? requireNativeView('PencilCanvas') : null;
 
 function parse<T>(json: string, fallback: T): T {
   try {
@@ -60,6 +66,7 @@ export function PencilCanvas({
     []
   );
 
+  if (!NativeView) return null;
   return (
     <NativeView
       ref={nativeRef}

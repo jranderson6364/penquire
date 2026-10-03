@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, type ExportedImage, type PencilCanvasHandle } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -126,6 +126,18 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     );
     return { lines, image, strokes: strokes.length };
   };
+
+  if (!nativeCanvasAvailable) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ fontSize: 20, fontWeight: '800', color: C.ink }}>This app build is missing the drawing module</Text>
+        <Text style={{ maxWidth: 520, textAlign: 'center', color: C.sub, fontSize: 16, lineHeight: 22 }}>
+          The installed copy of Penquire was built before the PencilKit canvas was included. Delete Penquire from this iPad, then install the latest development build from expo.dev (Builds, newest, Install). JS changes alone cannot fix this.
+        </Text>
+        <Button title="Back" onPress={onBack} />
+      </View>
+    );
+  }
 
   if (!a) {
     return (
