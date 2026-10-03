@@ -59,7 +59,9 @@ src/log.ts                      deterministic AI-use disclosure from the event l
 Conventions that matter:
 
 - **Native ↔ JS bridge passes JSON strings** (Sendable, simplest to bridge). Native view functions run on the main queue; Swift wraps UIKit work in `MainActor.assumeIsolated`, and async work uses `Task { @MainActor in … }`, not `DispatchQueue` closures.
-- **Coordinates:** canvas points = RN layout points (portrait only, no zoom or scroll, `requireFullScreen`). Marks are positioned from the line boxes **saved at check time**.
+- **Coordinates (apiVersion >= 2):** everything stored (strokes, line boxes, checks, exported images) is in PAGE space: a fixed 816x1056 pt Letter sheet (`src/page.ts`) that never changes with zoom, rotation or Split View. The native canvas reports `{scale, tx, ty}`; screen = page * scale + (tx, ty). Marks are mapped page -> screen from the line boxes **saved at check time**, hidden while pinching, and culled when off-screen. Checks saved before this (no `space: 'page-v2'`) are not drawn.
+- **Native surface is thin and versioned:** native exposes generic primitives only (`setTool(spec)`, `setRulerActive`, `fitToWidth`, viewport events, `apiVersion`). All tool/toolbar UI is JS (`src/tools.ts`, `DrawingToolbar`), so UI changes cost no build. JS must keep working on an older binary: feature-detect with `nativeApiVersion` (1 = original, 2 = fixed page + zoom + tools).
+- **Swift is compile-checked for free:** `.github/workflows/ios-compile.yml` builds the app on `macos-26` (Xcode 26.3's Swift rejects a header that EAS's newer toolchain only warns about, so macos-15 fails). Treat it as a gate before any EAS build; write Swift only with the Write/Edit tools (the shell eats `\(`).
 - **The AI never outputs pixel coordinates.** It refers to line IDs (`L4`) drawn in the exported image's left gutter. Keep that contract for future annotation features (F10).
 - **Providers are pluggable.** Add a new model or provider by implementing `TutorProvider`; screens call only `getProvider()`.
 - **The event log is append-only** (`Assignment.events`). Every check or reply records the help level used.
@@ -68,7 +70,7 @@ Conventions that matter:
 ## Build discipline (EAS builds are scarce: ~15 free iOS/month; user approved running the CLI, but ASK FIRST)
 
 - Default to JS-only. Before any native change, check whether JS, `app.json`/config plugin, or an existing native API can do it.
-- Batch native work. Pending for the NEXT build (not yet done): `exportImage` crop + JPEG/file-URI output, honor `maskedPathRanges`, `pageId`/`revision` on events, `expo-updates` + fingerprint `runtimeVersion`, `ios.privacyManifests`, all-four-orientations if the full-screen claim holds. Don't spend a build on one of these alone.
+- Batch native work. Build 2 (code written and CI-compiled, awaiting the user's OK to build): fixed page + zoom/pan + viewport events, `setTool`/ruler/Pencil double-tap, all orientations + Split View, page-rect export. Still pending after that: `exportImage` crop + JPEG/file-URI output, honor `maskedPathRanges`, `pageId`/`revision` on events, `expo-updates` + fingerprint `runtimeVersion`, `ios.privacyManifests`, optional KaTeX WebView (real LaTeX typesetting). Don't spend a build on one of these alone.
 - Gate every build: `npm run typecheck`, `npm test`, `npx expo-doctor`, `npx expo export --platform ios --output-dir dist-check` (then delete `dist-check`). Re-read new Swift against `node_modules/expo-modules-core/ios`. Confirm native files are tracked (`git ls-files modules`) and committed before building: EAS packs from git.
 - Say "NATIVE CHANGE: needs rebuild" in the commit and the reply. Never start a build without the user's yes.
 
