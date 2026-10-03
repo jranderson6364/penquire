@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -76,8 +76,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     });
   const hasKey = !!(settings.apiKey || ENV.anthropicApiKey);
   /** apiVersion >= 2: fixed page, zoom/pan, native tool spec. An older binary keeps the previous behavior. */
-  const modern = nativeApiVersion >= 2;
-  React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} (2 = zoom, rotation, new tools)`), []);
+  // The version constant is the normal signal; if it is missing, ask the canvas directly whether it has the new
+  // functions (an older binary has no getViewport). Either way the new features switch on as soon as they exist.
+  const [probedModern, setProbedModern] = React.useState(false);
+  const modern = nativeApiVersion >= 2 || probedModern;
+  React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} module=${JSON.stringify(nativeModuleInfo)}`), []);
   const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
   const prevToolRef = React.useRef<ToolKind>('pen');
@@ -93,6 +96,30 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     c.setRulerActive(toolState.ruler).catch((e) => console.warn('setRulerActive failed', e));
     saveSettings({ toolState });
   }, [modern, toolState]);
+
+  React.useEffect(() => {
+    if (nativeApiVersion >= 2 || probedModern) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const vp = await withViewRetry(
+          async () => {
+            const c = canvasRef.current;
+            if (!c) throw new Error('canvas not mounted yet');
+            return c.getViewport();
+          },
+          { isCancelled: () => cancelled, tries: 20 }
+        );
+        console.warn(`[penquire] probe getViewport -> ${vp ? 'answered (new native build)' : 'no such function (old native build)'}`);
+        if (vp && !cancelled) setProbedModern(true);
+      } catch (e) {
+        if (!cancelled) console.warn('[penquire] probe failed', String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [probedModern]);
 
   const onViewportChanged = React.useCallback((e: ViewportEvent) => {
     setViewport((prev) => {

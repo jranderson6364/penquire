@@ -41,6 +41,13 @@ export const nativeCanvasAvailable = nativeModule != null;
  */
 export const nativeApiVersion: number = typeof nativeModule?.apiVersion === 'number' ? nativeModule.apiVersion : nativeCanvasAvailable ? 1 : 0;
 
+/** For diagnostics: what the installed binary actually exposes (names only). */
+export const nativeModuleInfo = {
+  available: nativeCanvasAvailable,
+  apiVersion: nativeApiVersion,
+  keys: nativeModule ? Object.keys(nativeModule as object).slice(0, 20) : [],
+};
+
 const NativeView: React.ComponentType<NativeProps> | null = nativeCanvasAvailable ? requireNativeView('PencilCanvas') : null;
 
 function parse<T>(json: string, fallback: T): T {
