@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Penquire",
+    "slug": "penquire",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jander.penquire",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "requireFullScreen": true
+    },
+    "plugins": [
+      "expo-dev-client"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "23f7312e-9e5f-4ec2-b61f-bac160438d2e"
+      }
+    },
+    "owner": "j.andy"
+  }
+}
