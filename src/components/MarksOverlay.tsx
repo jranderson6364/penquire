@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { LineVerdict } from '../ai/types';
+import type { LineVerdict, Verdict } from '../ai/types';
+import type { MarkFeedback, Rating } from '../store/evalRecords';
 import type { Line } from '../ink/lines';
 import { C, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
@@ -13,17 +14,34 @@ type Props = {
   verdicts: LineVerdict[];
   stale: boolean;
   onAsk: (v: LineVerdict) => void;
+  feedbackFor: (lineId: string) => MarkFeedback | undefined;
+  onRate: (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => void;
+  onInputBlur?: () => void;
 };
+
+type Correction = 'wrong' | 'misread';
+const CORRECT_VERDICTS: { v: Verdict; label: string }[] = [
+  { v: 'valid', label: '✓ valid' },
+  { v: 'partial', label: '~ partial' },
+  { v: 'incorrect', label: '✗ incorrect' },
+];
 
 const MARK = 26;
 const POPOVER_W = 300;
+const POPOVER_H = 290;
 
 /**
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk }: Props) {
+export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, feedbackFor, onRate, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
+  const [correcting, setCorrecting] = React.useState<Correction | null>(null);
+  const [reading, setReading] = React.useState('');
+  React.useEffect(() => {
+    setCorrecting(null);
+    setReading('');
+  }, [open]);
   const byId = React.useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
 
   React.useEffect(() => setOpen(null), [verdicts]);
@@ -70,7 +88,7 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk }: P
             styles.popover,
             {
               left: Math.max(8, Math.min(active.x - POPOVER_W + MARK, width - POPOVER_W - 8)),
-              top: active.y + MARK + 6 > height - 180 ? Math.max(8, active.y - 170) : active.y + MARK + 6,
+              top: active.y + MARK + 6 > height - POPOVER_H ? Math.max(8, active.y - POPOVER_H + MARK) : active.y + MARK + 6,
             },
           ]}
         >
@@ -87,6 +105,19 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk }: P
             </Text>
           )}
           <Text style={styles.note}>{active.v.note}</Text>
+          <FeedbackRow
+            verdict={active.v}
+            saved={feedbackFor(active.v.id)}
+            correcting={correcting}
+            setCorrecting={setCorrecting}
+            reading={reading}
+            setReading={setReading}
+            onRate={(fb) => {
+              onRate({ lineId: active.v.id, ...fb });
+              setCorrecting(null);
+            }}
+            onInputBlur={onInputBlur}
+          />
           <View style={styles.popActions}>
             <Button small kind="ghost" title="Close" onPress={() => setOpen(null)} />
             <Button
@@ -105,7 +136,68 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk }: P
   );
 }
 
+type RowProps = {
+  verdict: LineVerdict;
+  saved?: MarkFeedback;
+  correcting: Correction | null;
+  setCorrecting: (c: Correction | null) => void;
+  reading: string;
+  setReading: (s: string) => void;
+  onRate: (fb: { rating: Rating; correctVerdict?: Verdict; correctReading?: string }) => void;
+  onInputBlur?: () => void;
+};
+
+/** Was this mark right? Wrong verdicts (esp. a false ✓) and misreadings are recorded separately. */
+function FeedbackRow({ verdict, saved, correcting, setCorrecting, reading, setReading, onRate, onInputBlur }: RowProps) {
+  const chip = (label: string, on: boolean, press: () => void) => (
+    <Pressable key={label} onPress={press} style={[styles.chip, on && styles.chipOn]}>
+      <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <View style={styles.fb}>
+      <View style={styles.chips}>
+        {chip('👍', saved?.rating === 'up', () => onRate({ rating: 'up' }))}
+        {chip('👎', saved?.rating === 'down', () => onRate({ rating: 'down' }))}
+        {chip('Mark is wrong', saved?.rating === 'wrong' || correcting === 'wrong', () => setCorrecting(correcting === 'wrong' ? null : 'wrong'))}
+        {chip('Misread', saved?.rating === 'misread' || correcting === 'misread', () => setCorrecting(correcting === 'misread' ? null : 'misread'))}
+      </View>
+      {correcting === 'wrong' && (
+        <View style={styles.chips}>
+          <Text style={styles.fbLabel}>Should be:</Text>
+          {CORRECT_VERDICTS.filter((c) => c.v !== verdict.verdict).map((c) =>
+            chip(c.label, false, () => onRate({ rating: 'wrong', correctVerdict: c.v }))
+          )}
+        </View>
+      )}
+      {correcting === 'misread' && (
+        <TextInput
+          style={styles.fbInput}
+          value={reading}
+          onChangeText={setReading}
+          placeholder="What does the line actually say?"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onBlur={onInputBlur}
+          onSubmitEditing={() => reading.trim() && onRate({ rating: 'misread', correctReading: reading.trim() })}
+        />
+      )}
+      {!!saved && !correcting && <Text style={styles.fbSaved}>Saved: {saved.rating}{saved.correctVerdict ? ` → ${saved.correctVerdict}` : ''}</Text>}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  fb: { gap: 6, marginTop: 4 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  chip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line, backgroundColor: C.bg },
+  chipOn: { backgroundColor: C.primarySoft, borderColor: C.primary },
+  chipText: { fontSize: 13, color: C.ink },
+  chipTextOn: { color: C.primary, fontWeight: '700' },
+  fbLabel: { fontSize: 12, color: C.sub },
+  fbInput: { borderWidth: StyleSheet.hairlineWidth, borderColor: C.line, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14, backgroundColor: C.bg },
+  fbSaved: { fontSize: 12, color: C.valid },
   mark: {
     position: 'absolute',
     width: MARK,

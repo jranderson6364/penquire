@@ -45,6 +45,8 @@ src/ai/claude.ts                Anthropic Messages API via fetch; forced tool ou
                                 (report_check, report_problems); prompt caching on rules + context
 src/ai/prompts.ts               TUTOR_RULES (ported from the validated Socratic skill), HELP_LEVELS 0–4
 src/store/db.ts                 JSON store at Documents/penquire/db.json; pages at penquire/pages/<id>.pk
+src/store/evalRecords.ts        pure accuracy-feedback records + export builder (unit-tested)
+src/store/evals.ts              disk layer: penquire/evals/feedback.json, check images, JSON export
 src/screens/WorkspaceScreen.tsx canvas + MarksOverlay + SidePanel; check/send/reparse/autosave
 src/components/                 MarksOverlay, SidePanel (Feedback|Chat|Problems|Log), HelpLevelPicker
 src/log.ts                      deterministic AI-use disclosure from the event log

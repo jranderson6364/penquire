@@ -11,6 +11,8 @@ import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { groupLines, type Line } from '../ink/lines';
 import { getAssignment, getSettings, newId, readPage, subscribe, updateAssignment, writePage } from '../store/db';
+import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
+import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { readSource } from '../store/sources';
 import type { Assignment } from '../store/types';
 import { C } from '../theme';
@@ -49,6 +51,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [tab, setTab] = React.useState<Tab>('feedback');
   const [draft, setDraft] = React.useState('');
   const [showMarks, setShowMarks] = React.useState(true);
+  const [evals, setEvals] = React.useState(loadEvals);
+  React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
 
   const pageId = a?.pageIds[pageIndex] ?? '';
   const pageIdRef = React.useRef(pageId);
@@ -120,6 +124,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   const check = a.checks[pageId];
   const stale = !!check && strokeCount !== null && strokeCount !== check.strokeCount;
+  const checkId = check ? (check.id ?? `${pageId}-${check.at}`) : '';
 
   // ---- actions -----------------------------------------------------------
   const runCheck = async () => {
@@ -139,10 +144,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         pageNumber: pageIndex + 1,
         previous: prev ? { feedback: prev.result.feedback, stillOpen: prev.result.stillOpen } : undefined,
       });
+      try {
+        saveCheckImage(pageId, image.base64);
+      } catch (e) {
+        console.warn('saving check image failed', e);
+      }
       const counts = result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
       updateAssignment(a.id, (x) => ({
         ...x,
-        checks: { ...x.checks, [pageId]: { at: Date.now(), result, lines, strokeCount: strokes } },
+        checks: { ...x.checks, [pageId]: { id: newId('c_'), at: Date.now(), result, lines, strokeCount: strokes } },
         events: [
           ...x.events,
           {
@@ -229,6 +239,32 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setPanelOpen(true);
   };
 
+  const rateMark = (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => {
+    if (!check) return;
+    try {
+      recordFeedback(
+        pageId,
+        {
+          checkId,
+          checkedAt: check.at,
+          assignmentId: a.id,
+          course: a.course,
+          assignmentTitle: a.title,
+          policy: a.policy,
+          helpLevel: tutorContext(a).helpLevel,
+          problems: a.problems,
+          page: pageIndex + 1,
+          model: check.result.model,
+          lines: check.lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
+          verdicts: check.result.lines,
+        },
+        { ...fb, checkId, at: Date.now() }
+      );
+    } catch (e) {
+      Alert.alert('Could not save feedback', String(e instanceof Error ? e.message : e));
+    }
+  };
+
   const setLevel = (l: HelpLevel) =>
     updateAssignment(a.id, (x) => ({ ...x, helpLevel: l, events: [...x.events, { t: Date.now(), type: 'level_change', level: l }] }));
 
@@ -281,7 +317,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           onDrawingChanged={onDrawingChanged}
         />
         {check && showMarks && size.w > 0 && (
-          <MarksOverlay width={size.w} height={size.h} lines={check.lines} verdicts={check.result.lines} stale={stale} onAsk={askAbout} />
+          <MarksOverlay
+            width={size.w}
+            height={size.h}
+            lines={check.lines}
+            verdicts={check.result.lines}
+            stale={stale}
+            onAsk={askAbout}
+            feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
+            onRate={rateMark}
+            onInputBlur={() => canvasRef.current?.focus()}
+          />
         )}
         {stale && showMarks && (
           <View pointerEvents="none" style={styles.staleTag}>

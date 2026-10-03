@@ -4,7 +4,7 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 
 ## Now: make v0 trustworthy in daily use
 
-- [ ] **Accuracy feedback loop.** Add 👍/👎 and "this mark is wrong" on each mark popover. Store the page image, the line verdicts and the correction under `Documents/penquire/evals/`. Add a Settings button to export them (share sheet, zip or JSON).
+- [x] **Accuracy feedback loop.** Add 👍/👎 and "this mark is wrong" on each mark popover. Store the page image, the line verdicts and the correction under `Documents/penquire/evals/`. Add a Settings button to export them (share sheet, zip or JSON).
   - *Done when:* corrections persist across restarts and export to Files.
 - [ ] **Cost/usage meter.** Record token usage per check and reply (already returned in `CheckResult.usage`). Show this month's estimated cost in Settings, with per-model price constants in one file.
 - [ ] **Check only the active part.** Add a toolbar picker for the current part (from `assignment.problems`) and pass `focusPart`. Feedback emphasizes that part while still flagging missing ones.

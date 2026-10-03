@@ -1,10 +1,12 @@
 import * as React from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
 import { ENV } from '../config';
 import { getSettings, saveSettings } from '../store/db';
+import { feedbackStats } from '../store/evalRecords';
+import { loadEvals, writeExport } from '../store/evals';
 import type { Settings } from '../store/types';
 import { C } from '../theme';
 
@@ -55,6 +57,25 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         placeholder={ENV.parseModel}
         autoCapitalize="none"
         autoCorrect={false}
+      />
+
+      <Text style={styles.section}>Accuracy feedback</Text>
+      <Text style={styles.label}>
+        {(() => {
+          const st = feedbackStats(loadEvals());
+          return `${st.ratings} rating${st.ratings === 1 ? '' : 's'} on ${st.checks} check${st.checks === 1 ? '' : 's'} (${st.wrong} wrong)`;
+        })()}
+      </Text>
+      <Button
+        title="Export feedback (JSON)"
+        onPress={async () => {
+          try {
+            if (feedbackStats(loadEvals()).ratings === 0) return Alert.alert('Nothing to export', 'Rate a mark first.');
+            await Share.share({ url: writeExport() });
+          } catch (e) {
+            Alert.alert('Export failed', String(e instanceof Error ? e.message : e));
+          }
+        }}
       />
 
       <Text style={styles.section}>Canvas</Text>

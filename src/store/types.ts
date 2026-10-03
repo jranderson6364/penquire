@@ -2,6 +2,8 @@ import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
 
 export type StoredCheck = {
+  /** stable id for accuracy feedback (missing on checks saved before it existed) */
+  id?: string;
   at: number;
   result: CheckResult;
   /** line boxes as they were at check time (marks are positioned from these) */
