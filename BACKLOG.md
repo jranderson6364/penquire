@@ -11,6 +11,34 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [ ] **Faster checks.** Shrink the image (JPEG option in `exportImage` 🔨 native, or crop to the written area). Target median under 6 s. Show elapsed time in the feedback footer.
 - [ ] **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.
 
+## Research-driven (from ../research/*.md, Oct 2026; re-verify numbers before acting)
+
+Blockers before any tester build:
+- [ ] **Move the API key off the device** (backend proxy, below) and add an **AI consent screen naming Anthropic** (App Store guideline 5.1.2(i)), **in-app account deletion**, a privacy policy and a reviewer demo account.
+- [ ] **Fix `setDrawing` so a decode failure throws** instead of loading a blank drawing that the next autosave would persist 🔨 native.
+- [ ] **Verify the iPadOS 27 `UIRequiresFullScreen` claim** (re-read Apple TN3192). If true: fixed logical page size, with line boxes, marks and exports in page points rather than `canvas.bounds`; allow all four iPad orientations (else ITMS-90474).
+
+Accuracy (the product's core risk is a false ✓):
+- [ ] **Per-line `transcription` + legibility in `report_check`**; show it to the student; a "Misread" rating forces `?`. Most grading errors are transcription errors (arXiv 2605.19043, not tested on Claude).
+- [ ] **Golden eval set** (20-50 cases from feedback exports, grow to ~200). Code graders: false-valid rate (hard gate at 0) and answer leakage; run on Windows, nightly via Batch. Log cache hit counts.
+- [ ] **Verifier pass**: blind second read with a cheaper model, a SymPy check that can only downgrade a verdict, a refute-every-✓ pass. Needs the backend.
+- [ ] **Answer-leak guards**: CAS check on hint contents, cross-family judge, templated fallback hint, adversarial-student suite. Consider a one-tap hint ladder (Khanmigo evidence); product decision.
+- [ ] Add `strict: true` to `report_check` / `report_problems` (needs `additionalProperties: false` throughout).
+- [ ] Honor `maskedPathRanges` for erased strokes; add `pageId` and `revision` to canvas events.
+
+Cost and speed:
+- [ ] Crop blank page, make `maxDimension` model-aware (cap 2576 px on 4.7+, 1568 px older), return a file URI instead of base64. About 3.9k image tokens per check today (estimate).
+
+Tooling (no Mac):
+- [ ] **CLAUDE.md as single source**, imported from AGENTS.md (AGENTS.md currently says Expo Router, but the app uses a state router).
+- [ ] **Hooks (Node scripts)**: block edits to `ios/` and `android/`; print REBUILD NEEDED on native changes; Stop hook running typecheck and tests.
+- [ ] **GitHub remote + CI**: typecheck, tests, `expo-doctor`; optional macOS job (`expo prebuild`, `pod install`, unsigned `xcodebuild`) to compile-check Swift. Free on public repos, so decide on prompt visibility first.
+- [ ] **Install `expo-updates` with a fingerprint `runtimeVersion` policy** 🔨 native (bundle with the next rebuild), then EAS Workflows so JS-only changes ship OTA. Do not publish updates to a shared channel until the proxy exists.
+- [ ] `eas-build-pre-install` hook running typecheck so a TS error never burns one of the ~15 monthly builds.
+- [ ] Specs: lightweight `specs/<feature>.md` with a "native? Y/N" field and named acceptance tests.
+
+Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, `PrivacyInfo.xcprivacy` via `expo.ios.privacyManifests`, App Attest + Durable Object budgets in the Worker, Mathpix as an optional second reader, accessible marks (labels, 44 pt targets), `PKStrokeRecognizer` as a readability preflight.
+
 ## Next: v0.2 features (see ../docs/03-features.md)
 
 - [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, `note{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
@@ -32,5 +60,6 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 
 ## Known issues
 
+- Fixed: forced `tool_choice` returned a 400 on Sonnet 5.5 / Opus 5.5 / Fable 5.1; `claude.ts` now uses `auto` + instruction + one retry. Not yet tested against the live API.
 - Line grouping can split or merge lines on cramped or diagonal writing (`src/ink/lines.ts`). Add a failing test case for each real example you hit.
 - Portrait only by design for now.

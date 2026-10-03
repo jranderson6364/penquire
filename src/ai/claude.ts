@@ -147,10 +147,23 @@ export class ClaudeProvider implements TutorProvider {
     return (await res.json()) as ApiResponse;
   }
 
-  private static toolInput<T>(res: ApiResponse, name: string): T {
-    const block = res.content.find((b) => b.type === 'tool_use' && b.name === name);
-    if (!block?.input) throw new Error(`Model did not return ${name} (stop_reason: ${res.stop_reason})`);
-    return block.input as T;
+  /**
+   * Forced tool_choice ('tool'/'any') is a 400 on Sonnet 5.5, Opus 5.5 and Fable 5.1, so ask for the tool by
+   * name (tool_choice auto) and retry once if the model answers in prose instead.
+   */
+  private async callTool<T>(body: Record<string, unknown>, tool: Tool, instruction: string): Promise<{ res: ApiResponse; out: T }> {
+    const messages = (body.messages as Message[]).map((m, i, all) => {
+      if (i !== all.length - 1 || typeof m.content === 'string') return m;
+      return { ...m, content: [...m.content, { type: 'text', text: instruction } as ContentBlock] };
+    });
+    const req = { ...body, messages, tools: [tool], tool_choice: { type: 'auto' } };
+    let last: ApiResponse | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      last = await this.call(req);
+      const block = last.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
+      if (block?.input) return { res: last, out: block.input as T };
+    }
+    throw new Error(`Model did not return ${tool.name} (stop_reason: ${last?.stop_reason})`);
   }
 
   private static usage(res: ApiResponse): Usage | undefined {
@@ -179,16 +192,10 @@ export class ClaudeProvider implements TutorProvider {
         input.onlyProblems?.trim() ? ` Only include these problems: ${input.onlyProblems.trim()}.` : ''
       } Split into the smallest gradable parts (a, b, c...). Copy wording verbatim; math in LaTeX. For asks_for, list every distinct deliverable, especially bundled asks ("is it valid? if not, give a minimal fix") and required forms ("find the cosine of the angle").`,
     });
-    const res = await this.call({
-      model: this.opts.parseModel,
-      max_tokens: 8000,
-      tools: [PARSE_TOOL],
-      tool_choice: { type: 'tool', name: PARSE_TOOL.name },
-      messages: [{ role: 'user', content }],
-    });
-    const out = ClaudeProvider.toolInput<{ course?: string; problems: Array<{ label: string; text: string; asks_for: string[] }> }>(
-      res,
-      PARSE_TOOL.name
+    const { out } = await this.callTool<{ course?: string; problems: Array<{ label: string; text: string; asks_for: string[] }> }>(
+      { model: this.opts.parseModel, max_tokens: 8000, messages: [{ role: 'user', content }] },
+      PARSE_TOOL,
+      `Respond only by calling the ${PARSE_TOOL.name} tool.`
     );
     return {
       course: out.course,
@@ -204,12 +211,18 @@ export class ClaudeProvider implements TutorProvider {
       ? `PREVIOUS ROUND (line IDs may have changed since):\nFeedback: ${input.previous.feedback}\nStill open: ${input.previous.stillOpen.join('; ') || 'none'}\nSay explicitly which of these are now fixed.`
       : 'This is the first check of this page.';
 
-    const res = await this.call({
+    const { res, out } = await this.callTool<{
+      lines: CheckResult['lines'];
+      parts: CheckResult['parts'];
+      feedback: string;
+      question: string;
+      fixed_since_last: string[];
+      still_open: string[];
+    }>(
+      {
       model: this.opts.checkModel,
       max_tokens: 4000,
       system: this.system(),
-      tools: [CHECK_TOOL],
-      tool_choice: { type: 'tool', name: CHECK_TOOL.name },
       messages: [
         {
           role: 'user',
@@ -231,16 +244,10 @@ Check my work. Label every line, report part status (including parts the page sh
           ],
         },
       ],
-    });
-
-    const out = ClaudeProvider.toolInput<{
-      lines: CheckResult['lines'];
-      parts: CheckResult['parts'];
-      feedback: string;
-      question: string;
-      fixed_since_last: string[];
-      still_open: string[];
-    }>(res, CHECK_TOOL.name);
+      },
+      CHECK_TOOL,
+      `Respond only by calling the ${CHECK_TOOL.name} tool.`
+    );
 
     return {
       lines: out.lines ?? [],
