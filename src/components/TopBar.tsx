@@ -36,6 +36,9 @@ type Props = {
   onToggleQuestion: () => void;
   checking: boolean;
   onCheck: () => void;
+  /** 'saved' on disk, 'dirty' waiting for the autosave, 'blocked' could not be saved */
+  saveStatus: 'saved' | 'dirty' | 'blocked';
+  onSaveTap: () => void;
   insetTop: number;
   insetLeft: number;
   insetRight: number;
@@ -62,6 +65,11 @@ export function TopBar(p: Props) {
           <Text style={styles.title} numberOfLines={1}>
             {p.title}
           </Text>
+          <Pressable onPress={p.onSaveTap} hitSlop={8} accessibilityLabel="Save status">
+            <Text style={[styles.save, p.saveStatus === 'blocked' && styles.saveBad]}>
+              {p.saveStatus === 'saved' ? '✓ Saved' : p.saveStatus === 'dirty' ? 'Saving…' : '⚠ Not saved'}
+            </Text>
+          </Pressable>
           <Pressable onPress={p.onPrevPage} disabled={atFirst} hitSlop={8} style={styles.page}>
             <Text style={[styles.pageArrow, atFirst && styles.dim]}>‹</Text>
           </Pressable>
@@ -76,6 +84,11 @@ export function TopBar(p: Props) {
           </Pressable>
         </View>
 
+        {!p.modern && (
+          <View style={styles.group}>
+            <Text style={styles.oldBuild}>Old app build: install the latest build for zoom, rotation and the new tools</Text>
+          </View>
+        )}
         {p.modern && (
           <View style={styles.group}>
             {TOOLS.map((t) => (
@@ -177,6 +190,9 @@ const styles = StyleSheet.create({
   row: { flexGrow: 1, alignItems: 'center', justifyContent: 'space-between', gap: 14 },
   group: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   title: { fontSize: 15, fontWeight: '700', color: C.ink, maxWidth: 200, marginHorizontal: 4 },
+  save: { fontSize: 12, color: C.faint, marginRight: 6 },
+  saveBad: { color: C.incorrect, fontWeight: '800' },
+  oldBuild: { fontSize: 12, color: C.partial, fontWeight: '700', maxWidth: 260 },
   page: { paddingHorizontal: 4 },
   pageArrow: { fontSize: 22, color: C.primary, fontWeight: '600' },
   pageText: { fontSize: 13, color: C.sub, fontVariant: ['tabular-nums'] },

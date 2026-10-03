@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Alert, AppState, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
@@ -20,6 +20,7 @@ import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings,
 import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { applyParse } from '../store/parseApply';
+import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { readSource } from '../store/sources';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -76,6 +77,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const hasKey = !!(settings.apiKey || ENV.anthropicApiKey);
   /** apiVersion >= 2: fixed page, zoom/pan, native tool spec. An older binary keeps the previous behavior. */
   const modern = nativeApiVersion >= 2;
+  React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} (2 = zoom, rotation, new tools)`), []);
   const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
   const prevToolRef = React.useRef<ToolKind>('pen');
@@ -116,15 +118,30 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- persistence -------------------------------------------------------
-  const savePage = React.useCallback(async () => {
+  // Never lose work: 'saved' = on disk, 'dirty' = changes waiting for the autosave, 'blocked' = this page's stored
+  // drawing never loaded into the canvas, so saving could overwrite it with a blank page (see src/store/saveGuard.ts).
+  const [saveState, setSaveState] = React.useState<'saved' | 'dirty' | 'blocked'>('saved');
+  const [loadFailed, setLoadFailed] = React.useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = React.useState(0);
+
+  /** Returns false when the page could NOT be saved (the caller must not silently leave). */
+  const savePage = React.useCallback(async (): Promise<boolean> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     const id = pageIdRef.current;
-    if (!id || !canvasRef.current || loadedPageRef.current !== id) return;
+    const c = canvasRef.current;
+    if (!id || !c) return true; // nothing on screen to save
+    if (!mayAutosave({ loadedPageId: loadedPageRef.current, pageId: id, savedDrawing: readPage(id) })) {
+      setSaveState('blocked');
+      return false;
+    }
     try {
-      writePage(id, await canvasRef.current.getDrawing());
+      writePage(id, await c.getDrawing());
+      setSaveState('saved');
+      return true;
     } catch (e) {
-      // the native view can be gone (screen closed or reloaded) by the time a timer fires
-      if (!String(e).includes('ViewNotFound')) throw e;
+      // the native view is gone (screen closed or reloaded) by the time a timer fires: nothing left to save from
+      if (isTransientViewError(e)) return true;
+      throw e;
     }
   }, []);
 
@@ -136,29 +153,38 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     []
   );
 
-  // Load the drawing whenever the page changes (and on first mount).
+  // Load the drawing whenever the page changes (and on first mount). The native canvas may not be reachable for a moment,
+  // so retry through that instead of giving up; only a real failure (e.g. an undecodable file) stops it.
   React.useEffect(() => {
     if (!pageId) return;
     let cancelled = false;
+    loadedPageRef.current = '';
+    setLoadFailed(null);
     (async () => {
-      const c = canvasRef.current;
-      if (!c) return;
-      loadedPageRef.current = '';
-      await c.setDrawing(readPage(pageId));
+      const saved = readPage(pageId);
+      await withViewRetry(
+        async () => {
+          const c = canvasRef.current;
+          if (!c) throw new Error('canvas not mounted yet');
+          await c.setDrawing(saved);
+        },
+        { isCancelled: () => cancelled }
+      );
       if (cancelled) return;
       loadedPageRef.current = pageId;
-      const strokes = await c.getStrokes();
-      if (!cancelled) setStrokeCount(strokes.length);
+      setSaveState('saved');
+      const strokes = await canvasRef.current?.getStrokes();
+      if (!cancelled && strokes) setStrokeCount(strokes.length);
     })().catch((e) => {
-      // A reload, page switch or unmount while the call was in flight leaves a dead native view tag: not a real failure.
       if (cancelled) return;
       console.warn('load page failed', e);
-      Alert.alert('Could not open this page', 'The saved drawing could not be read. It was left untouched and will not be overwritten.');
+      setLoadFailed(isTransientViewError(e) ? 'The drawing canvas did not become ready.' : 'The saved drawing could not be read. It was left untouched.');
+      setSaveState('blocked');
     });
     return () => {
       cancelled = true;
     };
-  }, [pageId]);
+  }, [pageId, loadNonce]);
 
   // Save when the app goes to the background (unmount is too late: the native view is gone).
   React.useEffect(() => {
@@ -171,11 +197,30 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const onDrawingChanged = React.useCallback(
     (e: { strokeCount: number }) => {
       setStrokeCount(e.strokeCount);
+      setSaveState((s) => (s === 'blocked' ? s : 'dirty'));
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => void savePage(), 1200);
+      saveTimer.current = setTimeout(() => void savePage().catch((err) => console.warn('autosave failed', err)), 800);
     },
     [savePage]
   );
+
+  /** Leave only when the page is safely on disk; otherwise tell the student instead of dropping their work. */
+  const saveOrWarn = React.useCallback(async (): Promise<boolean> => {
+    let ok = false;
+    try {
+      ok = await savePage();
+    } catch (e) {
+      console.warn('save failed', e);
+    }
+    if (!ok) {
+      Alert.alert(
+        'This page is not saved',
+        'The drawing did not finish loading, so changes on this page cannot be saved without risking what is already stored. Retry loading it, or stay here.',
+        [{ text: 'Retry loading', onPress: () => setLoadNonce((n) => n + 1) }, { text: 'Stay', style: 'cancel' }]
+      );
+    }
+    return ok;
+  }, [savePage]);
 
   // ---- capture -----------------------------------------------------------
   const capture = async (): Promise<{ lines: Line[]; image: ExportedImage | null; strokes: number }> => {
@@ -323,12 +368,12 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   const goToPage = async (index: number) => {
     if (index < 0 || index >= a.pageIds.length || index === pageIndex) return;
-    await savePage();
+    if (!(await saveOrWarn())) return;
     setPageIndex(index);
   };
 
   const addPage = async () => {
-    await savePage();
+    if (!(await saveOrWarn())) return;
     const updated = updateAssignment(a.id, (x) => ({ ...x, pageIds: [...x.pageIds, newId('p_')] }));
     if (updated) setPageIndex(updated.pageIds.length - 1);
   };
@@ -395,9 +440,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         pageIndex={pageIndex}
         pageCount={a.pageIds.length}
         onBack={async () => {
-          await savePage();
-          onBack();
+          if (await saveOrWarn()) onBack();
         }}
+        saveStatus={saveState}
+        onSaveTap={() => (saveState === 'blocked' ? setLoadNonce((n) => n + 1) : void saveOrWarn())}
         onPrevPage={() => goToPage(pageIndex - 1)}
         onNextPage={() => goToPage(pageIndex + 1)}
         onAddPage={addPage}
@@ -450,6 +496,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           <View pointerEvents="none" style={styles.staleTag}>
             <Text style={styles.staleText}>Marks from an older version · Check again</Text>
           </View>
+        )}
+        {loadFailed && (
+          <Pressable onPress={() => setLoadNonce((n) => n + 1)} style={styles.loadBanner}>
+            <Text style={styles.loadBannerText}>{loadFailed} Tap to retry. Nothing has been overwritten.</Text>
+          </Pressable>
         )}
         {!hasKey && (
           <View pointerEvents="none" style={styles.keyBanner}>
@@ -513,6 +564,8 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: -4, height: 0 },
   },
+  loadBanner: { position: 'absolute', top: 8, alignSelf: 'center', maxWidth: '90%', backgroundColor: C.incorrectSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, zIndex: 5 },
+  loadBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 13 },
   keyBanner: { position: 'absolute', top: 8, alignSelf: 'center', backgroundColor: C.incorrectSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   keyBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 12 },
   staleTag: { position: 'absolute', top: 8, left: 8, backgroundColor: C.partialSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
