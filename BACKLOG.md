@@ -32,7 +32,8 @@ Cost and speed:
 Tooling (no Mac):
 - [ ] **CLAUDE.md as single source**, imported from AGENTS.md (AGENTS.md currently says Expo Router, but the app uses a state router).
 - [ ] **Hooks (Node scripts)**: block edits to `ios/` and `android/`; print REBUILD NEEDED on native changes; Stop hook running typecheck and tests.
-- [ ] **GitHub remote + CI**: typecheck, tests, `expo-doctor`; optional macOS job (`expo prebuild`, `pod install`, unsigned `xcodebuild`) to compile-check Swift. Free on public repos, so decide on prompt visibility first.
+- [ ] **Fix the macOS Swift compile job** (`.github/workflows/ios-compile.yml`, currently experimental): fails resolving package dependencies in ExpoModulesJSI's script phase; try `xcodebuild -resolvePackageDependencies` first or build only the PencilCanvas pod target. (Repo is public: github.com/jranderson6364/penquire; CI checks job passes.)
+- [x] **GitHub remote + CI**: typecheck, tests, `expo-doctor`; optional macOS job (`expo prebuild`, `pod install`, unsigned `xcodebuild`) to compile-check Swift. Free on public repos, so decide on prompt visibility first.
 - [ ] **Install `expo-updates` with a fingerprint `runtimeVersion` policy** 🔨 native (bundle with the next rebuild), then EAS Workflows so JS-only changes ship OTA. Do not publish updates to a shared channel until the proxy exists.
 - [ ] `eas-build-pre-install` hook running typecheck so a TS error never burns one of the ~15 monthly builds.
 - [ ] Specs: lightweight `specs/<feature>.md` with a "native? Y/N" field and named acceptance tests.
