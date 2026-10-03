@@ -21,6 +21,7 @@ Blockers before any tester build:
 Accuracy (the product's core risk is a false ✓):
 - [ ] **Per-line `transcription` + legibility in `report_check`**; show it to the student; a "Misread" rating forces `?`. Most grading errors are transcription errors (arXiv 2605.19043, not tested on Claude).
 - [ ] **Golden eval set** (20-50 cases from feedback exports, grow to ~200). Code graders: false-valid rate (hard gate at 0) and answer leakage; run on Windows, nightly via Batch. Log cache hit counts.
+- [x] **Algebra guard v1** (JS, on-device): parser + sampling equivalence + step relations, downgrade-only, wired into every check. Next: hint-ladder leak guard reusing `checkStep` (block any hint that is a valid next step from the student's last line), fixtures file of real derivations, node script replaying exported feedback through the guard, units/vector support, `\text` stripping.
 - [ ] **Verifier pass**: blind second read with a cheaper model, a SymPy check that can only downgrade a verdict, a refute-every-✓ pass. Needs the backend.
 - [ ] **Answer-leak guards**: CAS check on hint contents, cross-family judge, templated fallback hint, adversarial-student suite. Consider a one-tap hint ladder (Khanmigo evidence); product decision.
 - [ ] Add `strict: true` to `report_check` / `report_problems` (needs `additionalProperties: false` throughout).

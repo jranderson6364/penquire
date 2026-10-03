@@ -16,7 +16,10 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
   const lowered = new Map<string, string>();
   let prev: LineVerdict | undefined;
   for (const cur of order) {
-    if (!isMath(cur)) continue;
+    if (!isMath(cur)) {
+      prev = undefined; // never bridge across a line we could not read
+      continue;
+    }
     if (cur.verdict === 'valid') {
       const chain = checkChain(cur.reading);
       if (chain?.kind === 'inconsistent') {
@@ -33,7 +36,7 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
   if (lowered.size === 0) return lines;
   return lines.map((l) =>
     lowered.has(l.id)
-      ? { ...l, verdict: 'partial', guard: 'algebra', note: `${l.note ? l.note.replace(/\s+$/, '') + ' ' : ''}${lowered.get(l.id)}` }
+      ? { ...l, verdict: 'partial', guard: 'algebra', modelVerdict: l.verdict, note: `${l.note ? l.note.replace(/\s+$/, '') + ' ' : ''}${lowered.get(l.id)}` }
       : l
   );
 }

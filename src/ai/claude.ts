@@ -19,12 +19,20 @@ type ContentBlock =
 
 type Message = { role: 'user' | 'assistant'; content: string | ContentBlock[] };
 
+/**
+ * Thinking can't be disabled on current models and its tokens count toward max_tokens, so a full-page vision
+ * grade needs headroom (4000 truncated before the tool call). Effort trades thoroughness for speed; tune with evals.
+ */
+const MAX_TOKENS = 16000;
+const CHECK_EFFORT = 'medium';
+
 type Tool = { name: string; description: string; input_schema: Record<string, unknown> };
 
 type ApiResponse = {
   content: Array<{ type: string; text?: string; name?: string; input?: unknown }>;
   model: string;
   stop_reason: string;
+  stop_details?: { category?: string | null; explanation?: string } | null;
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -47,7 +55,11 @@ const CHECK_TOOL: Tool = {
           properties: {
             id: { type: 'string', description: 'Line label from the gutter, e.g. "L4"' },
             part: { type: 'string', description: 'Problem part this line belongs to, e.g. "3.10c", if identifiable' },
-            reading: { type: 'string', description: 'How you read the line (LaTeX for math)' },
+            reading: {
+              type: 'string',
+              description:
+                'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose or units). Never correct, simplify or complete it.',
+            },
             verdict: {
               type: 'string',
               enum: ['valid', 'partial', 'incorrect', 'unreadable', 'context'],
@@ -160,6 +172,9 @@ export class ClaudeProvider implements TutorProvider {
     let last: ApiResponse | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
       last = await this.call(req);
+      // Retrying a truncated or refused request would fail identically; only retry a prose answer.
+      if (last.stop_reason === 'max_tokens') throw new Error('The answer was cut off before it finished. Try again, or check fewer lines at once.');
+      if (last.stop_reason === 'refusal') throw new Error(`The model declined this request${last.stop_details?.category ? ` (${last.stop_details.category})` : ''}.`);
       const block = last.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
       if (block?.input) return { res: last, out: block.input as T };
     }
@@ -193,7 +208,7 @@ export class ClaudeProvider implements TutorProvider {
       } Split into the smallest gradable parts (a, b, c...). Copy wording verbatim; math in LaTeX. For asks_for, list every distinct deliverable, especially bundled asks ("is it valid? if not, give a minimal fix") and required forms ("find the cosine of the angle").`,
     });
     const { out } = await this.callTool<{ course?: string; problems: Array<{ label: string; text: string; asks_for: string[] }> }>(
-      { model: this.opts.parseModel, max_tokens: 8000, messages: [{ role: 'user', content }] },
+      { model: this.opts.parseModel, max_tokens: MAX_TOKENS, output_config: { effort: 'low' }, messages: [{ role: 'user', content }] },
       PARSE_TOOL,
       `Respond only by calling the ${PARSE_TOOL.name} tool.`
     );
@@ -221,7 +236,8 @@ export class ClaudeProvider implements TutorProvider {
     }>(
       {
       model: this.opts.checkModel,
-      max_tokens: 4000,
+      max_tokens: MAX_TOKENS,
+      output_config: { effort: CHECK_EFFORT },
       system: this.system(),
       messages: [
         {

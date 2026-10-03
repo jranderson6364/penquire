@@ -28,6 +28,8 @@ export function normalize(src: string): string {
   s = s.replace(/\\cdot|\\times|[×·⋅]/g, '*').replace(/[−–—]/g, '-').replace(/÷/g, '/');
   s = s.replace(/\\pi|π/g, ' pi ').replace(/\\(sin|cos|tan|exp|ln|log|arcsin|arccos|arctan|sinh|cosh|tanh)/g, ' $1 ');
   s = s.replace(/arcsin/g, 'asin').replace(/arccos/g, 'acos').replace(/arctan/g, 'atan');
+  const GREEK: Record<string, string> = { alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', nu: 'ν', rho: 'ρ', sigma: 'σ', tau: 'τ', phi: 'φ', omega: 'ω', Delta: 'Δ', Omega: 'Ω', Sigma: 'Σ', Gamma: 'Γ', Phi: 'Φ' };
+  s = s.replace(/\\(alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|rho|sigma|tau|phi|omega|Delta|Omega|Sigma|Gamma|Phi)(?![A-Za-z])/g, (_m, n: string) => ' ' + GREEK[n] + ' ');
   s = s.replace(/²/g, '^2').replace(/³/g, '^3').replace(/√\s*\(/g, 'sqrt(');
   // \frac{a}{b} and \sqrt{a}, repeatedly (handles nesting from the inside out)
   for (let i = 0; i < 12; i++) {
@@ -56,6 +58,11 @@ function tokenize(s: string): Tok[] | string {
       const m = /^(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(s.slice(i));
       if (!m) return `bad number at ${i}`;
       out.push({ k: 'num', s: m[0], v: Number(m[0]) });
+      i += m[0].length;
+    } else if (/[Ͱ-Ͽ]/.test(c)) {
+      // a Greek letter is one quantity (optionally subscripted); "Δx" is one quantity too
+      const m = c === 'Δ' ? /^Δ[A-Za-z]?(_[A-Za-z0-9]+)?/.exec(s.slice(i))! : /^.(_[A-Za-z0-9]+)?/.exec(s.slice(i))!;
+      out.push({ k: 'id', s: m[0] });
       i += m[0].length;
     } else if (/[A-Za-z]/.test(c)) {
       // a word: known function/constant, or letters (implicit product of single-letter variables), with _subscript
@@ -274,13 +281,29 @@ function mulberry32(seed: number) {
 
 const SAMPLES = 40;
 const MIN_VALID = 8;
-const close = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
+const close = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol * Math.max(Math.abs(a), Math.abs(b)) + 1e-12;
 
 /** Deterministic sample points over positive reals (physics quantities), so results are reproducible. */
 function points(vars: string[]): Array<Record<string, number>> {
   const rnd = mulberry32(0x9e3779b9);
   return Array.from({ length: SAMPLES }, () => Object.fromEntries(vars.map((v) => [v, 0.35 + rnd() * 2.9])));
 }
+
+/**
+ * Students write rounded values with "=". Allow the precision they wrote: half a unit in the last digit
+ * of each decimal literal (relative), times a safety factor for error growth through powers. Looser means
+ * fewer flags, so this errs toward silence. Capped at 5%.
+ */
+export function roundingTol(src: string, base = 1e-9): number {
+  let rel = 0;
+  for (const m of src.matchAll(/(\d*)\.(\d+)/g)) {
+    const v = Math.abs(Number(m[0]));
+    if (v > 0) rel = Math.max(rel, (0.5 * Math.pow(10, -m[2].length)) / v);
+  }
+  return Math.min(0.05, Math.max(base, rel * 4));
+}
+
+const sameVars = (a: Node, b: Node) => variablesOf(a).join(',') === variablesOf(b).join(',');
 
 export type Equiv = 'equivalent' | 'different' | 'inconclusive';
 
@@ -350,13 +373,21 @@ export function checkChain(src: string): StepRelation | null {
     if (!p.ok) return { kind: 'unparsed', detail: p.reason };
     asts.push(p.ast);
   }
+  const tol = Math.max(roundingTol(src), /\\approx|≈/.test(src) ? 2e-2 : 0);
+  let skipped = 0;
   for (let i = 0; i + 1 < asts.length; i++) {
-    // approximate ("≈") chains would need a loose tolerance; only exact chains are judged
-    if (/\\approx|≈/.test(src)) return { kind: 'unrelated', detail: 'approximate chain not judged' };
-    const r = exprEquivalent(asts[i], asts[i + 1]);
+    // F = ma = (2)(9.8) = 19.6 : links that substitute numbers for variables are not identities
+    if (!sameVars(asts[i], asts[i + 1])) {
+      skipped++;
+      continue;
+    }
+    const r = exprEquivalent(asts[i], asts[i + 1], tol);
     if (r === 'different') return { kind: 'inconsistent', detail: `link ${i + 1} of the chain is not an identity` };
+    if (r === 'inconclusive') skipped++;
   }
-  return { kind: 'equivalent', detail: 'every link of the chain is an identity' };
+  return skipped
+    ? { kind: 'unrelated', detail: `${skipped} link(s) not judged` }
+    : { kind: 'equivalent', detail: 'every link of the chain is an identity' };
 }
 
 /** Does the step prev -> next follow by simple algebra? Conservative: 'unrelated' is not an accusation. */
@@ -367,9 +398,11 @@ export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
     return { kind: 'unparsed', detail: typeof prev === 'string' ? `prev: ${prev}` : `next: ${next as string}` };
   }
   const loose = /\\approx|≈/.test(prevSrc + nextSrc);
-  const tol = loose ? 2e-2 : 1e-9;
+  const tol = Math.max(roundingTol(prevSrc + ' ' + nextSrc), loose ? 2e-2 : 0);
 
   if (prev.expr && next.expr) {
+    // substituting numbers for variables (ma -> (2)(9.8)) is a normal step, not a comparison of functions
+    if (!sameVars(prev.expr, next.expr)) return { kind: 'unrelated', detail: 'different quantities' };
     const r = exprEquivalent(prev.expr, next.expr, tol);
     if (r === 'equivalent') return { kind: 'equivalent', detail: 'same expression' };
     if (r === 'different') return { kind: 'inconsistent', detail: 'expression changed value' };
@@ -414,6 +447,12 @@ export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
   if (solved && variablesOf(r1).includes(solved.name)) {
     const sub = substitute(r1, solved.name, solved.rhs);
     const rest = variablesOf(sub);
+    // Judge only a claimed rearrangement (rhs built from the previous line's other variables) or a full
+    // numeric answer. "v = 6" after "v = v_0 + a t" leaves unknowns free: that is a substitution, not a claim.
+    const otherVars = variablesOf(r1).filter((x) => x !== solved.name);
+    const rhsVars = variablesOf(solved.rhs);
+    const judgeable = rest.length === 0 || (rhsVars.length > 0 && rhsVars.every((x) => otherVars.includes(x)));
+    if (!judgeable) return { kind: 'unrelated', detail: 'substitution leaves unknowns free' };
     let ok = 0;
     let bad = 0;
     for (const env of points(rest)) {
@@ -421,10 +460,9 @@ export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
       if (!Number.isFinite(v)) continue;
       const scale = Math.max(
         Math.abs(evaluate(substitute(prev.eq[0], solved.name, solved.rhs), env)),
-        Math.abs(evaluate(substitute(prev.eq[1], solved.name, solved.rhs), env)),
-        1
+        Math.abs(evaluate(substitute(prev.eq[1], solved.name, solved.rhs), env))
       );
-      if (Math.abs(v) <= tol * scale + (loose ? 0 : 1e-9)) ok++;
+      if (Math.abs(v) <= tol * scale + 1e-12) ok++;
       else bad++;
     }
     if (ok >= MIN_VALID && bad === 0) return { kind: 'solution', detail: `${solved.name} satisfies the previous equation` };
@@ -439,7 +477,7 @@ export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
       const holds = roots.filter((x) => {
         const val = evaluate(r2, { [v]: x });
         const scale = Math.max(Math.abs(evaluate(next.eq![0], { [v]: x })), Math.abs(evaluate(next.eq![1], { [v]: x })), 1);
-        return Number.isFinite(val) && Math.abs(val) <= (loose ? 5e-2 : 1e-6) * scale;
+        return Number.isFinite(val) && Math.abs(val) <= Math.max(tol, 1e-6) * scale;
       });
       if (holds.length === roots.length) return { kind: 'implied', detail: 'every solution of the previous line satisfies this line' };
       if (holds.length === 0) return { kind: 'inconsistent', detail: 'no solution of the previous line satisfies this line' };

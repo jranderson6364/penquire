@@ -19,6 +19,8 @@ export type LineVerdict = {
   note: string; // one clause: why / what to look at (never the fix)
   /** set when a deterministic guard (not the model) lowered this verdict */
   guard?: 'algebra';
+  /** the model's own verdict before a guard lowered it (for evals: model error vs guard error) */
+  modelVerdict?: Verdict;
 };
 
 export type PartStatus = {

@@ -49,6 +49,8 @@ src/store/evalRecords.ts        pure accuracy-feedback records + export builder 
 src/store/evals.ts              disk layer: penquire/evals/feedback.json, check images, JSON export
 src/screens/WorkspaceScreen.tsx canvas + MarksOverlay + SidePanel; check/send/reparse/autosave
 src/components/                 MarksOverlay, SidePanel (Feedback|Chat|Problems|Log), HelpLevelPicker
+src/verify/expr.ts            deterministic math checker (parser, sampling equivalence, step relations); no deps
+src/verify/guard.ts           downgrade-only algebra guard on check results; wired in src/ai/index.ts (guarded())
 src/log.ts                      deterministic AI-use disclosure from the event log
 ```
 
@@ -76,6 +78,11 @@ Accuracy and pedagogy (the product's core risk):
 - Hint ladder (user decision): one-tap escalation within `HELP_LEVELS` and the course policy ceiling. Pure questioning loses users (Khanmigo); unguarded answers hurt learning (Bastani PNAS). Never exceed `policyMaxLevel`.
 - Answer-leak guards for any hint text: CAS check on contents, cross-family judge, templated fallback hint, adversarial-student suite in CI. Keyword filters alone miss adversarial leaks.
 - Evals run on Windows: seed from feedback exports (`src/store/evals.ts`), code graders for false-valid rate (hard gate 0) and leakage, score with pass^k, log cache hits.
+
+Algebra guard rules (src/verify, keep these invariants; tests in physics.test.ts are the false-downgrade gate):
+- Only ever LOWERS a verdict (valid -> partial), never raises; stores `modelVerdict`. Unreadable/unparsed/prose lines and lines after an unreadable line are skipped.
+- Substituting numbers for variables is a normal step: judge a step only when it is a rearrangement (same variables) or a full numeric answer. Tolerance comes from the decimals written (`roundingTol`), so rounded answers written with "=" pass.
+- LaTeX in tests/strings: write it with the Write/Edit tools, not shell heredocs (the shell eats backslashes).
 
 Claude API (verify with the `claude-api` skill before changing `src/ai/claude.ts`):
 - Forced `tool_choice` (`any`/`tool`) is a 400 on Sonnet 5.5, Opus 5.5, Fable 5.1: use `auto` + explicit instruction + retry (`callTool`). Adding `strict: true` needs `additionalProperties: false` in every schema.

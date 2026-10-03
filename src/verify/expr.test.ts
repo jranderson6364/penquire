@@ -104,7 +104,7 @@ test('approximate values use a loose tolerance', () => {
 });
 
 test('chains', () => {
-  assert.equal(checkChain('(x+1)^2 = x^2+2x+1 = 25')?.kind ?? 'none', 'inconsistent');
+  assert.equal(checkChain('(x+1)^2 = x^2+2x+1 = 25')?.kind, 'unrelated'); // value substitution is not judged
   assert.equal(checkChain('(x+1)^2 = x^2+2x+1')?.kind ?? 'none', 'none');
   assert.equal(checkChain('(x+1)(x-1) = x^2 - 1 = x^2-1')?.kind, 'equivalent');
   assert.equal(checkChain('(x+1)^2 = x^2+1 = 2')?.kind, 'inconsistent');
