@@ -1,0 +1,37 @@
+# Compile-checks the Swift module (PencilCanvas) for free on a macOS runner, so Swift errors
+# don't cost an EAS build. Unsigned simulator build; nothing is uploaded.
+name: iOS compile check
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/**'
+      - 'package.json'
+      - 'app.json'
+      - '.github/workflows/ios-compile.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate native project (not committed)
+        run: npx expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: ios
+        run: pod install
+      - name: Build for simulator (unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -workspace Penquire.xcworkspace -scheme Penquire \
+            -sdk iphonesimulator -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 200
+          exit ${PIPESTATUS[0]}
