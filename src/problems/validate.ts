@@ -6,11 +6,12 @@ import type { ParseIssue, ProblemGroup } from './types.ts';
 export function squash(s: string): string {
   return asciiScripts(latexToUnicode(s))
     .replace(/[_^]/g, '')
-    .normalize('NFD')
+    .normalize('NFKD')
     .replace(/[̀-ͯ⃗]/g, '')
     .toLowerCase()
     .replace(/[‘’“”]/g, "'")
     .replace(/−/g, '-')
+    .replace(/[ℝℕℤℚℂℙℍ]/g, (c) => 'rnzqcph'['ℝℕℤℚℂℙℍ'.indexOf(c)])
     .replace(/[\s.,;:!?'"`]+/g, '');
 }
 

@@ -5,5 +5,5 @@
 export const ENV = {
   anthropicApiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '',
   checkModel: process.env.EXPO_PUBLIC_CHECK_MODEL || 'claude-sonnet-5-5',
-  parseModel: process.env.EXPO_PUBLIC_PARSE_MODEL || 'claude-sonnet-5-5',
+  parseModel: process.env.EXPO_PUBLIC_PARSE_MODEL || 'claude-opus-5-5',
 };

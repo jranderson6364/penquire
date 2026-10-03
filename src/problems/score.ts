@@ -59,7 +59,7 @@ const norm = (s: string) => squash(s);
 /** Words of 5+ letters in `text`, after removing markup and [Figure: ...] descriptions (those are the model's own words). */
 export function contentWords(text: string): string[] {
   const plain = latexToUnicode(text.replace(/\[figure[^\]]*\]/gi, ' '))
-    .normalize('NFD')
+    .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
   return plain.match(/[a-z]{5,}/g) ?? [];

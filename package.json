@@ -11,6 +11,7 @@
     "build:preview": "eas build --profile preview --platform ios"
   },
   "dependencies": {
+    "@cantoo/pdf-lib": "^2.11.1",
     "expo": "~57.0.26",
     "expo-dev-client": "~57.0.19",
     "expo-file-system": "~57.0.7",

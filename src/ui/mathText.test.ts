@@ -80,6 +80,15 @@ test('an operator directly before a vector command does not glue to the vector l
   assert.ok(!t('\\pm\\hat{k}').includes('\\'));
 });
 
+test('matrices and column vectors render readably', () => {
+  assert.equal(t('\\begin{bmatrix} -4 \\\\ 2+2t_1 \\\\ 7+3t_1 \\end{bmatrix}'), '[-4; 2+2t₁; 7+3t₁]');
+  assert.equal(t('\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}'), '[1, 2; 3, 4]');
+  assert.equal(t('\\begin{pmatrix} a \\\\ b \\end{pmatrix}'), '(a; b)');
+  assert.equal(t('\\begin{vmatrix} 1 & 2 \\\\ 3 & 4 \\end{vmatrix}'), '|1, 2; 3, 4|');
+  assert.equal(t('\\begin{bmatrix} 1 \\\\ 2 \\end{bmatrix} + t\\begin{bmatrix} 0 \\\\ 1 \\end{bmatrix}'), '[1; 2] + t[0; 1]');
+  assert.equal(t('\\vec{p} = \\begin{bmatrix} x_1 \\\\ x_2 \\end{bmatrix}'), 'p⃗ = [x₁; x₂]');
+});
+
 test('degrees: ^\\circ is the degree sign', () => {
   assert.equal(t('30^\\circ\\text{-}60^{\\circ}'), '30°-60°');
   assert.equal(t('45^\\circ'), '45°');

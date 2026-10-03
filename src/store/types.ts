@@ -1,6 +1,7 @@
 import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Ladder } from '../tutor/ladder';
+import type { ParseIssue, ProblemGroup } from '../problems/types';
 import type { UsageRecord } from './usageRecords';
 
 export type StoredCheck = {
@@ -32,7 +33,18 @@ export type Assignment = {
   policyMaxLevel: HelpLevel;
   helpLevel: HelpLevel;
   style: string;
+  /** flat per-part problems (labels like "6a") used by the tutor, part picker and snapshots */
   problems: Problem[];
+  /** structured problems (setup once, parts, sub-parts, hints, closing); absent on assignments parsed before this existed */
+  groups?: ProblemGroup[];
+  /** assignment-level text that is not a problem (reading, logistics, policies) */
+  notes?: string[];
+  /** what the validator still flagged after the repair pass */
+  parseIssues?: ParseIssue[];
+  /** page range of the source PDF that was parsed, e.g. "80-82" (large PDFs are sliced) */
+  sourcePages?: string;
+  /** the "only these problems" filter used when parsing, e.g. "3.8, 3.10, 3.12" */
+  sourceOnly?: string;
   pageIds: string[];
   chat: ChatTurn[];
   /** latest check per page id */

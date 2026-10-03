@@ -107,6 +107,15 @@ export function latexToUnicode(input: string): string {
   // math delimiters and layout commands
   s = s.replace(/\$\$|\$|\\\(|\\\)|\\\[|\\\]/g, '');
   s = s.replace(/\\(left|right|big|Big|bigg|Bigg)(?![A-Za-z])\s*/g, '');
+  // matrices before row breaks (\\) are turned into newlines: [1, 2; 3, 4], a column is [a; b; c]
+  s = s.replace(/\\begin\{([bBpvV]?)matrix\*?\}([\s\S]*?)\\end\{\1matrix\*?\}/g, (_m, kind: string, body: string) => {
+    const rows = body
+      .split(/\\\\/)
+      .map((r) => r.split('&').map((c) => latexToUnicode(c.trim())).join(', '))
+      .filter((r) => r.trim() !== '');
+    const inner = rows.join('; ');
+    return kind === 'p' ? `(${inner})` : kind === 'v' ? `|${inner}|` : kind === 'V' ? `‖${inner}‖` : `[${inner}]`;
+  });
   s = s.replace(/\\(quad|qquad)(?![A-Za-z])/g, '  ').replace(/\\[,;:! ]/g, ' ').replace(/\\\\/g, '\n');
 
   // Degrees: 30^\circ and 30^{\circ} are the degree sign, not a superscript.

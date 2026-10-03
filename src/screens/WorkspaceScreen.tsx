@@ -18,6 +18,7 @@ import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type Too
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
+import { applyParse } from '../store/parseApply';
 import { readSource } from '../store/sources';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -297,13 +298,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     }
     setReparsing(true);
     try {
-      const parsed = await providerFromSettings().parseAssignment({ title: a.title, pdfBase64: pdf });
-      updateAssignment(a.id, (x) => ({
-        ...x,
-        problems: parsed.problems,
-        course: x.course || parsed.course || '',
-        events: [...x.events, { t: Date.now(), type: 'parse', detail: `${parsed.problems.length} parts` }],
-      }));
+      const parsed = await providerFromSettings().parseAssignment({ title: a.title, pdfBase64: pdf, onlyProblems: a.sourceOnly });
+      updateAssignment(a.id, (x) => applyParse(x, parsed));
+      setActivePart(undefined);
     } catch (e) {
       Alert.alert('Parsing failed', String(e instanceof Error ? e.message : e));
     } finally {

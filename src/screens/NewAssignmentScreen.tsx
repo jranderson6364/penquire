@@ -7,7 +7,9 @@ import { getProvider } from '../ai';
 import { HELP_LEVELS } from '../ai/prompts';
 import type { HelpLevel } from '../ai/types';
 import { Button } from '../components/Button';
-import { getSettings, newId, saveAssignment } from '../store/db';
+import { MAX_SLICE_PAGES, MAX_WHOLE_PDF_PAGES, parsePageRange, pdfPageCount, slicePdf } from '../pdf/pages';
+import { getSettings, newId, recordUsage, saveAssignment } from '../store/db';
+import { applyParse } from '../store/parseApply';
 import { saveSource } from '../store/sources';
 import type { Assignment } from '../store/types';
 import { C } from '../theme';
@@ -25,23 +27,57 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
   const [maxLevel, setMaxLevel] = React.useState<HelpLevel>(2);
   const [only, setOnly] = React.useState('');
   const [pasted, setPasted] = React.useState('');
-  const [pdf, setPdf] = React.useState<{ name: string; base64: string } | null>(null);
+  const [pdf, setPdf] = React.useState<{ name: string; base64: string; pageCount?: number } | null>(null);
+  const [pages, setPages] = React.useState('');
+  const [reading, setReading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+
+  const needsRange = !!pdf?.pageCount && pdf.pageCount > MAX_WHOLE_PDF_PAGES;
 
   const pickPdf = async () => {
     try {
       const res = await File.pickFileAsync({ mimeTypes: 'application/pdf' });
       if (res.canceled) return;
       const file = res.result;
+      setReading(true);
       const base64 = await file.base64();
-      setPdf({ name: file.name, base64 });
+      let pageCount: number | undefined;
+      try {
+        pageCount = await pdfPageCount(base64);
+      } catch (e) {
+        console.warn('could not count PDF pages', e);
+      }
+      setPdf({ name: file.name, base64, pageCount });
+      setPages('');
       if (!title) setTitle(file.name.replace(/\.pdf$/i, ''));
     } catch (e) {
       Alert.alert('Could not open PDF', String(e));
+    } finally {
+      setReading(false);
     }
   };
 
   const create = async () => {
+    // Large PDFs (a whole textbook) are never sent whole: slice out the pages that hold the problems.
+    let source = pdf?.base64;
+    let pagesUsed = '';
+    if (pdf && (needsRange || pages.trim())) {
+      const range = parsePageRange(pages, pdf.pageCount);
+      if (!range.pages) {
+        Alert.alert(needsRange ? `This PDF has ${pdf.pageCount} pages` : 'Check the page range', range.error ?? 'Enter a page range like 80-82.');
+        return;
+      }
+      try {
+        setBusy(true);
+        source = await slicePdf(pdf.base64, range.pages);
+        pagesUsed = pages.trim();
+      } catch (e) {
+        setBusy(false);
+        Alert.alert('Could not read those pages', String(e instanceof Error ? e.message : e));
+        return;
+      }
+    }
+
     setBusy(true);
     const s = getSettings();
     const now = Date.now();
@@ -62,38 +98,28 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
       updatedAt: now,
     };
     try {
-      if (pdf || pasted.trim()) {
-        const provider = getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel });
-        const parsed = await provider.parseAssignment({
-          title: a.title,
-          pdfBase64: pdf?.base64,
-          text: pasted,
-          onlyProblems: only,
-        });
-        a = {
-          ...a,
-          problems: parsed.problems,
-          course: a.course || parsed.course || '',
-          events: [{ t: Date.now(), type: 'parse', detail: `${parsed.problems.length} parts` }],
-        };
+      if (source || pasted.trim()) {
+        const provider = getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel, onUsage: recordUsage });
+        const parsed = await provider.parseAssignment({ title: a.title, pdfBase64: source, text: pasted, onlyProblems: only });
+        a = applyParse(a, parsed, { pages: pagesUsed, only: only.trim() });
       }
     } catch (e) {
       Alert.alert('Parsing failed', `${String(e)}\n\nThe assignment was created without problem text; you can retry from the Problems tab.`);
     }
     saveAssignment(a);
-    // Keep the PDF so parsing can be retried without re-picking it.
-    if (pdf) saveSource(a.id, pdf.base64);
+    // Keep the (sliced) PDF so parsing can be retried without re-picking it.
+    if (source) saveSource(a.id, source);
     setBusy(false);
     onCreated(a.id);
   };
 
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView contentContainerStyle={[styles.root, { paddingTop: insets.top + 12 }]}>
+      <ScrollView contentContainerStyle={[styles.root, { paddingTop: insets.top + 12 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Button title="Cancel" kind="ghost" onPress={onCancel} />
           <Text style={styles.title}>New assignment</Text>
-          <Button title="Create" kind="primary" onPress={create} loading={busy} />
+          <Button title={busy ? 'Reading…' : 'Create'} kind="primary" onPress={create} loading={busy} disabled={reading} />
         </View>
 
         <Field label="Title">
@@ -103,12 +129,36 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
           <TextInput style={styles.input} value={course} onChangeText={setCourse} placeholder="PHYSICS 61" />
         </Field>
 
-        <Field label="Assignment PDF" hint="The pset itself, or textbook pages. The tutor reads the exact wording.">
+        <Field label="Assignment PDF" hint="The pset itself, or a textbook. The tutor reads the exact wording, including figures.">
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Button title={pdf ? 'Change PDF' : 'Choose PDF'} onPress={pickPdf} />
-            <Text style={styles.hint}>{pdf ? pdf.name : 'None selected'}</Text>
+            <Button title={pdf ? 'Change PDF' : 'Choose PDF'} onPress={pickPdf} loading={reading} />
+            <Text style={styles.hint}>
+              {pdf ? `${pdf.name}${pdf.pageCount ? ` · ${pdf.pageCount} pages` : ''}` : 'None selected'}
+            </Text>
           </View>
         </Field>
+
+        {pdf?.pageCount ? (
+          <Field
+            label={needsRange ? 'Pages that contain your problems (required)' : 'Only these pages (optional)'}
+            hint={
+              needsRange
+                ? `This PDF has ${pdf.pageCount} pages, too many to read at once. Use the PDF page numbers (the Nth page of the file), up to ${MAX_SLICE_PAGES} pages, e.g. 80-82.`
+                : 'Leave empty to read the whole document.'
+            }
+          >
+            <TextInput
+              style={[styles.input, needsRange && !pages.trim() && styles.inputWarn]}
+              value={pages}
+              onChangeText={setPages}
+              placeholder="80-82"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
+          </Field>
+        ) : null}
+
         <Field label="Only these problems (optional)" hint="Useful for textbook chapters, e.g. 3.8, 3.10, 3.12">
           <TextInput style={styles.input} value={only} onChangeText={setOnly} placeholder="3.8, 3.10, 3.12" />
         </Field>
@@ -162,6 +212,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
   },
+  inputWarn: { borderColor: C.partial, borderWidth: 1.5 },
   multi: { minHeight: 90, textAlignVertical: 'top' },
   level: { padding: 10, borderRadius: 10, backgroundColor: C.card, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   levelActive: { borderColor: C.primary, backgroundColor: C.primarySoft },
