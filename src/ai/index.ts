@@ -1,6 +1,6 @@
 import { ENV } from '../config';
 import { ClaudeProvider } from './claude';
-import { applyAlgebraGuard } from '../verify/guard';
+import { applyAlgebraGuard, applyLeakGuard } from '../verify/guard';
 import type { TutorProvider } from './types';
 
 export type ProviderSettings = { provider: 'anthropic'; apiKey?: string; checkModel?: string; parseModel?: string };
@@ -23,7 +23,7 @@ export function guarded(inner: TutorProvider): TutorProvider {
     reply: (i) => inner.reply(i),
     check: async (i) => {
       const r = await inner.check(i);
-      return { ...r, lines: applyAlgebraGuard(r.lines) };
+      return applyLeakGuard({ ...r, lines: applyAlgebraGuard(r.lines) }, i.helpLevel);
     },
   };
 }

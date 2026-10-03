@@ -1,4 +1,5 @@
-import type { LineVerdict } from '../ai/types';
+import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
+import { fallbackQuestion, scrubText, type Leak, type LeakContext } from './leak.ts';
 import { checkChain, checkStep } from './expr.ts';
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
@@ -39,4 +40,31 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
       ? { ...l, verdict: 'partial', guard: 'algebra', modelVerdict: l.verdict, note: `${l.note ? l.note.replace(/\s+$/, '') + ' ' : ''}${lowered.get(l.id)}` }
       : l
   );
+}
+
+/**
+ * Withhold answer leaks from every piece of tutor text in a check result. A removed question is replaced
+ * by a content-free one that mentions only line IDs. The result records what was blocked.
+ */
+export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
+  const ctx: LeakContext = { level, lines: r.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })) };
+  const blocked: Leak[] = [];
+  const clean = (t: string) => {
+    const s = scrubText(t, ctx);
+    blocked.push(...s.leaks);
+    return s.text;
+  };
+  const lines = r.lines.map((l) => {
+    const note = clean(l.note);
+    return note === l.note ? l : { ...l, note: note || 'Look at this line again.' };
+  });
+  const feedback = clean(r.feedback);
+  let question = clean(r.question);
+  if (!question && r.question.trim()) {
+    const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
+    const idx = ordered.findIndex((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+    question = fallbackQuestion(level, idx >= 0 ? ordered[idx].id : undefined, idx > 0 ? ordered[idx - 1].id : undefined);
+  }
+  if (blocked.length === 0) return r;
+  return { ...r, lines, feedback, question, leaksBlocked: blocked.map((b) => ({ fragment: b.fragment, why: b.why })) };
 }

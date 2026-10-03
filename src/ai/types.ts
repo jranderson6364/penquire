@@ -39,6 +39,8 @@ export type CheckResult = {
   /** exactly one guiding question */
   question: string;
   fixedSinceLast: string[];
+  /** formulas withheld from the text by the leak guard (for evals / transparency) */
+  leaksBlocked?: { fragment: string; why: string }[];
   stillOpen: string[];
   model: string;
   usage?: Usage;

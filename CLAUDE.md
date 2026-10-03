@@ -50,6 +50,8 @@ src/store/evals.ts              disk layer: penquire/evals/feedback.json, check 
 src/screens/WorkspaceScreen.tsx canvas + MarksOverlay + SidePanel; check/send/reparse/autosave
 src/components/                 MarksOverlay, SidePanel (Feedback|Chat|Problems|Log), HelpLevelPicker
 src/verify/expr.ts            deterministic math checker (parser, sampling equivalence, step relations); no deps
+src/verify/leak.ts             answer-leak detector: judges the MATH in hint text with the checker (not keywords)
+src/tutor/ladder.ts           per-issue hint rungs, clamped to policy in code, pruned when fixed
 src/verify/guard.ts           downgrade-only algebra guard on check results; wired in src/ai/index.ts (guarded())
 src/log.ts                      deterministic AI-use disclosure from the event log
 ```
@@ -83,6 +85,8 @@ Algebra guard rules (src/verify, keep these invariants; tests in physics.test.ts
 - Only ever LOWERS a verdict (valid -> partial), never raises; stores `modelVerdict`. Unreadable/unparsed/prose lines and lines after an unreadable line are skipped.
 - Substituting numbers for variables is a normal step: judge a step only when it is a rearrangement (same variables) or a full numeric answer. Tolerance comes from the decimals written (`roundingTol`), so rounded answers written with "=" pass.
 - LaTeX in tests/strings: write it with the Write/Edit tools, not shell heredocs (the shell eats backslashes).
+
+Leak guard rules (src/verify/leak.ts): levels 0-3 withhold the corrected step, solved forms and final answers; level 4 may explain one step but a final numeric answer is withheld at EVERY level. Quoting the student's own line, and math unrelated to their work (analogous examples, named laws), is allowed. Normal-tutoring sentences in leak.physics.test.ts must never be withheld. Run on question, feedback and line notes in guarded(); chat replies are not covered yet.
 
 Claude API (verify with the `claude-api` skill before changing `src/ai/claude.ts`):
 - Forced `tool_choice` (`any`/`tool`) is a 400 on Sonnet 5.5, Opus 5.5, Fable 5.1: use `auto` + explicit instruction + retry (`callTool`). Adding `strict: true` needs `additionalProperties: false` in every schema.
