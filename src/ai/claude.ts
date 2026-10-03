@@ -1,4 +1,5 @@
 import { TUTOR_RULES, contextBlock, levelBlock } from './prompts';
+import { sanitizeCheck } from './sanitize';
 import type {
   CheckInput,
   CheckResult,
@@ -265,16 +266,7 @@ Check my work. Label every line, report part status (including parts the page sh
       `Respond only by calling the ${CHECK_TOOL.name} tool.`
     );
 
-    return {
-      lines: out.lines ?? [],
-      parts: out.parts ?? [],
-      feedback: out.feedback ?? '',
-      question: out.question ?? '',
-      fixedSinceLast: out.fixed_since_last ?? [],
-      stillOpen: out.still_open ?? [],
-      model: res.model,
-      usage: ClaudeProvider.usage(res),
-    };
+    return sanitizeCheck(out as unknown as Record<string, unknown>, res.model, ClaudeProvider.usage(res));
   }
 
   async reply(input: ReplyInput): Promise<string> {

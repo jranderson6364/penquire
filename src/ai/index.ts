@@ -20,10 +20,24 @@ export function guarded(inner: TutorProvider): TutorProvider {
   return {
     id: inner.id,
     parseAssignment: (i) => inner.parseAssignment(i),
-    reply: async (i) => applyReplyLeakGuard(await inner.reply(i), i.lines ?? [], i.helpLevel),
+    reply: async (i) => {
+      const text = await inner.reply(i);
+      try {
+        return applyReplyLeakGuard(text, i.lines ?? [], i.helpLevel);
+      } catch (e) {
+        console.warn('reply leak guard failed', e);
+        return text;
+      }
+    },
     check: async (i) => {
       const r = await inner.check(i);
-      return applyLeakGuard({ ...r, lines: applyAlgebraGuard(r.lines) }, i.helpLevel);
+      // A guard bug must never lose a check the student already paid for: fall back to the model's own result.
+      try {
+        return applyLeakGuard({ ...r, lines: applyAlgebraGuard(r.lines) }, i.helpLevel);
+      } catch (e) {
+        console.warn('verification guards failed; returning the unguarded check', e);
+        return r;
+      }
     },
   };
 }

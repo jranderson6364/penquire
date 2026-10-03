@@ -86,6 +86,8 @@ Algebra guard rules (src/verify, keep these invariants; tests in physics.test.ts
 - Substituting numbers for variables is a normal step: judge a step only when it is a rearrangement (same variables) or a full numeric answer. Tolerance comes from the decimals written (`roundingTol`), so rounded answers written with "=" pass.
 - LaTeX in tests/strings: write it with the Write/Edit tools, not shell heredocs (the shell eats backslashes).
 
+Untrusted model output: every check goes through `src/ai/sanitize.ts` (unknown/missing verdict -> "unreadable", never "valid"; bad/duplicate line IDs dropped) before guards or UI. Guards are wrapped in try/catch in guarded() and fall back to the model's own result, and `src/verify/fuzz.test.ts` (parser round-trip, garbage, hostile input, timing) must stay green. Parser input is capped at 400 chars.
+
 Leak guard rules (src/verify/leak.ts): levels 0-3 withhold the corrected step, solved forms and final answers; level 4 may explain one step but a final numeric answer is withheld at EVERY level. Quoting the student's own line, and math unrelated to their work (analogous examples, named laws), is allowed. Normal-tutoring sentences in leak.physics.test.ts must never be withheld. Runs on question, feedback, line notes AND chat replies (pass `lines` in ReplyInput) in guarded(). Hint ladder: "More help" on a mark escalates that issue's rung (Assignment.ladder), re-asks at that level via reply(), logs a reply event with detail "hint ladder"; pruned after each check by issue key (part + transcribed reading, so a re-transcription resets a rung).
 
 Claude API (verify with the `claude-api` skill before changing `src/ai/claude.ts`):

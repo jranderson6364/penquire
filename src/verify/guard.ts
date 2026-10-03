@@ -3,7 +3,9 @@ import { fallbackQuestion, scrubText, type Leak, type LeakContext } from './leak
 import { checkChain, checkStep } from './expr.ts';
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
-const isMath = (v: LineVerdict) => v.verdict !== 'context' && v.verdict !== 'unreadable' && v.reading.trim() !== '';
+/** Tolerate a malformed transcription (missing or non-string) rather than throwing. */
+const rd = (v: { reading?: unknown }): string => (typeof v.reading === 'string' ? v.reading : '');
+const isMath = (v: LineVerdict) => v.verdict !== 'context' && v.verdict !== 'unreadable' && rd(v).trim() !== '';
 
 /**
  * Redundant algebra check on the model's own transcription. If the model calls a line valid but the
@@ -22,11 +24,11 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
       continue;
     }
     if (cur.verdict === 'valid') {
-      const chain = checkChain(cur.reading);
+      const chain = checkChain(rd(cur));
       if (chain?.kind === 'inconsistent') {
         lowered.set(cur.id, 'Algebra check: one link in this chain of equalities is not an identity. Which one?');
       } else if (prev && prev.verdict === 'valid' && (prev.part ?? '') === (cur.part ?? '')) {
-        const rel = checkStep(prev.reading, cur.reading);
+        const rel = checkStep(rd(prev), rd(cur));
         if (rel.kind === 'inconsistent') {
           lowered.set(cur.id, `Algebra check: this does not follow from ${prev.id} (${rel.detail}). What changed between the two lines?`);
         }
@@ -47,7 +49,7 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
  * by a content-free one that mentions only line IDs. The result records what was blocked.
  */
 export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
-  const ctx: LeakContext = { level, lines: r.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })) };
+  const ctx: LeakContext = { level, lines: r.lines.map((l) => ({ id: l.id, reading: rd(l), verdict: l.verdict })) };
   const blocked: Leak[] = [];
   const clean = (t: string) => {
     const s = scrubText(t, ctx);
@@ -72,7 +74,7 @@ export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
 /** Same protection for chat replies: withhold leaking sentences; if nothing is left, ask a content-free question. */
 export function applyReplyLeakGuard(reply: string, lines: { id: string; reading: string; verdict: string }[], level: HelpLevel): string {
   if (lines.length === 0) return reply;
-  const { text, leaks } = scrubText(reply, { level, lines });
+  const { text, leaks } = scrubText(reply, { level, lines: lines.map((l) => ({ ...l, reading: rd(l) })) });
   if (leaks.length === 0) return reply;
   if (text) return text;
   const ordered = [...lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));

@@ -183,7 +183,11 @@ class Parser {
   }
 }
 
+/** Hostile or runaway input guard: transcriptions are short; reject anything absurd before recursing. */
+const MAX_LEN = 400;
+
 export function parseExpr(src: string): Parsed {
+  if (src.length > MAX_LEN) return { ok: false, reason: 'too long' };
   const toks = tokenize(normalize(src));
   if (typeof toks === 'string') return { ok: false, reason: toks };
   if (toks.length === 0) return { ok: false, reason: 'empty' };
@@ -474,11 +478,17 @@ export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
     const v = vars[0];
     const roots = realRoots(r1, v);
     if (roots.length > 0) {
+      let undefinedAtRoot = false;
       const holds = roots.filter((x) => {
         const val = evaluate(r2, { [v]: x });
+        if (!Number.isFinite(val)) {
+          undefinedAtRoot = true; // sqrt(-2), 1/0 ...: the next line says nothing there, so don't judge
+          return false;
+        }
         const scale = Math.max(Math.abs(evaluate(next.eq![0], { [v]: x })), Math.abs(evaluate(next.eq![1], { [v]: x })), 1);
-        return Number.isFinite(val) && Math.abs(val) <= Math.max(tol, 1e-6) * scale;
+        return Math.abs(val) <= Math.max(tol, 1e-6) * scale;
       });
+      if (undefinedAtRoot) return { kind: 'unrelated', detail: 'next line is undefined at a solution' };
       if (holds.length === roots.length) return { kind: 'implied', detail: 'every solution of the previous line satisfies this line' };
       if (holds.length === 0) return { kind: 'inconsistent', detail: 'no solution of the previous line satisfies this line' };
     }
