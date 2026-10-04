@@ -346,7 +346,7 @@ export class ClaudeProvider implements TutorProvider {
     const settled = input.settled?.length
       ? `SETTLED LINES (already verified in an earlier check and unchanged since; they are context for the lines below, nothing more):\n${input.settled
           .map((s) => `${s.id} [${s.part || 'none'}]: ${s.reading}`)
-          .join('\n')}\nDo NOT re-grade, re-transcribe, mention or return an entry for a settled line. Grade only the other lines. If a graded line shows that a settled line was wrong after all, say so in the feedback (the settled line will be re-checked next time).`
+          .join('\n')}\nDo NOT re-grade, re-transcribe or return an entry for a settled line, and do not mention settled lines or their parts anywhere in the feedback or question, not even to say they are unchanged or still fine. Write only about the lines you grade. If a graded line shows that a settled line was wrong after all, say so in the feedback (the settled line will be re-checked next time).`
       : '';
     const gradeList = settledIds.size ? `\nLines to grade: ${input.lines.filter((l) => !settledIds.has(l.id)).map((l) => l.id).join(', ')}` : '';
 
