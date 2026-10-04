@@ -13,6 +13,8 @@ export type StoredCheck = {
   /** line boxes as they were at check time (marks are positioned from these) */
   lines: Line[];
   strokeCount: number;
+  /** estimated API cost of this check (all calls, including retries) */
+  costUSD?: number;
   /** 'page-v2': line boxes are in fixed-page space (apiVersion >= 2). Absent: the old view-sized canvas space. */
   space?: 'page-v2';
 };
@@ -31,6 +33,8 @@ export type LogEvent = {
   revealed?: string[];
   /** reveal kinds the tutor reported beyond the help level used */
   overLevel?: string[];
+  /** estimated API cost of the call behind this event */
+  costUSD?: number;
 };
 
 export type Assignment = {

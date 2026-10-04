@@ -6,6 +6,7 @@ import { sanitizeParsed } from '../problems/sanitize';
 import { hasErrors, validateGroups } from '../problems/validate';
 import { sanitizeCheck } from './sanitize';
 import { cleanReply } from './replyText';
+import { effortParam } from './models';
 import type {
   CheckInput,
   CheckResult,
@@ -300,7 +301,7 @@ export class ClaudeProvider implements TutorProvider {
 
     const call = async (messages: Message[]) => {
       const { out } = await this.callTool<Record<string, unknown>>(
-        { model: this.opts.parseModel, max_tokens: MAX_TOKENS, output_config: { effort: this.opts.parseEffort ?? 'high' }, system: PARSE_RULES, messages },
+        { model: this.opts.parseModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.parseModel, this.opts.parseEffort ?? 'high'), system: PARSE_RULES, messages },
         PARSE_TOOL,
         `Respond only by calling the ${PARSE_TOOL.name} tool.`,
         'parse'
@@ -361,7 +362,7 @@ export class ClaudeProvider implements TutorProvider {
       {
       model: this.opts.checkModel,
       max_tokens: MAX_TOKENS,
-      output_config: { effort: CHECK_EFFORT },
+      ...effortParam(this.opts.checkModel, CHECK_EFFORT),
       system: this.system(),
       messages: [
         {
@@ -424,7 +425,7 @@ Check my work. First verify each line yourself, including steps I did in my head
         {
           model: this.opts.checkModel,
           max_tokens: MAX_TOKENS,
-          output_config: { effort: 'low' },
+          ...effortParam(this.opts.checkModel, 'low'),
           system: this.system(),
           messages: msgs,
         },

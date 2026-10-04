@@ -26,6 +26,7 @@ import { readSource } from '../store/sources';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
+import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
 import { C } from '../theme';
 
@@ -40,9 +41,19 @@ const tutorContext = (a: Assignment): TutorContext => ({
   style: a.style,
 });
 
-const providerFromSettings = () => {
+/** `spend.total` accumulates the estimated cost of every API call made through the returned provider (retries included). */
+const providerFromSettings = (spend?: { total: number }) => {
   const s = getSettings();
-  return getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel, onUsage: recordUsage });
+  return getProvider({
+    apiKey: s.apiKey,
+    checkModel: s.checkModel,
+    parseModel: s.parseModel,
+    onUsage: (e) => {
+      recordUsage(e);
+      const c = costUSD(e.model, e.usage);
+      if (spend && c !== null) spend.total += c;
+    },
+  });
 };
 
 export function WorkspaceScreen({ assignmentId, onBack }: Props) {
@@ -329,7 +340,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         return;
       }
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
-      const fresh = await providerFromSettings().check({
+      const spend = { total: 0 };
+      const fresh = await providerFromSettings(spend).check({
         ...tutorContext(a),
         image: { base64: image.base64, mediaType: 'image/png' },
         lines: lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
@@ -362,7 +374,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ...x,
           ladder: pruneLadder(x.ladder ?? {}, openKeys),
           issues,
-          checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, space: modern ? 'page-v2' : undefined } },
+          checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, costUSD: spend.total, space: modern ? 'page-v2' : undefined } },
           events: [
             ...x.events,
             ...resolved.map((r) => ({
@@ -378,6 +390,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               page: pageIndex + 1,
               level: base,
               detail: `✓${counts.valid ?? 0} ~${counts.partial ?? 0} ✗${counts.incorrect ?? 0} ?${counts.unreadable ?? 0}`,
+              costUSD: spend.total,
               revealed: result.revealed?.length ? [...new Set(result.revealed.map((r) => r.kind))] : undefined,
               overLevel: result.overLevel,
             },
@@ -400,7 +413,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     try {
       const image = attachPage ? (await capture()).image : null;
       const level = levelOverride ?? tutorContext(a).helpLevel;
-      const reply = await providerFromSettings().reply({
+      const spend = { total: 0 };
+      const reply = await providerFromSettings(spend).reply({
         ...tutorContext(a),
         helpLevel: level,
         lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
@@ -414,10 +428,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       const type = intent === 'start' ? 'start' : intent === 'dispute' ? 'dispute' : 'reply';
       updateAssignment(a.id, (x) => ({
         ...x,
-        chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply }],
+        chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply, costUSD: spend.total }],
         events: [
           ...x.events,
-          { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : undefined },
+          { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : undefined, costUSD: spend.total },
         ],
       }));
     } catch (e) {

@@ -39,6 +39,16 @@ export function monthTotal(records: UsageRecord[], now = new Date()): { costUSD:
   return { costUSD: cost, calls, unpriced };
 }
 
+/** Per-call cost: three decimals under 10 cents so a $0.017 check does not read as "<$0.01". */
+export function formatCost(n: number): string {
+  return n >= 0.1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+}
+
+/** Sum of the costs recorded on an assignment's events (checks, replies, parses). */
+export function assignmentSpend(events: ReadonlyArray<{ costUSD?: number }>): number {
+  return events.reduce((sum, e) => sum + (typeof e.costUSD === 'number' && Number.isFinite(e.costUSD) ? e.costUSD : 0), 0);
+}
+
 export function formatUSD(n: number): string {
   return n < 0.01 && n > 0 ? '<$0.01' : `$${n.toFixed(2)}`;
 }

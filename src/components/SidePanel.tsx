@@ -16,6 +16,7 @@ import { HELP_LEVELS } from '../ai/prompts';
 import type { PartStatus } from '../ai/types';
 import { disclosureSummary, issueOutcomes } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
+import { assignmentSpend, formatCost } from '../store/usageRecords';
 import { C, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
 import { Markdown } from './Markdown';
@@ -128,6 +129,11 @@ function FeedbackTab(p: Props) {
           ) : null
         )}
       </View>
+      {typeof check.costUSD === 'number' && check.costUSD > 0 && (
+        <Text style={styles.cost}>
+          This check {formatCost(check.costUSD)} · this assignment {formatCost(assignmentSpend(p.assignment.events))}
+        </Text>
+      )}
       {r.parts.length > 0 && (
         <View style={styles.chips}>
           {r.parts.map((part) => {
@@ -204,6 +210,7 @@ function ChatTab(p: Props) {
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
             {m.role === 'user' ? <Text style={styles.userText}>{m.text}</Text> : <Markdown text={m.text} />}
+            {m.role === 'assistant' && typeof m.costUSD === 'number' && m.costUSD > 0 && <Text style={styles.cost}>{formatCost(m.costUSD)}</Text>}
           </View>
         ))}
         {sending && <ActivityIndicator style={{ marginTop: 8 }} />}
@@ -322,4 +329,5 @@ const styles = StyleSheet.create({
   disclosure: { backgroundColor: C.card, borderRadius: 10, padding: 12 },
   disclosureText: { fontSize: 14, lineHeight: 20, color: C.ink },
   logItem: { fontSize: 12, color: C.sub, fontFamily: 'Menlo' },
+  cost: { fontSize: 12, color: C.sub, fontVariant: ['tabular-nums'], marginTop: 4 },
 });

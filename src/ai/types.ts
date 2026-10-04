@@ -104,7 +104,7 @@ export type CheckInput = TutorContext & {
   settled?: { id: string; part?: string; reading: string }[];
 };
 
-export type ChatTurn = { role: 'user' | 'assistant'; text: string };
+export type ChatTurn = { role: 'user' | 'assistant'; text: string; /** estimated cost of the call that produced this reply */ costUSD?: number };
 
 export type ReplyInput = TutorContext & {
   history: ChatTurn[];

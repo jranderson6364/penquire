@@ -39,3 +39,11 @@ test('currency formatting', () => {
   assert.equal(formatUSD(0.004), '<$0.01');
   assert.equal(formatUSD(12.345), '$12.35');
 });
+
+test('per-call cost keeps three decimals under 10 cents; assignment spend sums event costs', async () => {
+  const { formatCost, assignmentSpend } = await import('./usageRecords.ts');
+  assert.equal(formatCost(0.0173), '$0.017');
+  assert.equal(formatCost(0.1), '$0.10');
+  assert.equal(formatCost(1.234), '$1.23');
+  assert.ok(Math.abs(assignmentSpend([{ costUSD: 0.01 }, {}, { costUSD: 0.02 }, { costUSD: Number.NaN }]) - 0.03) < 1e-9);
+});
