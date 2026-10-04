@@ -53,6 +53,24 @@ test('subscripts and superscripts stay on the line', () => {
   assert.equal(lines.length, 1);
 });
 
+test('a matrix equation (bracket pairs with rows inside) is ONE line, not one line per matrix row', () => {
+  i = 0;
+  const bracket = (x: number) => glyph(x, 95, 8, 100);
+  const column = (x: number) => [bracket(x), glyph(x + 18, 100), glyph(x + 18, 130), glyph(x + 18, 160), bracket(x + 42)];
+  const equation = [glyph(20, 128), glyph(38, 134, 18, 4), ...column(70), glyph(135, 128), glyph(160, 134, 18, 4), ...column(190)];
+  const lines = groupLines([...row(20, 6), ...equation]);
+  assert.equal(lines.length, 2, JSON.stringify(lines.map((l) => [l.y, l.h, l.strokes.length])));
+  const matrixLine = lines[1];
+  assert.equal(matrixLine.strokes.length, equation.length);
+  assert.ok(matrixLine.h >= 100, 'the line box covers the whole matrix');
+});
+
+test('a bracket without a partner does not merge unrelated lines', () => {
+  i = 0;
+  const strokes = [...row(100, 6), glyph(150, 90, 8, 100) /* a lone tall stroke, e.g. an integral sign */, ...row(180, 6)];
+  assert.equal(groupLines(strokes).length, 2);
+});
+
 test('tightly spaced lines (ruled paper) with a subscript between them stay separate', () => {
   i = 0;
   const strokes = [...row(100, 6), glyph(130, 116, 8, 10), ...row(132, 6), ...row(164, 4)];

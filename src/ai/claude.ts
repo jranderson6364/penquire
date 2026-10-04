@@ -102,9 +102,9 @@ const CHECK_TOOL: Tool = {
       feedback: {
         type: 'string',
         description:
-          'Short markdown summary in the tutor format: per part, the key steps with **valid** / **partially valid** / **incorrect** and why; missing pieces; one line on presentation if relevant. Keep it tight.',
+          'Short markdown summary in the tutor format: per part, the key steps with **valid** / **partially valid** / **incorrect** and why; missing pieces; presentation only if it makes the meaning unclear. Keep it tight.',
       },
-      question: { type: 'string', description: 'Exactly ONE question or next action for the most important (earliest) issue, chosen to fit its obstacle.' },
+      question: { type: 'string', description: 'ONE question or next action for the earliest REAL issue, chosen to fit its obstacle. Empty string "" when the work holds up: do not invent a question.' },
       revealed: {
         type: 'array',
         description: 'Everything the feedback, notes and question gave away beyond the student\'s own work. [] if you only marked lines.',
@@ -362,7 +362,7 @@ ${lineList}
 
 ${previous}
 
-Check my work. Label every line, diagnose the obstacle on each line that isn't valid, report part status (including parts the page should address but doesn't), give one question or next action for the earliest issue that matters, and list what you revealed.`,
+Check my work. First verify each line yourself, including steps I did in my head. Label every line. Diagnose an obstacle only on a line that is actually wrong, incomplete or ambiguous. Report part status (including parts the page should address but doesn't). Give one question or next action ONLY if there is a real issue; if my work holds up, leave the question empty and say so in the feedback. List what you revealed.`,
             },
           ],
         },

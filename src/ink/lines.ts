@@ -7,6 +7,7 @@
  *  2. Stacked fractions (numerator / bar / denominator) are merged into one line.
  *  3. Small marks (sub/superscripts, dots) and tall glyphs attach to the line whose band contains them.
  *  4. Lines that still overlap heavily are merged.
+ *  4b. A matched bracket pair (matrix, column vector, brace) is one object: the bands it spans merge into one line.
  *  5. A line is split at a wide horizontal gap (margin labels, side calculations, two-column work), and
  *     groups at the same height are numbered left to right.
  */
@@ -123,6 +124,48 @@ export function groupLines(strokes: StrokeLike[]): Line[] {
       Object.assign(best, union(best, s));
     } else {
       groups.push({ ...s, strokes: [s.i], core: { x: s.x, y: s.y, w: s.w, h: Math.max(4, s.h) } });
+    }
+  }
+
+  // Pass 2.5: a bracket pair (matrix, column vector, big brace) is ONE object. Without this every row of a column
+  // vector becomes its own "line", and the boxes overlap each other (real linear-algebra pages came out as 30+ colliding
+  // lines). Merge the bands whose centres sit inside a matched pair. Two tall, thin strokes of similar height at the same
+  // vertical position, with nothing closer in between, form a pair.
+  const bracketLike = strokes.filter((s) => s.h > hMed * 1.8 && s.w < s.h * 0.45).sort((p, q) => p.x - q.x);
+  const paired = new Set<number>();
+  for (let a = 0; a < bracketLike.length; a++) {
+    const left = bracketLike[a];
+    if (paired.has(left.i)) continue;
+    let right: StrokeLike | null = null;
+    let rightGap = Infinity;
+    for (let b = a + 1; b < bracketLike.length; b++) {
+      const cand = bracketLike[b];
+      if (paired.has(cand.i)) continue;
+      const gap = cand.x - (left.x + left.w);
+      if (gap < 0) continue;
+      if (gap > hMed * 14) break; // sorted by x: nothing further away can be closer
+      const overlap = Math.max(0, Math.min(left.y + left.h, cand.y + cand.h) - Math.max(left.y, cand.y)) / Math.min(left.h, cand.h);
+      const ratio = Math.max(left.h, cand.h) / Math.min(left.h, cand.h);
+      if (overlap >= 0.75 && ratio <= 1.5 && gap < rightGap) {
+        right = cand;
+        rightGap = gap;
+      }
+    }
+    if (!right) continue;
+    paired.add(left.i);
+    paired.add(right.i);
+    const rect = union(left, right);
+    const inside = groups.filter((g) => {
+      const cy = g.y + g.h / 2;
+      return cy >= rect.y - hMed * 0.2 && cy <= rect.y + rect.h + hMed * 0.2;
+    });
+    if (inside.length < 2) continue;
+    const keep = inside[0];
+    for (const g of inside.slice(1)) {
+      keep.strokes.push(...g.strokes);
+      Object.assign(keep, union(keep, g));
+      keep.core = union(keep.core, g.core);
+      groups.splice(groups.indexOf(g), 1);
     }
   }
 

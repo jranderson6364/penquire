@@ -120,6 +120,13 @@ Tooling: no Mac, so Swift only compiles in the cloud. Plan: GitHub Actions macOS
 - Figure text `[Figure: ...]` is machine-written and may be wrong: the UI labels it "auto-described" and TUTOR_RULES tells the tutor never to rely on it.
 - EVAL LOOP lives OUTSIDE the repo in `Penquire/evals-private/parse/` (gold files quote real course PSets; this repo is PUBLIC, so never commit them or real problem text; committed tests use invented text). Build: `npx --yes esbuild run.ts --bundle --platform=node --format=esm --outfile=dist/run.mjs`; run from that folder: `node dist/run.mjs --sets pset0,pset1,m51_ch3 --variant new --label X [--model M --effort E --repeat N]`; `--rescore <out dir>` re-grades saved output free; `judge.ts` runs a stronger independent model over page images. Scorer: `src/problems/score.ts`. Baseline (old flat parser) 65.2% -> structured parser 99.7% over 6 runs. Change the prompt/schema only with a before/after run.
 
+## Check stance and eval (measured, keep it that way)
+
+- The tutor VERIFIES, it does not audit: assume a competent student, do the maths, accept mental arithmetic/routine algebra, ask only when a line is actually wrong/incomplete or the problem asks for shown work. Correct page => empty `question`. Guarded by `src/ai/stance.test.ts`; change `TUTOR_RULES` only with a before/after run.
+- Eval lives OUTSIDE the repo in `Penquire/evals-private/check/` (real handwritten page + synthetic pages with known truth: `python synth.py`, then `node dist/synth.mjs --label X`; build with esbuild). Result of the reframing: needless questions on correct pages 6/6 -> 0/8, false alarms 1/16 -> 0/20, real mistakes caught 8/8 kept.
+- `src/ink/lines.ts` merges everything inside a matched tall-bracket pair into one line (matrices), so the AI sees one label per equation.
+- The AI sidebar DOCKS (shrinks the canvas area) so the page re-centres in the remaining space instead of being overlaid.
+
 ## Working agreement
 
 - Read `BACKLOG.md`, pick the top unchecked item unless told otherwise, and keep changes scoped to it.
