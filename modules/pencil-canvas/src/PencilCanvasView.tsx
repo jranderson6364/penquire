@@ -42,11 +42,33 @@ export const nativeCanvasAvailable = nativeModule != null;
 export const nativeApiVersion: number = typeof nativeModule?.apiVersion === 'number' ? nativeModule.apiVersion : nativeCanvasAvailable ? 1 : 0;
 
 /** For diagnostics: what the installed binary actually exposes (names only). */
+/** Function names the installed binary registers for its views (read defensively: the structure is Expo-internal). */
+function viewFunctionNames(): string[] {
+  try {
+    const protos = (nativeModule as unknown as { ViewPrototypes?: Record<string, unknown> } | null)?.ViewPrototypes;
+    if (!protos || typeof protos !== 'object') return [];
+    const names = new Set<string>();
+    for (const proto of Object.values(protos)) {
+      let o: object | null = proto && typeof proto === 'object' ? (proto as object) : null;
+      for (let depth = 0; o && depth < 3; depth++, o = Object.getPrototypeOf(o)) {
+        for (const n of Object.getOwnPropertyNames(o)) if (n !== 'constructor') names.add(n);
+      }
+    }
+    return [...names].sort();
+  } catch {
+    return [];
+  }
+}
+
 export const nativeModuleInfo = {
   available: nativeCanvasAvailable,
   apiVersion: nativeApiVersion,
   keys: nativeModule ? Object.keys(nativeModule as object).slice(0, 20) : [],
+  viewFunctions: viewFunctionNames(),
 };
+
+/** True when the installed binary registers the new view functions, regardless of the version constant. */
+export const nativeHasNewFunctions = nativeModuleInfo.viewFunctions.includes('getViewport') && nativeModuleInfo.viewFunctions.includes('setTool');
 
 const NativeView: React.ComponentType<NativeProps> | null = nativeCanvasAvailable ? requireNativeView('PencilCanvas') : null;
 

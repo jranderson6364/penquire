@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -80,7 +80,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   // The version constant is the normal signal; if it is missing, ask the canvas directly whether it has the new
   // functions (an older binary has no getViewport). Either way the new features switch on as soon as they exist.
   const [probedModern, setProbedModern] = React.useState(false);
-  const modern = nativeApiVersion >= 2 || probedModern;
+  const modern = nativeApiVersion >= 2 || nativeHasNewFunctions || probedModern;
   React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} module=${JSON.stringify(nativeModuleInfo)}`), []);
   const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
@@ -99,7 +99,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   }, [modern, toolState]);
 
   React.useEffect(() => {
-    if (nativeApiVersion >= 2 || probedModern) return;
+    if (nativeApiVersion >= 2 || nativeHasNewFunctions || probedModern) return;
     let cancelled = false;
     (async () => {
       try {
