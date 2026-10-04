@@ -39,3 +39,22 @@ test('part status falls back to in_progress; parts without a label are dropped',
   const r = sanitizeCheck({ parts: [{ label: '1a', status: 'weird', missing: ['x', '', 3] }, { status: 'complete' }] }, 'm');
   assert.deepEqual(r.parts, [{ label: '1a', status: 'in_progress', missing: ['x', '3'] }]);
 });
+
+test('line parts are matched to the problem list; unknown labels and "none" become no part', () => {
+  const known = ['1a', '2a', '3.10c'];
+  const lines = sanitizeLines(
+    [
+      { id: 'L1', part: ' 2A ', reading: '', verdict: 'valid', note: '' },
+      { id: 'L2', part: '(1a)', reading: '', verdict: 'valid', note: '' },
+      { id: 'L3', part: 'none', reading: '', verdict: 'context', note: '' },
+      { id: 'L4', part: '9z', reading: '', verdict: 'valid', note: '' },
+      { id: 'L5', part: '3.10 c', reading: '', verdict: 'valid', note: '' },
+    ],
+    known
+  );
+  assert.deepEqual(lines.map((l) => l.part), ['2a', '1a', undefined, undefined, '3.10c']);
+});
+
+test('without a problem list the model part is kept as written', () => {
+  assert.equal(sanitizeLines([{ id: 'L1', part: 'Q7', reading: '', verdict: 'valid', note: '' }])[0].part, 'Q7');
+});

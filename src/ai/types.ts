@@ -42,6 +42,8 @@ export type LineVerdict = {
   reading: string; // how the model read the line (LaTeX/plain)
   verdict: Verdict;
   note: string; // one clause: why / what to look at (never the fix)
+  /** fingerprint of the line's ink when it was checked (src/check/carry.ts); lets a later check skip unchanged lines */
+  sig?: string;
   /** kind of obstacle (non-valid lines only; absent when the model gave none) */
   obstacle?: Obstacle;
   /** set when a deterministic guard (not the model) lowered this verdict */
@@ -98,6 +100,8 @@ export type CheckInput = TutorContext & {
   pageNumber: number;
   focusPart?: string;
   previous?: { feedback: string; stillOpen: string[] };
+  /** lines verified by an earlier check and unchanged since (src/check/carry.ts): context only, not to be graded */
+  settled?: { id: string; part?: string; reading: string }[];
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };

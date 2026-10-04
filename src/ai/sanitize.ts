@@ -13,7 +13,18 @@ const OBSTACLE_SET: ReadonlySet<string> = new Set(OBSTACLES);
 const REVEAL_SET: ReadonlySet<string> = new Set(REVEAL_KINDS);
 const strList = (v: unknown): string[] => (Array.isArray(v) ? v.map(str).filter((s) => s.trim() !== '') : []);
 
-export function sanitizeLines(raw: unknown): LineVerdict[] {
+const canonPart = (s: string) => s.toLowerCase().replace(/[\s()]/g, '');
+
+/** A part label the problem list knows (matched ignoring case, spaces and parentheses); "none" or anything else is no part. */
+export function normalizePart(part: unknown, known?: readonly string[]): string | undefined {
+  const raw = str(part).trim();
+  if (raw === '' || canonPart(raw) === 'none') return undefined;
+  if (!known) return raw;
+  const hit = known.find((k) => canonPart(k) === canonPart(raw));
+  return hit;
+}
+
+export function sanitizeLines(raw: unknown, knownParts?: readonly string[]): LineVerdict[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
   const out: LineVerdict[] = [];
@@ -29,7 +40,7 @@ export function sanitizeLines(raw: unknown): LineVerdict[] {
     const obstacle = str(r.obstacle).trim().toLowerCase();
     out.push({
       id,
-      part: r.part == null || str(r.part) === '' ? undefined : str(r.part),
+      part: normalizePart(r.part, knownParts),
       reading: str(r.reading),
       verdict,
       note: known ? str(r.note) : `${str(r.note)} (The tutor's verdict for this line was not understood, so it is not marked.)`.trim(),
@@ -68,9 +79,9 @@ export function sanitizeRevealed(raw: unknown): Revealed[] {
     .filter((r): r is Revealed => r !== null);
 }
 
-export function sanitizeCheck(out: Record<string, unknown>, model: string, usage?: CheckResult['usage']): CheckResult {
+export function sanitizeCheck(out: Record<string, unknown>, model: string, usage?: CheckResult['usage'], knownParts?: readonly string[]): CheckResult {
   return {
-    lines: sanitizeLines(out.lines),
+    lines: sanitizeLines(out.lines, knownParts),
     parts: sanitizeParts(out.parts),
     feedback: str(out.feedback),
     question: str(out.question),

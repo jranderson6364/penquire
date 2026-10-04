@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type StrokeBox, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -13,6 +13,7 @@ import { ContextStrip, TopBar } from '../components/TopBar';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { SidePanel, type Tab } from '../components/SidePanel';
+import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
@@ -85,6 +86,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} module=${JSON.stringify(nativeModuleInfo)}`), []);
   const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
+  const toolIsPixelEraser = toolState.tool === 'eraser' && toolState.eraserMode === 'pixel';
+  // Pages where the pixel eraser was used since their last check (it can shrink a stroke without changing its box).
+  const pixelErased = React.useRef(new Set<string>());
   const prevToolRef = React.useRef<ToolKind>('pen');
   const [evals, setEvals] = React.useState(loadEvals);
   React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
@@ -141,6 +145,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   const pageId = a?.pageIds[pageIndex] ?? '';
   const pageIdRef = React.useRef(pageId);
+  React.useEffect(() => {
+    if (toolIsPixelEraser && pageId) pixelErased.current.add(pageId);
+  }, [toolIsPixelEraser, pageId]);
   pageIdRef.current = pageId;
   /** page whose saved drawing is currently loaded; never autosave a page that failed to load */
   const loadedPageRef = React.useRef('');
@@ -252,7 +259,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   }, [savePage]);
 
   // ---- capture -----------------------------------------------------------
-  const capture = async (): Promise<{ lines: Line[]; image: ExportedImage | null; strokes: number }> => {
+  const capture = async (): Promise<{ lines: Line[]; image: ExportedImage | null; strokes: number; strokeList: StrokeBox[] }> => {
     const c = canvasRef.current;
     if (!c) throw new Error('Canvas not ready');
     const strokes = await c.getStrokes();
@@ -261,7 +268,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
       2000
     );
-    return { lines, image, strokes: strokes.length };
+    return { lines, image, strokes: strokes.length, strokeList: strokes };
   };
 
   if (!nativeCanvasAvailable) {
@@ -303,20 +310,37 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setChecking(true);
     try {
       await savePage();
-      const { lines, image, strokes } = await capture();
+      const { lines, image, strokes, strokeList } = await capture();
       if (strokes === 0 || !image) {
         Alert.alert('Nothing to check', 'Write something on this page first.');
         return;
       }
       const prev = a.checks[pageId];
-      const result = await providerFromSettings().check({
+      // Only grade what is new or changed: lines verified earlier and untouched since stay as they were (src/check/carry.ts).
+      // The pixel eraser can shrink a stroke without changing its box, so after using it nothing is carried.
+      const sigs = signatures(lines, strokeList);
+      const current = lines.map((l) => ({ id: l.id, sig: sigs.get(l.id) ?? '' }));
+      const plan = planCarry(current, prev && prev.space === 'page-v2' ? prev.result.lines : undefined, pixelErased.current.has(pageId) || (toolState.tool === 'eraser' && toolState.eraserMode === 'pixel'));
+      if (prev && plan.toGrade.length === 0 && plan.dirtyParts.size === 0) {
+        setShowMarks(true);
+        setTab('feedback');
+        setPanelOpen(true);
+        Alert.alert('No changes', 'Nothing on this page changed since your last check.');
+        return;
+      }
+      const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
+      const fresh = await providerFromSettings().check({
         ...tutorContext(a),
         image: { base64: image.base64, mediaType: 'image/png' },
         lines: lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
         pageNumber: pageIndex + 1,
         focusPart: activePart && a.problems.some((p) => p.label === activePart) ? activePart : undefined,
         previous: prev ? { feedback: prev.result.feedback, stillOpen: prev.result.stillOpen } : undefined,
+        settled: settled.length ? settled : undefined,
       });
+      const mergedLines = mergeVerdicts(current, plan, fresh.lines);
+      const result = { ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) };
+      if (!toolIsPixelEraser) pixelErased.current.delete(pageId);
       try {
         saveCheckImage(pageId, image.base64);
       } catch (e) {

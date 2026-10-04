@@ -61,7 +61,11 @@ const CHECK_TOOL: Tool = {
           type: 'object',
           properties: {
             id: { type: 'string', description: 'Line label from the gutter, e.g. "L4"' },
-            part: { type: 'string', description: 'Problem part this line belongs to, e.g. "3.10c", if identifiable' },
+            part: {
+              type: 'string',
+              description:
+                'The problem part this line belongs to: exactly one label from the problem list (e.g. "2a", "3.10c"), or "none" for headings, margin scratch and anything that belongs to no part. Prefer the label the student wrote next to the work ("2a)"); otherwise work continues the previous line\'s part until the student starts another.',
+            },
             reading: {
               type: 'string',
               description:
@@ -84,7 +88,7 @@ const CHECK_TOOL: Tool = {
                 'Only for lines that are not valid/context: the kind of obstacle the work shows (slip = sound plan, local error; method = inapplicable method; notation; prerequisite = missing earlier skill; misconception = coherent wrong idea; no_work = correct result without reasoning; incomplete = missing deliverable; alt_path = valid but unexpected approach; unclear = the work does not tell these apart).',
             },
           },
-          required: ['id', 'reading', 'verdict', 'note'],
+          required: ['id', 'part', 'reading', 'verdict', 'note'],
         },
       },
       parts: {
@@ -108,7 +112,7 @@ const CHECK_TOOL: Tool = {
       feedback: {
         type: 'string',
         description:
-          'Short markdown summary in the tutor format: per part, the key steps with **valid** / **partially valid** / **incorrect** and why; missing pieces; presentation only if it makes the meaning unclear. Keep it tight.',
+          'Short markdown summary in the tutor format, about the lines you were asked to grade ONLY: per part, the key steps with **valid** / **partially valid** / **incorrect** and why; missing pieces; presentation only if it makes the meaning unclear. Name the part each point is about. Never discuss settled lines. Keep it tight.',
       },
       question: { type: 'string', description: 'ONE question or next action for the earliest REAL issue, chosen to fit its obstacle. Empty string "" when the work holds up: do not invent a question.' },
       revealed: {
@@ -338,6 +342,13 @@ export class ClaudeProvider implements TutorProvider {
     const previous = input.previous
       ? `PREVIOUS ROUND (line IDs may have changed since):\nFeedback: ${input.previous.feedback}\nStill open: ${input.previous.stillOpen.join('; ') || 'none'}\nSay explicitly which of these are now fixed.`
       : 'This is the first check of this page.';
+    const settledIds = new Set((input.settled ?? []).map((s) => s.id));
+    const settled = input.settled?.length
+      ? `SETTLED LINES (already verified in an earlier check and unchanged since; they are context for the lines below, nothing more):\n${input.settled
+          .map((s) => `${s.id} [${s.part || 'none'}]: ${s.reading}`)
+          .join('\n')}\nDo NOT re-grade, re-transcribe, mention or return an entry for a settled line. Grade only the other lines. If a graded line shows that a settled line was wrong after all, say so in the feedback (the settled line will be re-checked next time).`
+      : '';
+    const gradeList = settledIds.size ? `\nLines to grade: ${input.lines.filter((l) => !settledIds.has(l.id)).map((l) => l.id).join(', ')}` : '';
 
     const { res, out } = await this.callTool<{
       lines: CheckResult['lines'];
@@ -364,11 +375,11 @@ export class ClaudeProvider implements TutorProvider {
 
 This is page ${input.pageNumber} of the student's work.${input.focusPart ? ` The student is currently working on part ${input.focusPart}: put your detailed feedback and your one question there, but still report the status of every part (including parts the page should address but does not).` : ''}
 Detected lines (boxes in page points; labels are drawn in the gutter):
-${lineList}
+${lineList}${gradeList}
 
-${previous}
+${settled ? settled + '\n\n' : ''}${previous}
 
-Check my work. First verify each line yourself, including steps I did in my head. Label every line. Diagnose an obstacle only on a line that is actually wrong, incomplete or ambiguous. Report part status (including parts the page should address but doesn't). Give one question or next action ONLY if there is a real issue; if my work holds up, leave the question empty and say so in the feedback. List what you revealed.`,
+Check my work. First verify each line yourself, including steps I did in my head. Label every line you are asked to grade, and give each one its problem part. Diagnose an obstacle only on a line that is actually wrong, incomplete or ambiguous. Report part status (including parts the page should address but doesn't). Give one question or next action ONLY if there is a real issue; if my work holds up, leave the question empty and say so in the feedback. List what you revealed.`,
             },
           ],
         },
@@ -379,7 +390,7 @@ Check my work. First verify each line yourself, including steps I did in my head
       'check'
     );
 
-    return sanitizeCheck(out as unknown as Record<string, unknown>, res.model, ClaudeProvider.usage(res));
+    return sanitizeCheck(out as unknown as Record<string, unknown>, res.model, ClaudeProvider.usage(res), input.problems.length ? input.problems.map((p) => p.label) : undefined);
   }
 
   async reply(input: ReplyInput): Promise<string> {
