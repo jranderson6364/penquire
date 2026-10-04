@@ -93,8 +93,13 @@ const CHECK_TOOL: Tool = {
           type: 'object',
           properties: {
             label: { type: 'string' },
-            status: { type: 'string', enum: ['complete', 'in_progress', 'missing_items', 'not_started'] },
-            missing: { type: 'array', items: { type: 'string' }, description: 'What the part asks for that is not yet addressed' },
+            status: {
+              type: 'string',
+              enum: ['complete', 'in_progress', 'missing_items', 'not_started'],
+              description:
+                'complete = every line for this part holds up AND everything the part asks for is on the page (its final answer, units, requested explanation). Use it as soon as that is true: do not hold it back for style, extra checking, or because an earlier check flagged the part. in_progress = the work so far holds up but stops before the answer, or a line is still partly wrong. missing_items = the work is written but a specific requested item is absent (list it in missing). not_started = nothing written for this part.',
+            },
+            missing: { type: 'array', items: { type: 'string' }, description: 'What the part asks for that is not yet addressed. Empty when the part is complete.' },
           },
           required: ['label', 'status', 'missing'],
         },
