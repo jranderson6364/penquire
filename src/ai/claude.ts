@@ -5,6 +5,7 @@ import { flatten } from '../problems/flatten';
 import { sanitizeParsed } from '../problems/sanitize';
 import { hasErrors, validateGroups } from '../problems/validate';
 import { sanitizeCheck } from './sanitize';
+import { cleanReply } from './replyText';
 import type {
   CheckInput,
   CheckResult,
@@ -403,27 +404,39 @@ Check my work. First verify each line yourself, including steps I did in my head
     }
     finalContent.push({
       type: 'text',
-      text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of markdown. If they describe a fix in words, check it. One question max.)`,
+      text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.)`,
     });
     messages.push({ role: 'user', content: finalContent });
 
-    const res = await this.call(
-      {
-        model: this.opts.checkModel,
-        max_tokens: MAX_TOKENS,
-        output_config: { effort: 'low' },
-        system: this.system(),
-        messages,
-      },
-      'reply'
-    );
-    if (res.stop_reason === 'refusal') throw new Error(`The model declined this request${res.stop_details?.category ? ` (${res.stop_details.category})` : ''}.`);
-    const text = res.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text ?? '')
-      .join('\n')
-      .trim();
-    if (!text) throw new Error(res.stop_reason === 'max_tokens' ? 'The reply was cut off before it finished. Try again.' : 'The model returned an empty reply. Try again.');
-    return text;
+    const ask = async (msgs: Message[]) => {
+      const res = await this.call(
+        {
+          model: this.opts.checkModel,
+          max_tokens: MAX_TOKENS,
+          output_config: { effort: 'low' },
+          system: this.system(),
+          messages: msgs,
+        },
+        'reply'
+      );
+      if (res.stop_reason === 'refusal') throw new Error(`The model declined this request${res.stop_details?.category ? ` (${res.stop_details.category})` : ''}.`);
+      const raw = res.content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join('\n')
+        .trim();
+      return { raw, stop: res.stop_reason };
+    };
+
+    let { raw, stop } = await ask(messages);
+    let cleaned = cleanReply(raw);
+    // The model sometimes answers in the JSON shape of a check result. Salvage its prose, or ask once more in prose.
+    if (cleaned.wasJson && !cleaned.text) {
+      const retry = [...messages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: 'That was JSON. Answer again as a short plain-text message to me, no JSON, no code blocks.' }];
+      ({ raw, stop } = await ask(retry));
+      cleaned = cleanReply(raw);
+    }
+    if (!cleaned.text) throw new Error(stop === 'max_tokens' ? 'The reply was cut off before it finished. Try again.' : 'The model returned an empty reply. Try again.');
+    return cleaned.text;
   }
 }
