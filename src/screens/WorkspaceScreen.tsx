@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Alert, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type ViewportEvent } from '../../modules/pencil-canvas';
@@ -46,6 +46,7 @@ const providerFromSettings = () => {
 
 export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const insets = useSafeAreaInsets();
+  const { width: winW } = useWindowDimensions();
   const settings = getSettings();
   const canvasRef = React.useRef<PencilCanvasHandle>(null);
 
@@ -501,9 +502,39 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const setLevel = (l: HelpLevel) =>
     updateAssignment(a.id, (x) => ({ ...x, helpLevel: l, events: [...x.events, { t: Date.now(), type: 'level_change', level: l }] }));
 
-  const narrow = size.w > 0 && size.w < 700;
-  const drawerWidth = narrow ? Math.round(size.w * 0.94) : Math.min(560, Math.max(380, Math.round(size.w * 0.5)));
+  // Sidebar: docked beside the canvas when the window is wide enough, so the canvas area (and with it the page's
+  // centre and fit) shrinks to the space that is left. In a very narrow window (Split View) it overlays instead.
+  const narrow = winW < 600;
+  const drawerWidth = narrow ? Math.round(winW * 0.94) : Math.min(520, Math.max(340, Math.round(winW * 0.4)));
   const counts = check?.result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
+
+  const panel = (
+        <SidePanel
+          assignment={a}
+          check={check}
+          stale={stale}
+          tab={tab}
+          onTab={setTab}
+          draft={draft}
+          onDraft={setDraft}
+          onSend={send}
+          onHelpStart={helpStart}
+          sending={sending}
+          onReparse={reparse}
+          reparsing={reparsing}
+          activePart={activePart}
+          onSelectPart={setActivePart}
+          header={
+            <View style={styles.sideHeader}>
+              <Button small kind="primary" title={checking ? 'Checking…' : 'Check this page'} loading={checking} onPress={runCheck} />
+              <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
+              <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
+            </View>
+          }
+          onClose={() => setPanelOpen(false)}
+          onInputBlur={() => canvasRef.current?.focus()}
+        />
+  );
 
   return (
     <View style={styles.root}>
@@ -537,6 +568,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       {modern && <ContextStrip tool={toolState} onChange={setToolState} insetLeft={insets.left} insetRight={insets.right} />}
       {showQuestion && <QuestionBanner assignment={a} activePart={activePart} onChange={setActivePart} insetLeft={insets.left} insetRight={insets.right} />}
 
+      <View style={styles.body}>
       <View style={styles.page} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
         <PencilCanvas
           ref={canvasRef}
@@ -587,35 +619,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           </View>
         )}
         {!panelOpen && <AiFab onPress={() => setPanelOpen(true)} counts={counts} stale={stale} insetRight={insets.right} insetBottom={insets.bottom} />}
-        {panelOpen && (
+        {panelOpen && narrow && (
           <View style={[styles.drawer, { width: drawerWidth, paddingBottom: insets.bottom, paddingRight: insets.right }]}>
-            <SidePanel
-              assignment={a}
-              check={check}
-              stale={stale}
-              tab={tab}
-              onTab={setTab}
-              draft={draft}
-              onDraft={setDraft}
-              onSend={send}
-              onHelpStart={helpStart}
-              sending={sending}
-              onReparse={reparse}
-              reparsing={reparsing}
-              activePart={activePart}
-              onSelectPart={setActivePart}
-              header={
-                <View style={styles.sideHeader}>
-                  <Button small kind="primary" title={checking ? 'Checking…' : 'Check this page'} loading={checking} onPress={runCheck} />
-                  <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
-                  <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
-                </View>
-              }
-              onClose={() => setPanelOpen(false)}
-              onInputBlur={() => canvasRef.current?.focus()}
-            />
+            {panel}
           </View>
         )}
+      </View>
+      {panelOpen && !narrow && (
+        <View style={[styles.dock, { width: drawerWidth + insets.right, paddingBottom: insets.bottom, paddingRight: insets.right }]}>{panel}</View>
+      )}
       </View>
     </View>
   );
@@ -625,7 +637,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   sideHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, flexWrap: 'wrap', backgroundColor: C.card, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+  body: { flex: 1, flexDirection: 'row' },
   page: { flex: 1, overflow: 'hidden' },
+  dock: { backgroundColor: C.bg, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   drawer: {
     position: 'absolute',
     top: 0,
