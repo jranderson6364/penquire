@@ -215,16 +215,36 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     canvas.maximumZoomScale = maxZoom
     if forceFit || !userHasZoomed {
       userHasZoomed = false
-      canvas.setZoomScale(min(max(fitW, minZoom), maxZoom), animated: false)
-      updateInsets()
-      canvas.setContentOffset(CGPoint(x: -canvas.contentInset.left, y: -canvas.contentInset.top), animated: false)
+      let target = min(max(fitW, minZoom), maxZoom)
+      if !forceFit && abs(canvas.zoomScale - target) < 0.001 {
+        // Same zoom, only the height changed (a banner or sidebar appeared): keep where the student is looking.
+        updateInsets()
+        clampOffset()
+      } else {
+        canvas.setZoomScale(target, animated: false)
+        updateInsets()
+        canvas.setContentOffset(CGPoint(x: -canvas.contentInset.left, y: -canvas.contentInset.top), animated: false)
+      }
     } else {
       canvas.setZoomScale(min(max(canvas.zoomScale, minZoom), maxZoom), animated: false)
       updateInsets()
+      clampOffset()
     }
     isAdjusting = false
     updatePaper()
     sendViewport()
+  }
+
+  /// Keep the scroll position inside the page after the view resized (it can end up out of range when the view grows).
+  private func clampOffset() {
+    let z = canvas.zoomScale
+    let minX = -canvas.contentInset.left
+    let minY = -canvas.contentInset.top
+    let maxX = max(minX, pageSize.width * z + canvas.contentInset.right - bounds.width)
+    let maxY = max(minY, pageSize.height * z + canvas.contentInset.bottom - bounds.height)
+    let o = canvas.contentOffset
+    let clamped = CGPoint(x: min(max(o.x, minX), maxX), y: min(max(o.y, minY), maxY))
+    if clamped != o { canvas.setContentOffset(clamped, animated: false) }
   }
 
   /// When the page is smaller than the view (zoomed out, or a wide window), centre it.
