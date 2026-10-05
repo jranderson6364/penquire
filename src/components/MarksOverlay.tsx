@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { LineVerdict, Verdict } from '../ai/types';
 import type { MarkFeedback, Rating } from '../store/evalRecords';
 import type { Line } from '../ink/lines';
+import { placeMarks } from '../check/placeMarks';
 import { C, VERDICT_STYLE } from '../theme';
 import { latexToUnicode } from '../ui/mathText';
 import { Button } from './Button';
@@ -36,6 +37,7 @@ const CORRECT_VERDICTS: { v: Verdict; label: string }[] = [
 ];
 
 const MARK = 26;
+const MARK_OK = 20; // a check that holds up is quieter than one that needs attention
 const POPOVER_W = 300;
 const POPOVER_H = 340;
 
@@ -55,24 +57,26 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
 
   React.useEffect(() => setOpen(null), [verdicts]);
 
-  const placed = verdicts
+  const visible = verdicts
     .filter((v) => v.verdict !== 'context')
-    .map((v) => {
-      const line = byId.get(v.id);
-      if (!line) return null;
-      const x = Math.min(width - MARK - 6, line.x + line.w + 8);
-      const y = Math.max(4, line.y + line.h / 2 - MARK / 2);
-      return { v, line, x, y };
-    })
-    .filter((p): p is NonNullable<typeof p> => p !== null)
+    .map((v) => ({ v, line: byId.get(v.id) }))
+    .filter((p): p is { v: LineVerdict; line: Line } => !!p.line)
     // zoomed or panned away: no mark for a line that is outside the view
     .filter((p) => p.line.x + p.line.w > 0 && p.line.x < width && p.line.y + p.line.h > 0 && p.line.y < height);
+  const sizeOf = (v: LineVerdict) => (v.verdict === 'valid' ? MARK_OK : MARK);
+  const spots = placeMarks(
+    visible.map(({ v, line }) => ({ id: v.id, box: line, size: sizeOf(v), priority: v.verdict !== 'valid' })),
+    width,
+    height
+  );
+  const spotOf = new Map(spots.map((p) => [p.id, p]));
+  const placed = visible.map(({ v, line }) => ({ v, line, x: spotOf.get(v.id)!.x, y: spotOf.get(v.id)!.y, size: sizeOf(v) }));
 
   const active = placed.find((p) => p.v.id === open);
 
   return (
     <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { width, height }]}>
-      {placed.map(({ v, line, x, y }) => {
+      {placed.map(({ v, line, x, y, size }) => {
         const s = VERDICT_STYLE[v.verdict as keyof typeof VERDICT_STYLE];
         return (
           <React.Fragment key={v.id}>
@@ -85,7 +89,7 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
             <Pressable
               hitSlop={8}
               onPress={() => setOpen(open === v.id ? null : v.id)}
-              style={[styles.mark, { left: x, top: y, backgroundColor: s.bg, borderColor: s.color, opacity: stale ? 0.45 : 1 }]}
+              style={[styles.mark, { left: x, top: y, width: size, height: size, borderRadius: size / 2, backgroundColor: s.bg, borderColor: s.color, opacity: stale ? 0.45 : 1 }]}
             >
               <Text style={[styles.markText, { color: s.color }]}>{s.symbol}</Text>
             </Pressable>
@@ -98,8 +102,8 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
           style={[
             styles.popover,
             {
-              left: Math.max(8, Math.min(active.x - POPOVER_W + MARK, width - POPOVER_W - 8)),
-              top: active.y + MARK + 6 > height - POPOVER_H ? Math.max(8, active.y - POPOVER_H + MARK) : active.y + MARK + 6,
+              left: Math.max(8, Math.min(active.x - POPOVER_W + active.size, width - POPOVER_W - 8)),
+              top: active.y + active.size + 6 > height - POPOVER_H ? Math.max(8, active.y - POPOVER_H + active.size) : active.y + active.size + 6,
             },
           ]}
         >

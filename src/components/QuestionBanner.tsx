@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { findPart } from '../problems/flatten';
 import type { Assignment } from '../store/types';
-import { C } from '../theme';
+import { C, F, R, T } from '../theme';
 import { MathText } from './MathText';
 import { PartPicker } from './PartPicker';
 
@@ -17,9 +17,12 @@ type Props = {
   insetRight: number;
 };
 
-/** Fixed heights on purpose: this sits in the layout above the canvas, and resizing it would make the page reflow. */
+/**
+ * Fixed height on purpose: this sits in the layout above the canvas, and resizing it would make the page reflow.
+ * The full setup opens as a sheet that floats over the page instead of pushing it down.
+ */
 export const BANNER_COLLAPSED = 92;
-export const BANNER_EXPANDED = 300;
+const SHEET_MAX = 320;
 
 /** The question being worked on, always visible under the controls. */
 export function QuestionBanner({ assignment, activePart, onChange, insetLeft, insetRight }: Props) {
@@ -47,7 +50,7 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
       : 'No question selected';
 
   return (
-    <View style={[styles.wrap, { height: expanded ? BANNER_EXPANDED : BANNER_COLLAPSED, paddingLeft: Math.max(12, insetLeft), paddingRight: Math.max(12, insetRight) }]}>
+    <View style={[styles.wrap, { height: BANNER_COLLAPSED, paddingLeft: Math.max(12, insetLeft), paddingRight: Math.max(12, insetRight) }]}>
       <View style={styles.row}>
         <Pressable onPress={() => go(-1)} hitSlop={8} style={styles.nav} accessibilityLabel="Previous question">
           <Text style={styles.navText}>‹</Text>
@@ -67,8 +70,15 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
 
       {!activePart ? (
         <Text style={styles.hintText}>Pick the question you are working on with ‹ › or the list. The tutor checks your page against it.</Text>
-      ) : expanded ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 6, paddingBottom: 10 }} nestedScrollEnabled>
+      ) : (
+        <MathText
+          text={found?.part ? `(${found.part.label}) ${found.part.text}` : (found?.group.context ?? flat?.text ?? '')}
+          style={styles.partText}
+          numberOfLines={2}
+        />
+      )}
+      {expanded && !!activePart && (
+        <ScrollView style={[styles.sheet, { left: Math.max(0, insetLeft), right: Math.max(0, insetRight) }]} contentContainerStyle={styles.sheetContent} nestedScrollEnabled>
           {found ? (
             <>
               {!!found.group.context && <MathText text={found.group.context} style={styles.setup} />}
@@ -79,7 +89,7 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
                     <MathText key={s.label} text={`(${s.label}) ${s.text}${s.hint ? `  Hint: ${s.hint}` : ''}`} style={styles.sub} />
                   ))}
                   {!!found.part.hint && <MathText text={`Hint: ${found.part.hint}`} style={styles.hint} />}
-                  {found.part.asksFor.length > 0 && <Text style={styles.asks}>Needs: {found.part.asksFor.join(' · ')}</Text>}
+                  {found.part.asksFor.length > 0 && <MathText text={`Needs: ${found.part.asksFor.join(' · ')}`} style={styles.asks} />}
                 </View>
               ) : null}
               {!!found.group.closing && <MathText text={`Applies to all parts: ${found.group.closing}`} style={styles.hint} />}
@@ -89,30 +99,38 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
             <MathText text={flat?.text ?? ''} style={styles.setup} />
           )}
         </ScrollView>
-      ) : (
-        <MathText
-          text={found?.part ? `(${found.part.label}) ${found.part.text}` : (found?.group.context ?? flat?.text ?? '')}
-          style={styles.partText}
-          numberOfLines={2}
-        />
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { backgroundColor: '#FFFBEB', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 6, gap: 4, overflow: 'hidden' },
+  wrap: { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line, paddingTop: 6, gap: 4, zIndex: 20, overflow: 'visible' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  nav: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+  nav: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
   navText: { fontSize: 20, color: C.primary, fontWeight: '700', marginTop: -2 },
-  title: { fontSize: 15, fontWeight: '800', color: C.ink, maxWidth: 360 },
-  expand: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: C.card, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
-  expandText: { fontSize: 13, fontWeight: '700', color: C.primary },
-  hintText: { color: C.sub, fontSize: 14 },
-  setup: { fontSize: 14, lineHeight: 20, color: C.sub },
-  partBox: { backgroundColor: C.card, borderRadius: 8, padding: 8, gap: 4 },
-  partText: { fontSize: 16, lineHeight: 22, color: C.ink },
-  sub: { fontSize: 15, lineHeight: 21, color: C.ink, paddingLeft: 12 },
-  hint: { fontSize: 14, fontStyle: 'italic', color: C.sub },
-  asks: { fontSize: 13, color: C.sub, fontStyle: 'italic' },
+  title: { fontSize: T.body, fontWeight: '700', color: C.ink, maxWidth: 360, letterSpacing: -0.2 },
+  expand: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: R.pill, backgroundColor: C.bg },
+  expandText: { fontSize: T.small, fontWeight: '600', color: C.primary },
+  hintText: { color: C.sub, fontSize: T.body - 1 },
+  sheet: {
+    position: 'absolute',
+    top: BANNER_COLLAPSED,
+    maxHeight: SHEET_MAX,
+    backgroundColor: C.card,
+    borderBottomWidth: 1,
+    borderColor: C.lineStrong,
+    shadowColor: '#0F1419',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  sheetContent: { gap: 8, padding: 14 },
+  setup: { fontSize: T.body - 1, lineHeight: 21, color: C.sub },
+  partBox: { backgroundColor: C.bg, borderRadius: R.sm + 2, padding: 10, gap: 4 },
+  partText: { fontSize: T.lead, lineHeight: 23, color: C.ink },
+  sub: { fontSize: T.body, lineHeight: 21, color: C.ink, paddingLeft: 12 },
+  hint: { fontSize: T.body - 1, fontStyle: 'italic', color: C.sub },
+  asks: { fontSize: T.small, color: C.sub, fontFamily: F.mono },
 });
