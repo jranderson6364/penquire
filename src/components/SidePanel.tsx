@@ -13,11 +13,11 @@ import {
 } from 'react-native';
 
 import { HELP_LEVELS } from '../ai/prompts';
-import type { PartStatus } from '../ai/types';
+import type { LineVerdict, PartStatus } from '../ai/types';
 import { disclosureSummary, issueOutcomes } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { assignmentSpend, formatCost } from '../store/usageRecords';
-import { C, VERDICT_STYLE } from '../theme';
+import { C, F, LABEL, R, T, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
 import { Markdown } from './Markdown';
 import { ProblemsView } from './ProblemsView';
@@ -99,8 +99,45 @@ function StartButton({ activePart, onHelpStart, sending }: Props) {
   );
 }
 
+function PartCard({ part, lines, active }: { part: PartStatus; lines: LineVerdict[]; active: boolean }) {
+  const s = STATUS_STYLE[part.status] ?? STATUS_STYLE.in_progress;
+  const flagged = lines.filter((l) => l.verdict !== 'valid' && l.verdict !== 'context');
+  const ok = lines.filter((l) => l.verdict === 'valid').length;
+  return (
+    <View style={[styles.partCard, active && { borderColor: C.primary }]}>
+      <View style={styles.partHead}>
+        <Text style={styles.partLabel}>{part.label}</Text>
+        <Text style={[styles.statusPill, { color: s.color, backgroundColor: s.bg }]}>{s.label}</Text>
+      </View>
+      {flagged.map((l) => {
+        const v = VERDICT_STYLE[l.verdict as keyof typeof VERDICT_STYLE];
+        return (
+          <View key={l.id} style={styles.lineRow}>
+            <Text style={[styles.lineSym, { color: v?.color ?? C.unknown }]}>{v?.symbol ?? '?'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lineId}>{l.id}</Text>
+              {!!l.note && <Text style={styles.lineNote}>{l.note}</Text>}
+            </View>
+          </View>
+        );
+      })}
+      {ok > 0 && (
+        <Text style={styles.okLine}>
+          ✓ {ok} line{ok === 1 ? '' : 's'} hold up
+        </Text>
+      )}
+      {part.missing.map((m, i) => (
+        <Text key={i} style={styles.missing}>
+          – {m}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 function FeedbackTab(p: Props) {
   const { check, stale } = p;
+  const [summary, setSummary] = React.useState(false);
   if (!check) {
     return (
       <View style={[styles.empty, { gap: 12 }]}>
@@ -135,23 +172,14 @@ function FeedbackTab(p: Props) {
         </Text>
       )}
       {r.parts.length > 0 && (
-        <View style={styles.chips}>
-          {r.parts.map((part) => {
-            const s = STATUS_STYLE[part.status] ?? STATUS_STYLE.in_progress;
-            return (
-              <View key={part.label} style={[styles.chip, { backgroundColor: s.bg }]}>
-                <Text style={[styles.chipText, { color: s.color }]}>
-                  {part.label} · {s.label}
-                </Text>
-                {part.missing.map((m, i) => (
-                  <Text key={i} style={styles.chipMissing}>
-                    – {m}
-                  </Text>
-                ))}
-              </View>
-            );
-          })}
+        <View style={styles.cards}>
+          {r.parts.map((part) => (
+            <PartCard key={part.label} part={part} lines={r.lines.filter((l) => l.part === part.label)} active={part.label === p.activePart} />
+          ))}
         </View>
+      )}
+      {r.lines.some((l) => !l.part) && r.lines.filter((l) => !l.part && l.verdict !== 'valid' && l.verdict !== 'context').length > 0 && (
+        <PartCard part={{ label: 'Other', status: 'in_progress', missing: [] }} lines={r.lines.filter((l) => !l.part)} active={false} />
       )}
       {r.fixedSinceLast.length > 0 && (
         <View style={styles.section}>
@@ -173,9 +201,14 @@ function FeedbackTab(p: Props) {
           ))}
         </View>
       )}
-      <View style={styles.section}>
-        <Markdown text={r.feedback} />
-      </View>
+      <Pressable onPress={() => setSummary((v) => !v)} accessibilityRole="button" style={styles.summaryToggle}>
+        <Text style={styles.summaryToggleText}>{summary ? 'Hide full summary' : 'Show full summary'}</Text>
+      </Pressable>
+      {summary && (
+        <View style={styles.section}>
+          <Markdown text={r.feedback} />
+        </View>
+      )}
       {!!r.revealed?.length && (
         <Text style={styles.meta}>
           This feedback showed: {[...new Set(r.revealed.map((x) => REVEAL_LABEL[x.kind] ?? x.kind))].join(', ')}
@@ -279,55 +312,64 @@ function LogTab({ assignment }: Props) {
 
 const styles = StyleSheet.create({
   panel: { flex: 1, backgroundColor: C.bg },
-  tabs: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingHorizontal: 8 },
+  tabs: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderColor: C.line, paddingHorizontal: 8, backgroundColor: C.card },
   tab: { paddingVertical: 12, paddingHorizontal: 10 },
   tabActive: { borderBottomWidth: 2, borderColor: C.primary },
-  tabText: { fontSize: 15, color: C.sub, fontWeight: '600' },
+  tabText: { fontSize: T.small, color: C.sub, fontWeight: '600' },
   tabTextActive: { color: C.primary },
   close: { marginLeft: 'auto', padding: 8 },
   closeText: { fontSize: 18, color: C.sub },
   scroll: { padding: 14, gap: 10, paddingBottom: 40 },
   empty: { padding: 20 },
-  emptyText: { color: C.sub, fontSize: 15, lineHeight: 21 },
-  staleBanner: { backgroundColor: C.partialSoft, color: C.partial, padding: 8, borderRadius: 8, fontWeight: '600' },
-  questionCard: { backgroundColor: C.primarySoft, borderRadius: 12, padding: 12, gap: 4 },
-  questionLabel: { fontSize: 12, fontWeight: '700', color: C.primary, textTransform: 'uppercase' },
-  question: { fontSize: 17, lineHeight: 24, color: C.ink, fontWeight: '600' },
+  emptyText: { color: C.sub, fontSize: T.body, lineHeight: 21 },
+  staleBanner: { backgroundColor: C.partialSoft, color: C.partial, padding: 8, borderRadius: R.sm, fontWeight: '600', overflow: 'hidden' },
+  questionCard: { backgroundColor: C.primarySoft, borderRadius: R.md, padding: 14, gap: 4 },
+  questionLabel: { ...LABEL, color: C.primary },
+  question: { fontSize: T.lead, lineHeight: 24, color: C.ink, fontWeight: '600', letterSpacing: -0.2 },
   countRow: { flexDirection: 'row', gap: 6 },
-  count: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, fontWeight: '700', overflow: 'hidden' },
-  chips: { gap: 6 },
-  chip: { borderRadius: 8, padding: 8 },
-  chipText: { fontWeight: '700', fontSize: 14 },
-  chipMissing: { fontSize: 13, color: C.ink, marginTop: 2 },
+  count: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: R.sm, fontWeight: '700', overflow: 'hidden', fontFamily: F.mono, fontSize: T.small },
+  cards: { gap: 8 },
+  partCard: { backgroundColor: C.card, borderRadius: R.md, padding: 12, gap: 8, borderWidth: 1, borderColor: C.line },
+  partHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  partLabel: { fontSize: T.lead, fontWeight: '700', color: C.ink, letterSpacing: -0.2 },
+  statusPill: { fontSize: T.caption, fontWeight: '600', paddingHorizontal: 8, paddingVertical: 3, borderRadius: R.pill, overflow: 'hidden' },
+  lineRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
+  lineSym: { width: 16, fontSize: T.body, fontWeight: '700', textAlign: 'center' },
+  lineId: { fontSize: T.caption, color: C.faint, fontFamily: F.mono },
+  lineNote: { fontSize: T.body - 1, lineHeight: 20, color: C.ink },
+  okLine: { fontSize: T.small, color: C.valid, fontWeight: '600' },
+  missing: { fontSize: T.small, color: C.ink },
+  summaryToggle: { alignSelf: 'flex-start', paddingVertical: 6 },
+  summaryToggleText: { fontSize: T.small, color: C.primary, fontWeight: '600' },
   section: { gap: 4 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: C.ink },
-  listItem: { fontSize: 14, color: C.ink },
-  meta: { fontSize: 12, color: C.faint },
-  bubble: { borderRadius: 12, padding: 10, maxWidth: '92%' },
+  sectionTitle: { ...LABEL, color: C.ink },
+  listItem: { fontSize: T.body - 1, color: C.ink },
+  meta: { fontSize: T.caption, color: C.faint, fontFamily: F.mono },
+  bubble: { borderRadius: R.md, padding: 10, maxWidth: '92%' },
   userBubble: { backgroundColor: C.primary, alignSelf: 'flex-end' },
-  botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
-  userText: { color: '#fff', fontSize: 15, lineHeight: 21 },
-  inputRow: { padding: 10, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, backgroundColor: C.card },
+  botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line },
+  userText: { color: '#fff', fontSize: T.body, lineHeight: 21 },
+  inputRow: { padding: 10, gap: 6, borderTopWidth: 1, borderColor: C.line, backgroundColor: C.card },
   attachRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  attachText: { color: C.sub, fontSize: 13 },
+  attachText: { color: C.sub, fontSize: T.small },
   input: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 44,
     maxHeight: 120,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: C.line,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    borderRadius: R.sm + 2,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
-    backgroundColor: '#fff',
+    fontSize: T.body,
+    backgroundColor: C.card,
   },
-  problem: { backgroundColor: C.card, borderRadius: 10, padding: 10, gap: 4 },
-  problemLabel: { fontWeight: '800', color: C.primary },
-  problemText: { fontSize: 14, lineHeight: 20, color: C.ink },
-  asks: { fontSize: 13, color: C.sub, fontStyle: 'italic' },
-  disclosure: { backgroundColor: C.card, borderRadius: 10, padding: 12 },
-  disclosureText: { fontSize: 14, lineHeight: 20, color: C.ink },
-  logItem: { fontSize: 12, color: C.sub, fontFamily: 'Menlo' },
-  cost: { fontSize: 12, color: C.sub, fontVariant: ['tabular-nums'], marginTop: 4 },
+  problem: { backgroundColor: C.card, borderRadius: R.sm + 2, padding: 10, gap: 4 },
+  problemLabel: { fontWeight: '700', color: C.primary },
+  problemText: { fontSize: T.body - 1, lineHeight: 20, color: C.ink },
+  asks: { fontSize: T.small, color: C.sub, fontStyle: 'italic' },
+  disclosure: { backgroundColor: C.card, borderRadius: R.sm + 2, padding: 12, borderWidth: 1, borderColor: C.line },
+  disclosureText: { fontSize: T.body - 1, lineHeight: 20, color: C.ink },
+  logItem: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
+  cost: { fontSize: T.caption, color: C.sub, fontFamily: F.mono, marginTop: 4 },
 });
