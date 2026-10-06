@@ -49,3 +49,24 @@ test('broken chain of equalities is flagged', () => {
   const out = applyAlgebraGuard([L('L1', '(x+1)^2 = x^2+1 = 2')]);
   assert.equal(out[0].verdict, 'partial');
 });
+
+test('a low-confidence reading never keeps a graded verdict (reading guard)', async () => {
+  const { applyReadingGuard } = await import('./guard.ts');
+  const out = applyReadingGuard([
+    { ...L('L1', '2x+3=7'), readConfidence: 'low', uncertain: '+3' },
+    { ...L('L2', '2x=10', 'incorrect'), readConfidence: 'low' },
+    { ...L('L3', 'x=2'), readConfidence: 'medium' },
+    { ...L('L4', 'Given', 'context'), readConfidence: 'low' },
+  ]);
+  assert.deepEqual(verdicts(out), ['unreadable', 'unreadable', 'valid', 'context']);
+  assert.equal(out[0].guard, 'reading');
+  assert.equal(out[0].modelVerdict, 'valid');
+  assert.match(out[0].note, /\+3/);
+  assert.equal(out[1].modelVerdict, 'incorrect');
+});
+
+test('reading guard returns the same array when nothing is low confidence', async () => {
+  const { applyReadingGuard } = await import('./guard.ts');
+  const input = [{ ...L('L1', 'x=2'), readConfidence: 'high' as const }, L('L2', 'y=3')];
+  assert.equal(applyReadingGuard(input), input);
+});

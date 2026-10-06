@@ -74,6 +74,16 @@ const CHECK_TOOL: Tool = {
               description:
                 'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose or units). Never correct, simplify or complete it.',
             },
+            read_confidence: {
+              type: 'string',
+              enum: ['high', 'medium', 'low'],
+              description:
+                'How sure you are that `reading` is exactly what is written, judged BEFORE grading: high = every symbol clear; medium = one symbol could be something else but the meaning is probably right; low = a symbol that matters (a sign, digit, exponent, subscript, fraction scope) could be read another way.',
+            },
+            uncertain: {
+              type: 'string',
+              description: 'The exact characters of `reading` you are unsure of (e.g. "-2" or "^2"), or "" when read_confidence is high.',
+            },
             verdict: {
               type: 'string',
               enum: ['valid', 'partial', 'incorrect', 'unreadable', 'context'],
@@ -91,7 +101,7 @@ const CHECK_TOOL: Tool = {
                 'Only for lines that are not valid/context: the kind of obstacle the work shows (slip = sound plan, local error; method = inapplicable method; notation; prerequisite = missing earlier skill; misconception = coherent wrong idea; no_work = correct result without reasoning; incomplete = missing deliverable; alt_path = valid but unexpected approach; unclear = the work does not tell these apart).',
             },
           },
-          required: ['id', 'part', 'reading', 'verdict', 'note'],
+          required: ['id', 'part', 'reading', 'read_confidence', 'verdict', 'note'],
         },
       },
       parts: {

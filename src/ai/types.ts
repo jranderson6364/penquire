@@ -46,8 +46,12 @@ export type LineVerdict = {
   sig?: string;
   /** kind of obstacle (non-valid lines only; absent when the model gave none) */
   obstacle?: Obstacle;
-  /** set when a deterministic guard (not the model) lowered this verdict */
-  guard?: 'algebra';
+  /** how sure the model was of `reading`, stated before grading (absent on older checks) */
+  readConfidence?: 'high' | 'medium' | 'low';
+  /** the characters of `reading` the model was unsure of */
+  uncertain?: string;
+  /** set when deterministic code (not the model) lowered this verdict: the algebra guard, or a low-confidence reading */
+  guard?: 'algebra' | 'reading';
   /** the model's own verdict before a guard lowered it (for evals: model error vs guard error) */
   modelVerdict?: Verdict;
 };

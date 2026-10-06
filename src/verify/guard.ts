@@ -45,6 +45,23 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
 }
 
 /**
+ * Read before judging: a verdict on a line the model itself could not read confidently is not evidence. Lower any
+ * graded verdict (valid, partial, incorrect) on a LOW-confidence reading to "unreadable" and ask the student to
+ * confirm what they wrote, quoting only their own characters. A false ✓ from a misread is the worst bug, and a false
+ * ✗ on a misread costs trust. Downgrade-only; medium/high or missing confidence is left alone.
+ */
+export function applyReadingGuard(lines: LineVerdict[]): LineVerdict[] {
+  let changed = false;
+  const out = lines.map((l) => {
+    if (l.readConfidence !== 'low' || l.verdict === 'context' || l.verdict === 'unreadable') return l;
+    changed = true;
+    const what = l.uncertain ? `“${l.uncertain}” in this line` : 'this line';
+    return { ...l, verdict: 'unreadable' as const, guard: 'reading' as const, modelVerdict: l.verdict, obstacle: undefined, note: `I'm not sure I read ${what} right. Is it what you wrote?` };
+  });
+  return changed ? out : lines;
+}
+
+/**
  * Withhold answer leaks from every piece of tutor text in a check result. A removed question is replaced
  * by a content-free one that mentions only line IDs. The result records what was blocked.
  */

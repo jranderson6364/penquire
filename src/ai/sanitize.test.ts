@@ -58,3 +58,14 @@ test('line parts are matched to the problem list; unknown labels and "none" beco
 test('without a problem list the model part is kept as written', () => {
   assert.equal(sanitizeLines([{ id: 'L1', part: 'Q7', reading: '', verdict: 'valid', note: '' }])[0].part, 'Q7');
 });
+
+test('read confidence is kept only when recognised; uncertain text is trimmed and capped', () => {
+  const [a, b] = sanitizeLines([
+    { id: 'L1', reading: 'x=2', verdict: 'valid', note: '', read_confidence: 'LOW', uncertain: '  2  ' },
+    { id: 'L2', reading: 'y=3', verdict: 'valid', note: '', read_confidence: 'sure', uncertain: '' },
+  ]);
+  assert.equal(a.readConfidence, 'low');
+  assert.equal(a.uncertain, '2');
+  assert.equal(b.readConfidence, undefined);
+  assert.equal(b.uncertain, undefined);
+});

@@ -6,6 +6,7 @@ import { OBSTACLES, REVEAL_KINDS, type CheckResult, type LineVerdict, type Obsta
  * cannot interpret as a verdict becomes "unreadable" (never "valid"), because a false ✓ is the worst bug.
  */
 const VERDICTS: ReadonlySet<string> = new Set(['valid', 'partial', 'incorrect', 'unreadable', 'context']);
+const READ_CONF: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
 const PART_STATUS: ReadonlySet<string> = new Set(['complete', 'in_progress', 'missing_items', 'not_started']);
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -38,10 +39,14 @@ export function sanitizeLines(raw: unknown, knownParts?: readonly string[]): Lin
     const known = VERDICTS.has(claimed);
     const verdict = (known ? claimed : 'unreadable') as Verdict;
     const obstacle = str(r.obstacle).trim().toLowerCase();
+    const conf = str(r.read_confidence).trim().toLowerCase();
+    const uncertain = str(r.uncertain).trim();
     out.push({
       id,
       part: normalizePart(r.part, knownParts),
       reading: str(r.reading),
+      ...(READ_CONF.has(conf) ? { readConfidence: conf as NonNullable<LineVerdict['readConfidence']> } : {}),
+      ...(uncertain ? { uncertain: uncertain.slice(0, 40) } : {}),
       verdict,
       note: known ? str(r.note) : `${str(r.note)} (The tutor's verdict for this line was not understood, so it is not marked.)`.trim(),
       // an obstacle only means something on a line that needs work; unknown values are dropped, not guessed
