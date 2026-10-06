@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { findPart } from '../problems/flatten';
 import type { Assignment } from '../store/types';
 import { C, F, R, T } from '../theme';
+import { Icon } from './Icon';
 import { MathText } from './MathText';
 import { PartPicker } from './PartPicker';
 
@@ -12,6 +13,11 @@ type Props = {
   /** flat label of the part being worked on ("6b"), or undefined */
   activePart?: string;
   onChange: (label: string | undefined) => void;
+  /** typeset the current part (or only the setup) onto the page */
+  onPlacePart: () => void;
+  onPlaceSetup: () => void;
+  /** tuck the whole strip away; a small pill on the page brings it back */
+  onRetract: () => void;
   /** left/right inset (safe area) */
   insetLeft: number;
   insetRight: number;
@@ -21,11 +27,11 @@ type Props = {
  * Fixed height on purpose: this sits in the layout above the canvas, and resizing it would make the page reflow.
  * The full setup opens as a sheet that floats over the page instead of pushing it down.
  */
-export const BANNER_COLLAPSED = 92;
+export const BANNER_COLLAPSED = 112;
 const SHEET_MAX = 320;
 
-/** The question being worked on, always visible under the controls. */
-export function QuestionBanner({ assignment, activePart, onChange, insetLeft, insetRight }: Props) {
+/** The question being worked on: the shared setup of the whole problem (one line), then just the current part. */
+export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, onPlaceSetup, onRetract, insetLeft, insetRight }: Props) {
   const [expanded, setExpanded] = React.useState(false);
   const { groups, problems } = assignment;
   const labels = problems.map((p) => p.label);
@@ -43,8 +49,11 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
     return { label: p.label, text: f?.part ? f.part.text || f.group.context : f?.group.context ?? p.text };
   });
 
+  const hasPart = !!found?.part && !!found.part.text;
+  const setup = found?.group.context ?? '';
+  const partLine = found?.part ? `(${found.part.label}) ${found.part.text}` : (setup || flat?.text || '');
   const title = found
-    ? `Problem ${found.group.label}${found.part ? ` · (${found.part.label})` : ''}${found.group.title ? ` · ${found.group.title}` : ''}`
+    ? `Problem ${found.group.label}${found.group.title ? ` · ${found.group.title}` : ''}`
     : flat
       ? flat.label
       : 'No question selected';
@@ -52,31 +61,56 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
   return (
     <View style={[styles.wrap, { height: BANNER_COLLAPSED, paddingLeft: Math.max(12, insetLeft), paddingRight: Math.max(12, insetRight) }]}>
       <View style={styles.row}>
-        <Pressable onPress={() => go(-1)} hitSlop={8} style={styles.nav} accessibilityLabel="Previous question">
-          <Text style={styles.navText}>‹</Text>
+        <Pressable onPress={() => go(-1)} hitSlop={8} style={styles.nav} accessibilityRole="button" accessibilityLabel="Previous question">
+          <Icon name="chevron-left" size={16} color={C.primary} />
         </Pressable>
+        <Pressable onPress={() => go(1)} hitSlop={8} style={styles.nav} accessibilityRole="button" accessibilityLabel="Next question">
+          <Icon name="chevron-right" size={16} color={C.primary} />
+        </Pressable>
+        {!!found?.part && (
+          <Text style={styles.partTag}>
+            {found.group.label}
+            {found.part.label}
+          </Text>
+        )}
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <Pressable onPress={() => go(1)} hitSlop={8} style={styles.nav} accessibilityLabel="Next question">
-          <Text style={styles.navText}>›</Text>
-        </Pressable>
         <View style={{ flex: 1 }} />
+        {!!activePart && (
+          <>
+            <Pressable onPress={onPlacePart} style={styles.action} accessibilityRole="button" accessibilityLabel="Place this part on the page">
+              <Icon name="pin" size={16} color={C.primary} />
+              <Text style={styles.actionText}>Place part</Text>
+            </Pressable>
+            {!!setup && hasPart && (
+              <Pressable onPress={onPlaceSetup} style={styles.action} accessibilityRole="button" accessibilityLabel="Place the setup of the whole problem on the page">
+                <Icon name="pin" size={16} color={C.primary} />
+                <Text style={styles.actionText}>Place setup</Text>
+              </Pressable>
+            )}
+          </>
+        )}
         <PartPicker parts={choices} value={activePart} onChange={onChange} />
-        <Pressable onPress={() => setExpanded((e) => !e)} style={styles.expand} accessibilityLabel={expanded ? 'Collapse' : 'Show the full setup'}>
-          <Text style={styles.expandText}>{expanded ? 'Less ▴' : 'Setup ▾'}</Text>
+        {!!activePart && (
+          <Pressable onPress={() => setExpanded((e) => !e)} style={styles.nav} accessibilityRole="button" accessibilityLabel={expanded ? 'Close details' : 'Show every detail of this question'}>
+            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.primary} />
+          </Pressable>
+        )}
+        <Pressable onPress={onRetract} hitSlop={6} style={styles.nav} accessibilityRole="button" accessibilityLabel="Hide the question strip">
+          <Icon name="close" size={14} color={C.sub} />
         </Pressable>
       </View>
 
       {!activePart ? (
-        <Text style={styles.hintText}>Pick the question you are working on with ‹ › or the list. The tutor checks your page against it.</Text>
+        <Text style={styles.hintText}>Pick the question you are working on with the arrows or the list. The tutor checks your page against it.</Text>
       ) : (
-        <MathText
-          text={found?.part ? `(${found.part.label}) ${found.part.text}` : (found?.group.context ?? flat?.text ?? '')}
-          style={styles.partText}
-          numberOfLines={2}
-        />
+        <>
+          {hasPart && !!setup && <MathText text={setup} style={styles.setupLine} numberOfLines={1} />}
+          <MathText text={partLine} style={styles.partText} numberOfLines={hasPart && setup ? 2 : 3} />
+        </>
       )}
+
       {expanded && !!activePart && (
         <ScrollView style={[styles.sheet, { left: Math.max(0, insetLeft), right: Math.max(0, insetRight) }]} contentContainerStyle={styles.sheetContent} nestedScrollEnabled>
           {found ? (
@@ -104,15 +138,29 @@ export function QuestionBanner({ assignment, activePart, onChange, insetLeft, in
   );
 }
 
+/** What remains of the question strip when it is tucked away: one small pill on the page. */
+export function QuestionPill({ label, onPress, insetLeft }: { label?: string; onPress: () => void; insetLeft: number }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.pill, { left: Math.max(8, insetLeft) }]} accessibilityRole="button" accessibilityLabel="Show the question">
+      <Icon name="question" size={16} color={C.primary} />
+      <Text style={styles.pillText}>{label ?? 'Question'}</Text>
+      <Icon name="chevron-down" size={14} color={C.sub} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  wrap: { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line, paddingTop: 6, gap: 4, zIndex: 20, overflow: 'visible' },
+  wrap: { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line, paddingTop: 6, gap: 3, zIndex: 20, overflow: 'visible' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   nav: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
-  navText: { fontSize: 20, color: C.primary, fontWeight: '700', marginTop: -2 },
-  title: { fontSize: T.body, fontWeight: '700', color: C.ink, maxWidth: 360, letterSpacing: -0.2 },
-  expand: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: R.pill, backgroundColor: C.bg },
-  expandText: { fontSize: T.small, fontWeight: '600', color: C.primary },
+  partTag: { fontSize: T.small, fontWeight: '700', color: C.primary, backgroundColor: C.primarySoft, borderRadius: R.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden', marginLeft: 4 },
+  title: { fontSize: T.body, fontWeight: '600', color: C.ink, maxWidth: 320, letterSpacing: -0.2 },
+  action: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 30, paddingHorizontal: 10, borderRadius: R.pill, backgroundColor: C.primarySoft },
+  actionText: { fontSize: T.small, fontWeight: '600', color: C.primary },
   hintText: { color: C.sub, fontSize: T.body - 1 },
+  setupLine: { fontSize: T.small, lineHeight: 18, color: C.sub },
+  pill: { position: 'absolute', top: 8, zIndex: 15, flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderRadius: R.pill, backgroundColor: C.card, borderWidth: 1, borderColor: C.line, shadowColor: '#0F1419', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
+  pillText: { fontSize: T.small, fontWeight: '600', color: C.ink },
   sheet: {
     position: 'absolute',
     top: BANNER_COLLAPSED,
@@ -129,7 +177,7 @@ const styles = StyleSheet.create({
   sheetContent: { gap: 8, padding: 14 },
   setup: { fontSize: T.body - 1, lineHeight: 21, color: C.sub },
   partBox: { backgroundColor: C.bg, borderRadius: R.sm + 2, padding: 10, gap: 4 },
-  partText: { fontSize: T.lead, lineHeight: 23, color: C.ink },
+  partText: { fontSize: T.lead - 1, lineHeight: 22, color: C.ink },
   sub: { fontSize: T.body, lineHeight: 21, color: C.ink, paddingLeft: 12 },
   hint: { fontSize: T.body - 1, fontStyle: 'italic', color: C.sub },
   asks: { fontSize: T.small, color: C.sub, fontFamily: F.mono },

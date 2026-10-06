@@ -8,10 +8,12 @@ import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/ty
 import { Button } from '../components/Button';
 import { AiFab } from '../components/AiFab';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
-import { QuestionBanner } from '../components/QuestionBanner';
-import { ContextStrip, TopBar } from '../components/TopBar';
+import { QuestionBanner, QuestionPill } from '../components/QuestionBanner';
+import { TopBar } from '../components/TopBar';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
+import { BlocksLayer } from '../components/BlocksLayer';
+import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, partContent, setupContent, type PageBlock } from '../blocks';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { groupLines, type Line } from '../ink/lines';
@@ -23,6 +25,7 @@ import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { applyParse } from '../store/parseApply';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { readSource } from '../store/sources';
+import { findPart } from '../problems/flatten';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -311,6 +314,57 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const marksUsable = !!check && (!modern || check.space === 'page-v2');
   const oldCheck = !!check && modern && check.space !== 'page-v2';
   const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToScreen(l, viewport) })) : check.lines) : [];
+
+  // ---- question blocks on the page ---------------------------------------
+  const pageBlocks: PageBlock[] = (a?.blocks && a.blocks[pageId]) || [];
+  const placeBlock = async (kind: 'part' | 'setup') => {
+    if (!a || !activePart) return;
+    const content = kind === 'part' ? partContent(a.groups, a.problems, activePart) : setupContent(a.groups, activePart);
+    if (!content) {
+      Alert.alert('Nothing to place', kind === 'setup' ? 'This problem has no shared setup.' : 'This question has no text to place.');
+      return;
+    }
+    const label = kind === 'part' ? activePart : (a.groups && findPart(a.groups, activePart)?.group.label) || activePart;
+    if (pageBlocks.some((b) => b.kind === kind && b.label === label)) {
+      Alert.alert('Already on this page', 'Drag it by its handle, or remove it with ✕ and place it again.');
+      return;
+    }
+    let inkBottom = 0;
+    try {
+      const strokes = (await canvasRef.current?.getStrokes()) ?? [];
+      for (const st of strokes) inkBottom = Math.max(inkBottom, st.y + st.h);
+    } catch {
+      // placing below the other blocks is still fine
+    }
+    const h = estimateHeight(content);
+    const block: PageBlock = {
+      id: newId('b_'),
+      kind,
+      label,
+      heading: content.heading,
+      lines: content.lines,
+      x: BLOCK_MARGIN_X,
+      y: nextBlockY(inkBottom, pageBlocks, PAGE_HEIGHT, h),
+      w: BLOCK_WIDTH,
+      h,
+    };
+    updateAssignment(a.id, (x) => ({ ...x, blocks: { ...(x.blocks ?? {}), [pageId]: [...((x.blocks ?? {})[pageId] ?? []), block] } }));
+  };
+  const moveBlock = React.useCallback(
+    (id: string, bx: number, by: number) => {
+      updateAssignment(assignmentId, (x) => {
+        const list = ((x.blocks ?? {})[pageId] ?? []).map((b) => (b.id === id ? { ...b, ...clampBlock({ x: bx, y: by, w: b.w }, PAGE_WIDTH, PAGE_HEIGHT) } : b));
+        return { ...x, blocks: { ...(x.blocks ?? {}), [pageId]: list } };
+      });
+    },
+    [assignmentId, pageId]
+  );
+  const removeBlock = React.useCallback(
+    (id: string) => {
+      updateAssignment(assignmentId, (x) => ({ ...x, blocks: { ...(x.blocks ?? {}), [pageId]: ((x.blocks ?? {})[pageId] ?? []).filter((b) => b.id !== id) } }));
+    },
+    [assignmentId, pageId]
+  );
 
   // ---- actions -----------------------------------------------------------
   const runCheck = async () => {
@@ -603,8 +657,18 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         insetLeft={insets.left}
         insetRight={insets.right}
       />
-      {modern && <ContextStrip tool={toolState} onChange={setToolState} insetLeft={insets.left} insetRight={insets.right} />}
-      {showQuestion && <QuestionBanner assignment={a} activePart={activePart} onChange={setActivePart} insetLeft={insets.left} insetRight={insets.right} />}
+      {showQuestion && (
+        <QuestionBanner
+          assignment={a}
+          activePart={activePart}
+          onChange={setActivePart}
+          onPlacePart={() => void placeBlock('part')}
+          onPlaceSetup={() => void placeBlock('setup')}
+          onRetract={toggleQuestion}
+          insetLeft={insets.left}
+          insetRight={insets.right}
+        />
+      )}
 
       <View style={styles.body}>
       <View style={styles.page} onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
@@ -617,6 +681,12 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           onDrawingChanged={onDrawingChanged}
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
         />
+        {modern && pageBlocks.length > 0 && size.w > 0 && (
+          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.4 : 1 }]}>
+            <BlocksLayer blocks={pageBlocks} viewport={viewport} onMove={moveBlock} onRemove={removeBlock} />
+          </View>
+        )}
+        {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
         {check && marksUsable && showMarks && size.w > 0 && (
           <View pointerEvents={viewport.interacting ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0 : 1 }]}>
             <MarksOverlay

@@ -1,3 +1,4 @@
+import type { PageBlock } from '../blocks';
 import type { ChatTurn, CheckResult, HelpLevel, Problem } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Ladder } from '../tutor/ladder';
@@ -61,6 +62,8 @@ export type Assignment = {
   /** flat label of the question the student is working on ("6b"); persists between sessions */
   activePart?: string;
   pageIds: string[];
+  /** question text placed on a page, by page id (src/blocks.ts); typeset above the ink, not part of the drawing */
+  blocks?: Record<string, PageBlock[]>;
   chat: ChatTurn[];
   /** latest check per page id */
   checks: Record<string, StoredCheck>;
