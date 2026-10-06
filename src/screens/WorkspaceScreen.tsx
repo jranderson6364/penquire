@@ -77,6 +77,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   const [strokeCount, setStrokeCount] = React.useState<number | null>(null);
   const [checking, setChecking] = React.useState(false);
+  // Normal outcomes ("nothing new", "add a key", a failed check) are a quiet line on the page, not a system alert.
+  const [notice, setNotice] = React.useState<{ text: string; tone: 'info' | 'warn' | 'error'; id: number } | null>(null);
+  const say = React.useCallback((text: string, tone: 'info' | 'warn' | 'error' = 'info') => setNotice({ text, tone, id: Date.now() }), []);
+  React.useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice((n) => (n?.id === notice.id ? null : n)), notice.tone === 'error' ? 8000 : 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
   const [sending, setSending] = React.useState(false);
   const [reparsing, setReparsing] = React.useState(false);
   const [panelOpen, setPanelOpen] = React.useState(false);
@@ -396,7 +404,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   // ---- actions -----------------------------------------------------------
   const runCheck = async () => {
     if (!hasKey) {
-      Alert.alert('No API key', 'Add your Anthropic API key in Settings (or .env) to check your work.');
+      say('Add your Anthropic API key in Settings to check your work.', 'warn');
       return;
     }
     setChecking(true);
@@ -404,7 +412,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       await savePage();
       const { lines, image, strokes, strokeList } = await capture();
       if (strokes === 0 || !image) {
-        Alert.alert('Nothing to check', 'Write something on this page first.');
+        say('Nothing to check yet. Write something on this page first.');
         return;
       }
       const prev = a.checks[pageId];
@@ -417,7 +425,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         setShowMarks(true);
         setTab('feedback');
         setPanelOpen(true);
-        Alert.alert('No changes', 'Nothing on this page changed since your last check.');
+        say('Nothing new since your last check.');
         return;
       }
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
@@ -486,7 +494,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       setTab('feedback');
       setPanelOpen(true);
     } catch (e) {
-      Alert.alert('Check failed', String(e instanceof Error ? e.message : e));
+      say(`Check didn't finish: ${String(e instanceof Error ? e.message : e)}. Tap Check to try again.`, 'error');
     } finally {
       setChecking(false);
     }
@@ -581,7 +589,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     const key = issueKey(v.part, v.reading, v.sig);
     const esc = escalate(a.ladder ?? {}, key, base, a.policyMaxLevel);
     if (esc.atCeiling) {
-      Alert.alert('Highest help for this course', `${HELP_LEVELS[a.policyMaxLevel].name} is the most this course's AI policy allows. Try the Chat tab to talk it through.`);
+      say(`${HELP_LEVELS[a.policyMaxLevel].name} is the most help this course's AI policy allows. Ask in the chat to talk it through.`, 'warn');
       return;
     }
     updateAssignment(a.id, (x) => ({ ...x, ladder: esc.ladder, issues: noteHelp(x.issues ?? {}, pageId, key, esc.level) }));
@@ -664,7 +672,6 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           onShowMarks={showTurnMarks}
           header={
             <View style={styles.sideHeader}>
-              <Button small kind="primary" title={checking ? 'Checking…' : 'Check this page'} loading={checking} onPress={runCheck} />
               <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
               <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
             </View>
@@ -757,6 +764,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             />
           </View>
         )}
+        {notice && (
+          <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
+            <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>
+          </Pressable>
+        )}
         {oldCheck && showMarks && (
           <View pointerEvents="none" style={styles.staleTag}>
             <Text style={styles.staleText}>Marks from an older version · Check again</Text>
@@ -818,4 +830,21 @@ const styles = StyleSheet.create({
   keyBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 12 },
   staleTag: { position: 'absolute', top: 8, left: 8, backgroundColor: C.partialSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   staleText: { color: C.partial, fontWeight: '700', fontSize: 12 },
+  notice: {
+    position: 'absolute',
+    top: 12,
+    alignSelf: 'center',
+    maxWidth: 520,
+    backgroundColor: C.card,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.line,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  noticeText: { fontSize: 14, color: C.ink, textAlign: 'center' },
 });

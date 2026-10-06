@@ -72,7 +72,7 @@ const CHECK_TOOL: Tool = {
             reading: {
               type: 'string',
               description:
-                'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose or units). Never correct, simplify or complete it.',
+                'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose). Units exactly as written, each in \\mathrm{...} (e.g. 9.8\\,\\mathrm{m/s^2}); never add a unit the student did not write. Never correct, simplify or complete it.',
             },
             read_confidence: {
               type: 'string',

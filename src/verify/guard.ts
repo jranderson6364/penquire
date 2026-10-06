@@ -1,6 +1,6 @@
 import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
 import { fallbackQuestion, scrubText, type Leak, type LeakContext } from './leak.ts';
-import { checkChain, checkStep } from './expr.ts';
+import { checkChain, checkLineUnits, checkStep } from './expr.ts';
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
 /** Tolerate a malformed transcription (missing or non-string) rather than throwing. */
@@ -25,7 +25,9 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
     }
     if (cur.verdict === 'valid') {
       const chain = checkChain(rd(cur));
-      if (chain?.kind === 'inconsistent') {
+      if (checkLineUnits(rd(cur))?.kind === 'inconsistent') {
+        lowered.set(cur.id, 'Units check: the two sides of an "=" on this line have different units. Which side is right?');
+      } else if (chain?.kind === 'inconsistent') {
         lowered.set(cur.id, 'Algebra check: one link in this chain of equalities is not an identity. Which one?');
       } else if (prev && prev.verdict === 'valid' && (prev.part ?? '') === (cur.part ?? '')) {
         const rel = checkStep(rd(prev), rd(cur));

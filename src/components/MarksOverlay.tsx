@@ -49,9 +49,11 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
+  const [offOpen, setOffOpen] = React.useState(false);
   React.useEffect(() => {
     setCorrecting(null);
     setReading('');
+    setOffOpen(false);
   }, [open]);
   const byId = React.useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
 
@@ -107,71 +109,112 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
             },
           ]}
         >
-          <Text style={styles.popTitle}>
-            {active.v.id}
-            {active.v.part ? ` · ${active.v.part}` : ''} ·{' '}
-            <Text style={{ color: VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].color }}>
-              {VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].label}
+          <View style={styles.popHead}>
+            <Text style={styles.popTitle}>
+              {active.v.part ? `${active.v.part} · ` : ''}
+              <Text style={{ color: VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].color }}>
+                {VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].label}
+              </Text>
             </Text>
-          </Text>
-          {!!active.v.reading && (
-            <Text style={styles.reading} numberOfLines={3}>
-              read as: {active.v.reading}
-            </Text>
-          )}
+            <Pressable hitSlop={12} onPress={() => setOpen(null)} accessibilityLabel="Close" style={styles.close}>
+              <Text style={styles.closeText}>✕</Text>
+            </Pressable>
+          </View>
           <Text style={styles.note}>{latexToUnicode(active.v.note)}</Text>
           {active.v.verdict !== 'valid' && repeats(active.v) && (
-            <Text style={styles.repeat}>Still flagged after another check. Try More help for a different kind of hint.</Text>
+            <Text style={styles.repeat}>Still flagged after another check. Help me see it gives a different kind of hint.</Text>
           )}
-          {(active.v.verdict === 'incorrect' || active.v.verdict === 'partial') && (
-            <Pressable
-              onPress={() => {
-                onDispute(active.v);
-                setOpen(null);
+          <Evidence v={active.v} />
+
+          {offOpen ? (
+            <SomethingOff
+              verdict={active.v}
+              saved={feedbackFor(active.v.id)}
+              correcting={correcting}
+              setCorrecting={setCorrecting}
+              reading={reading}
+              setReading={setReading}
+              onRate={(fb) => {
+                onRate({ lineId: active.v.id, ...fb });
+                setCorrecting(null);
+                setOffOpen(false);
               }}
-              style={styles.dispute}
-              accessibilityLabel="I think this line is right. Ask the tutor to re-check it."
-            >
-              <Text style={styles.disputeText}>I think this is right · re-check</Text>
+              onInputBlur={onInputBlur}
+            />
+          ) : (
+            <View style={styles.popActions}>
+              {(active.v.verdict === 'incorrect' || active.v.verdict === 'partial') && (
+                <>
+                  <Button
+                    small
+                    kind="primary"
+                    title="Help me see it"
+                    onPress={() => {
+                      onMoreHelp(active.v);
+                      setOpen(null);
+                    }}
+                  />
+                  <Button
+                    small
+                    title="I think this is right"
+                    onPress={() => {
+                      onDispute(active.v);
+                      setOpen(null);
+                    }}
+                  />
+                </>
+              )}
+              {active.v.verdict === 'unreadable' && (
+                <Button
+                  small
+                  kind="primary"
+                  title="That's not what I wrote"
+                  onPress={() => {
+                    setCorrecting('misread');
+                    setOffOpen(true);
+                  }}
+                />
+              )}
+              {(active.v.verdict === 'valid' || active.v.verdict === 'unreadable') && (
+                <Button
+                  small
+                  title="Ask about this"
+                  onPress={() => {
+                    onAsk(active.v);
+                    setOpen(null);
+                  }}
+                />
+              )}
+            </View>
+          )}
+          {!offOpen && (
+            <Pressable onPress={() => setOffOpen(true)} hitSlop={8} style={styles.offLink} accessibilityLabel="Something is off with this mark: it is wrong or I was misread">
+              <Text style={styles.offLinkText}>{feedbackFor(active.v.id) ? 'Feedback saved · change' : "Something's off?"}</Text>
             </Pressable>
           )}
-          <FeedbackRow
-            verdict={active.v}
-            saved={feedbackFor(active.v.id)}
-            correcting={correcting}
-            setCorrecting={setCorrecting}
-            reading={reading}
-            setReading={setReading}
-            onRate={(fb) => {
-              onRate({ lineId: active.v.id, ...fb });
-              setCorrecting(null);
-            }}
-            onInputBlur={onInputBlur}
-          />
-          <View style={styles.popActions}>
-            <Button small kind="ghost" title="Close" onPress={() => setOpen(null)} />
-            {active.v.verdict !== 'valid' && (
-              <Button
-                small
-                title={`More help (${rungName(active.v)})`}
-                onPress={() => {
-                  onMoreHelp(active.v);
-                  setOpen(null);
-                }}
-              />
-            )}
-            <Button
-              small
-              kind="primary"
-              title="Ask about this"
-              onPress={() => {
-                onAsk(active.v);
-                setOpen(null);
-              }}
-            />
-          </View>
         </View>
       )}
+    </View>
+  );
+}
+
+/** Why the mark is what it is: what the tutor read, and which deterministic check (if any) set it. Quiet, never shouty. */
+function Evidence({ v }: { v: LineVerdict }) {
+  if (!v.reading && !v.guard) return null;
+  const unsure = v.uncertain && v.reading.includes(v.uncertain) ? v.uncertain : '';
+  const [before, after] = unsure ? [v.reading.slice(0, v.reading.indexOf(unsure)), v.reading.slice(v.reading.indexOf(unsure) + unsure.length)] : [v.reading, ''];
+  const source = v.guard === 'algebra' ? 'Flagged by the algebra check, not only the tutor.' : v.guard === 'reading' ? 'Not marked: the tutor wasn’t sure it read this right.' : '';
+  return (
+    <View style={styles.evidence}>
+      {!!v.reading && (
+        <Text style={styles.reading} numberOfLines={3}>
+          <Text style={styles.readLabel}>Read as </Text>
+          {latexToUnicode(before)}
+          {!!unsure && <Text style={styles.unsure}>{latexToUnicode(unsure)}</Text>}
+          {!!unsure && latexToUnicode(after)}
+        </Text>
+      )}
+      {!!source && <Text style={styles.source}>{source}</Text>}
     </View>
   );
 }
@@ -187,8 +230,8 @@ type RowProps = {
   onInputBlur?: () => void;
 };
 
-/** Was this mark right? Wrong verdicts (esp. a false ✓) and misreadings are recorded separately. */
-function FeedbackRow({ verdict, saved, correcting, setCorrecting, reading, setReading, onRate, onInputBlur }: RowProps) {
+/** "Something's off": the mark is wrong (a false ✓ matters most) or the line was misread. Saved as eval data. */
+function SomethingOff({ verdict, saved, correcting, setCorrecting, reading, setReading, onRate, onInputBlur }: RowProps) {
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} onPress={press} style={[styles.chip, on && styles.chipOn]}>
       <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
@@ -197,10 +240,8 @@ function FeedbackRow({ verdict, saved, correcting, setCorrecting, reading, setRe
   return (
     <View style={styles.fb}>
       <View style={styles.chips}>
-        {chip('👍', saved?.rating === 'up', () => onRate({ rating: 'up' }))}
-        {chip('👎', saved?.rating === 'down', () => onRate({ rating: 'down' }))}
-        {chip('Mark is wrong', saved?.rating === 'wrong' || correcting === 'wrong', () => setCorrecting(correcting === 'wrong' ? null : 'wrong'))}
-        {chip('Misread', saved?.rating === 'misread' || correcting === 'misread', () => setCorrecting(correcting === 'misread' ? null : 'misread'))}
+        {chip('The mark is wrong', saved?.rating === 'wrong' || correcting === 'wrong', () => setCorrecting(correcting === 'wrong' ? null : 'wrong'))}
+        {chip('It misread me', saved?.rating === 'misread' || correcting === 'misread', () => setCorrecting(correcting === 'misread' ? null : 'misread'))}
       </View>
       {correcting === 'wrong' && (
         <View style={styles.chips}>
@@ -218,12 +259,13 @@ function FeedbackRow({ verdict, saved, correcting, setCorrecting, reading, setRe
           placeholder="What does the line actually say?"
           autoCapitalize="none"
           autoCorrect={false}
+          autoFocus
           returnKeyType="done"
           onBlur={onInputBlur}
           onSubmitEditing={() => reading.trim() && onRate({ rating: 'misread', correctReading: reading.trim() })}
         />
       )}
-      {!!saved && !correcting && <Text style={styles.fbSaved}>Saved: {saved.rating}{saved.correctVerdict ? ` → ${saved.correctVerdict}` : ''}</Text>}
+      {!!saved && !correcting && <Text style={styles.fbSaved}>Saved: {saved.rating}{saved.correctVerdict ? ` → ${saved.correctVerdict}` : ''}. Thanks, this improves the checker.</Text>}
     </View>
   );
 }
@@ -263,11 +305,18 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.line,
   },
+  popHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   popTitle: { fontSize: 13, fontWeight: '700', color: C.sub },
-  reading: { fontFamily: 'Menlo', fontSize: 12, color: C.sub },
+  close: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  closeText: { fontSize: 14, color: C.faint },
   note: { fontSize: 15, lineHeight: 21, color: C.ink },
   repeat: { fontSize: 13, lineHeight: 18, color: C.partial, fontWeight: '600' },
-  dispute: { alignSelf: 'flex-start', paddingVertical: 4 },
-  disputeText: { fontSize: 13, color: C.primary, fontWeight: '600' },
-  popActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  evidence: { gap: 2, paddingTop: 2 },
+  reading: { fontFamily: 'Menlo', fontSize: 12, color: C.sub },
+  readLabel: { fontFamily: undefined, color: C.faint },
+  unsure: { color: C.partial, fontWeight: '700', textDecorationLine: 'underline' },
+  source: { fontSize: 12, color: C.faint },
+  popActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 6 },
+  offLink: { alignSelf: 'flex-end', paddingTop: 2 },
+  offLinkText: { fontSize: 12, color: C.faint },
 });

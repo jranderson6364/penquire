@@ -5,6 +5,8 @@
  * Pure TypeScript, no dependencies (runs under `node --test`).
  */
 
+import { dimensionMismatch, unitize } from './units.ts';
+
 export type Node =
   | { t: 'num'; v: number }
   | { t: 'var'; name: string }
@@ -304,7 +306,15 @@ export function roundingTol(src: string, base = 1e-9): number {
     const v = Math.abs(Number(m[0]));
     if (v > 0) rel = Math.max(rel, (0.5 * Math.pow(10, -m[2].length)) / v);
   }
-  return Math.min(0.05, Math.max(base, rel * 4));
+  // Significant figures: a whole number ending in zeros may be rounded at its last non-zero digit ("19.6 = 20" at
+  // 2 s.f., "9.8 · 31 = 300" at 1 s.f.), the ambiguity STACK's NumSigFigs also allows. Not scaled by the safety
+  // factor and capped lower, so it only covers honest rounding.
+  let sig = 0;
+  for (const m of src.matchAll(/(?<![\d.])([1-9]\d*?)(0+)(?![\d.])/g)) {
+    const v = Number(m[0]);
+    sig = Math.max(sig, (0.5 * Math.pow(10, m[2].length)) / v);
+  }
+  return Math.min(0.05, Math.max(base, rel * 4, Math.min(sig, 0.03)));
 }
 
 const sameVars = (a: Node, b: Node) => variablesOf(a).join(',') === variablesOf(b).join(',');
@@ -367,21 +377,43 @@ function parseLine(src: string): Line | string {
 
 const residual = (eq: [Node, Node]): Node => ({ t: 'bin', op: '-', a: eq[0], b: eq[1] });
 
+/** A side that is a pure number (no quantities), e.g. "19.6" or "2 \cdot 9.8". */
+function isNumericSide(src: string): boolean {
+  const p = parseExpr(src);
+  return p.ok && variablesOf(p.ast).length === 0;
+}
+
+/** Unit groups (\mathrm{...}) never carry digits that mean precision: drop them before reading the written decimals. */
+const tolOf = (src: string) => roundingTol(src.replace(/\\(?:text|mathrm|operatorname|rm)\s*\{[^{}]*\}/g, ' '));
+
+/** One line whose sides carry units of different dimensions ("5 N = 5 J") is wrong whatever the numbers say. */
+export function checkLineUnits(src: string): StepRelation | null {
+  const u = unitize(src);
+  if (!u) return null;
+  const mm = dimensionMismatch(u.sides);
+  return mm ? { kind: 'inconsistent', detail: `the units on the two sides of an "=" don't match` } : null;
+}
+
 /** a = b = c ... : every adjacent pair must be identically equal. Returns null if the line isn't a chain. */
-export function checkChain(src: string): StepRelation | null {
+export function checkChain(raw: string): StepRelation | null {
+  // Units are compared in SI (src/verify/units.ts); a link between a side with units and one without is not judged.
+  const u = unitize(raw);
+  const src = u ? u.joined : raw;
   const parts = splitEq(src);
   if (parts.length < 3 || parts.some((p) => p.includes('??'))) return null;
+  if (u && u.sides.length !== parts.length) return { kind: 'unparsed', detail: 'units: sides did not line up' };
   const asts: Node[] = [];
   for (const part of parts) {
     const p = parseExpr(part);
     if (!p.ok) return { kind: 'unparsed', detail: p.reason };
     asts.push(p.ast);
   }
-  const tol = Math.max(roundingTol(src), /\\approx|≈/.test(src) ? 2e-2 : 0);
+  const tol = Math.max(tolOf(raw), /\\approx|≈/.test(raw) ? 2e-2 : 0);
   let skipped = 0;
   for (let i = 0; i + 1 < asts.length; i++) {
-    // F = ma = (2)(9.8) = 19.6 : links that substitute numbers for variables are not identities
-    if (!sameVars(asts[i], asts[i + 1])) {
+    // F = ma = (2)(9.8) = 19.6 : links that substitute numbers for variables are not identities.
+    // "19.6 N = 19.6" (a unit dropped on one side) is not evidence either.
+    if (!sameVars(asts[i], asts[i + 1]) || (u && u.sides[i].hasUnits !== u.sides[i + 1].hasUnits)) {
       skipped++;
       continue;
     }
@@ -395,14 +427,24 @@ export function checkChain(src: string): StepRelation | null {
 }
 
 /** Does the step prev -> next follow by simple algebra? Conservative: 'unrelated' is not an accusation. */
-export function checkStep(prevSrc: string, nextSrc: string): StepRelation {
+export function checkStep(prevRaw: string, nextRaw: string): StepRelation {
+  // Units: compare in SI, and only when both lines agree on writing units (a dropped unit is not an error signal).
+  const up = unitize(prevRaw);
+  const un = unitize(nextRaw);
+  const withUnits = (u: ReturnType<typeof unitize>) => !!u && u.sides.some((s) => s.hasUnits);
+  if (withUnits(up) !== withUnits(un)) return { kind: 'unrelated', detail: 'units written on one line only' };
+  // "x = 5 cm = 5": a bare number next to a side with units says nothing about conversion
+  const bareNumber = (u: ReturnType<typeof unitize>) => !!u && u.sides.some((s) => s.hasUnits) && u.sides.some((s) => !s.hasUnits && isNumericSide(s.src));
+  if (bareNumber(up) || bareNumber(un)) return { kind: 'unrelated', detail: 'a number without its unit' };
+  const prevSrc = up ? up.joined : prevRaw;
+  const nextSrc = un ? un.joined : nextRaw;
   const prev = parseLine(prevSrc);
   const next = parseLine(nextSrc);
   if (typeof prev === 'string' || typeof next === 'string') {
     return { kind: 'unparsed', detail: typeof prev === 'string' ? `prev: ${prev}` : `next: ${next as string}` };
   }
-  const loose = /\\approx|≈/.test(prevSrc + nextSrc);
-  const tol = Math.max(roundingTol(prevSrc + ' ' + nextSrc), loose ? 2e-2 : 0);
+  const loose = /\\approx|≈/.test(prevRaw + nextRaw);
+  const tol = Math.max(tolOf(prevRaw + ' ' + nextRaw), loose ? 2e-2 : 0);
 
   if (prev.expr && next.expr) {
     // substituting numbers for variables (ma -> (2)(9.8)) is a normal step, not a comparison of functions
