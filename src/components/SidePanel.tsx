@@ -17,6 +17,7 @@ import type { LineVerdict, PartStatus } from '../ai/types';
 import { disclosureSummary, issueOutcomes } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { assignmentSpend, formatCost } from '../store/usageRecords';
+import { tagColor } from '../tutor/marks';
 import { C, F, LABEL, R, T, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
 import { Markdown } from './Markdown';
@@ -39,9 +40,9 @@ type Props = {
   onReparse: () => void;
   reparsing: boolean;
   /** chat turn index -> how many marks the tutor drew on the current page for it */
-  marksByTurn?: Record<number, number>;
-  /** pulse those marks on the page */
-  onShowMarks?: (turn: number) => void;
+  marksByTurn?: Record<number, number[]>;
+  /** pulse those marks on the page (all of the turn's, or just the one with this tag) */
+  onShowMarks?: (turn: number, tag?: number) => void;
   /** the part being worked on (flat label) and how to change it from the Problems tab */
   activePart?: string;
   onSelectPart: (label: string | undefined) => void;
@@ -246,10 +247,14 @@ function ChatTab(p: Props) {
         {assignment.chat.length === 0 && <StartButton {...p} />}
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
-            {m.role === 'user' ? <Text style={styles.userText}>{m.text}</Text> : <Markdown text={m.text} />}
+            {m.role === 'user' ? (
+              <Text style={styles.userText}>{m.text}</Text>
+            ) : (
+              <Markdown text={m.text} tags={p.marksByTurn?.[i]?.length ? { style: (t) => (p.marksByTurn![i].includes(t) ? { color: tagColor(t).pen, backgroundColor: tagColor(t).wash } : undefined), onPress: (t) => p.marksByTurn![i].includes(t) && p.onShowMarks?.(i, t) } : undefined} />
+            )}
             {m.role === 'assistant' && !!p.marksByTurn?.[i] && (
               <Pressable onPress={() => p.onShowMarks?.(i)} style={styles.showMarks} accessibilityRole="button" accessibilityLabel="Show where the tutor pointed on the page">
-                <Text style={styles.showMarksText}>Show on page · {p.marksByTurn[i]}</Text>
+                <Text style={styles.showMarksText}>Show on page · {p.marksByTurn[i].length}</Text>
               </Pressable>
             )}
             {m.role === 'assistant' && typeof m.costUSD === 'number' && m.costUSD > 0 && <Text style={styles.cost}>{formatCost(m.costUSD)}</Text>}

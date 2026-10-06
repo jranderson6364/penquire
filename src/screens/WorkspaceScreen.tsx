@@ -355,11 +355,16 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   };
   const tutorMarks = (a?.tutorMarks && a.tutorMarks[pageId]) || [];
   const [focusTurn, setFocusTurn] = React.useState<number | undefined>(undefined);
-  const marksByTurn = React.useMemo(() => tutorMarks.reduce<Record<number, number>>((m, t) => ((m[t.turn] = (m[t.turn] ?? 0) + 1), m), {}), [tutorMarks]);
-  const showTurnMarks = (turn: number) => {
+  const [focusTag, setFocusTag] = React.useState<number | undefined>(undefined);
+  const marksByTurn = React.useMemo(() => tutorMarks.reduce<Record<number, number[]>>((m, t) => ((m[t.turn] = [...(m[t.turn] ?? []), t.tag]), m), {}), [tutorMarks]);
+  const showTurnMarks = (turn: number, tag?: number) => {
     setFocusTurn(turn);
+    setFocusTag(tag);
     if (narrow) setPanelOpen(false);
-    setTimeout(() => setFocusTurn((t) => (t === turn ? undefined : t)), 3500);
+    setTimeout(() => {
+      setFocusTurn((t) => (t === turn ? undefined : t));
+      setFocusTag(undefined);
+    }, 3500);
   };
   const dismissMark = React.useCallback(
     (id: string) => {
@@ -723,7 +728,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         )}
         {modern && tutorMarks.length > 0 && size.w > 0 && (
           <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.35 : 1 }]}>
-            <TutorMarksLayer marks={tutorMarks} viewport={viewport} focusTurn={focusTurn} onDismiss={dismissMark} onClear={clearMarks} />
+            <TutorMarksLayer marks={tutorMarks} viewport={viewport} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} onClear={clearMarks} />
           </View>
         )}
         {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}

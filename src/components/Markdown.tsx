@@ -5,9 +5,22 @@ import { C } from '../theme';
 import { latexToUnicode } from '../ui/mathText';
 
 /** Minimal markdown: paragraphs, "- " bullets, **bold**, `code`. Enough for tutor feedback. */
-function inline(text: string, base: TextStyle) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+type Tagging = { style: (tag: number) => TextStyle | undefined; onPress?: (tag: number) => void };
+
+function inline(text: string, base: TextStyle, tagging?: Tagging) {
+  // tutor replies name their marks as [[tag|words]]; without `tagging` the markup is dropped and only the words stay
+  const plain = tagging ? text : text.replace(/\[\[\s*\d\s*\|([^\]]*)\]\]/g, '$1');
+  const parts = plain.split(/(\*\*[^*]+\*\*|`[^`]+`|\[\[\s*\d\s*\|[^\]]*\]\])/g).filter(Boolean);
   return parts.map((p, i) => {
+    const t = tagging ? /^\[\[\s*(\d)\s*\|([^\]]*)\]\]$/.exec(p) : null;
+    if (t && tagging) {
+      const tag = Number(t[1]);
+      return (
+        <Text key={i} style={[base, styles.tagged, tagging.style(tag)]} onPress={tagging.onPress ? () => tagging.onPress!(tag) : undefined} suppressHighlighting>
+          {latexToUnicode(t[2])}
+        </Text>
+      );
+    }
     if (p.startsWith('**') && p.endsWith('**')) {
       return (
         <Text key={i} style={[base, styles.bold]}>
@@ -30,7 +43,8 @@ function inline(text: string, base: TextStyle) {
   });
 }
 
-export function Markdown({ text, style }: { text: string; style?: TextStyle }) {
+/** `tags` colors the [[n|words]] phrases a tutor reply uses to name its marks on the page; without it the markup is shown as plain words. */
+export function Markdown({ text, style, tags }: { text: string; style?: TextStyle; tags?: Tagging }) {
   const base: TextStyle = { ...styles.text, ...style };
   const blocks = text.split('\n');
   return (
@@ -45,13 +59,13 @@ export function Markdown({ text, style }: { text: string; style?: TextStyle }) {
           return (
             <View key={i} style={styles.bulletRow}>
               <Text style={base}>•</Text>
-              <Text style={[base, { flex: 1 }]}>{inline(content, base)}</Text>
+              <Text style={[base, { flex: 1 }]}>{inline(content, base, tags)}</Text>
             </View>
           );
         }
         return (
           <Text key={i} style={[base, heading && styles.bold]}>
-            {inline(content, heading ? { ...base, ...styles.bold } : base)}
+            {inline(content, heading ? { ...base, ...styles.bold } : base, tags)}
           </Text>
         );
       })}
@@ -62,6 +76,7 @@ export function Markdown({ text, style }: { text: string; style?: TextStyle }) {
 const styles = StyleSheet.create({
   text: { fontSize: 15, lineHeight: 21, color: C.ink },
   bold: { fontWeight: '700' },
+  tagged: { fontWeight: '600', borderRadius: 4, overflow: 'hidden' },
   code: { fontFamily: 'Menlo', fontSize: 13, backgroundColor: '#F1F3F5' },
   bulletRow: { flexDirection: 'row', gap: 6, marginVertical: 1 },
 });
