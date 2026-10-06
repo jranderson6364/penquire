@@ -137,25 +137,37 @@ const CHECK_TOOL: Tool = {
   },
 };
 
+/** A reply that looks at the page has to do the maths itself: 'low' effort told a student with a correct answer it was wrong. */
+const REPLY_EFFORT_WITH_PAGE = 'medium';
+
 const REPLY_TOOL: Tool = {
   name: 'reply_to_student',
-  description: "Send a short reply to the student, optionally pointing at lines on their page.",
+  description: "Send a short reply to the student, pointing at the exact spots on their page that you are talking about.",
   input_schema: {
     type: 'object',
     properties: {
-      message: { type: 'string', description: 'Your reply: a few sentences of plain markdown prose, one question at most. Never JSON. The student cannot see the gutter labels (L1, L2...), so never write them in the message or in a note: say "this line" or "the line I circled" and let the mark show which.' },
+      message: {
+        type: 'string',
+        description:
+          'Your reply: a few sentences of plain markdown prose, one question at most. Never JSON. When you mark a spot, wrap the words that talk about it in [[tag|words]] using that mark’s tag, e.g. "Check [[1|this sign]] against [[2|the term above it]]", so the student sees which mark you mean (each tag is a color). The student cannot see the gutter labels (L1, L2...), so never write them in the message or in a note: say "this line" or use a tagged phrase.',
+      },
       marks: {
         type: 'array',
         description:
-          "0 to 3 drawings on the student's page that point at where to look. Only POINT: never write the fix, an answer or a corrected expression. If the student asks you to show, point at, highlight, circle or underline something, you MUST draw it. Otherwise use none when pointing would not help, and do not mark a correct line unless the student asked about it.",
+          "0 to 4 drawings on the student's page that point at where to look. Be SPECIFIC: mark the smallest stretch that holds the issue (one term, one sign, one number), not a whole line, and use different lines or different stretches for different points. Only POINT: never write the fix, an answer or a corrected expression. If the student asks you to show, point at, highlight, circle or underline something, you MUST draw it. Otherwise use none when pointing would not help, and do not mark a correct line unless the student asked about it.",
         items: {
           type: 'object',
           properties: {
-            kind: { type: 'string', enum: ['highlight', 'circle', 'underline', 'note'], description: 'highlight = wash over the line; circle = ring around it; underline = line under it; note = a short caption beside it (7 words or fewer, a pointer or a question, never the fix).' },
+            tag: { type: 'integer', description: 'A different number 1 to 4 for each mark; the message names the mark as [[tag|words]].' },
+            kind: { type: 'string', enum: ['highlight', 'circle', 'underline', 'note'], description: 'highlight = marker wash over the stretch (good for a whole line or phrase); circle = a loop around a small expression; underline = line under it; note = a short caption beside it (7 words or fewer, a pointer or a question, never the fix).' },
             line: { type: 'string', description: 'The gutter label of the line, e.g. "L4".' },
+            line_text: { type: 'string', description: 'When you mean only part of the line: the whole line as you read it, written exactly (same symbols, in order).' },
+            quote: { type: 'string', description: 'When you mean only part of the line: the exact characters of line_text that you mean (a term, a sign, a number), copied from line_text.' },
+            from: { type: 'number', description: 'Left edge of the stretch you mean, as a fraction of that line’s width (0 = left end of the line, 1 = right end). Prefer line_text + quote; use from/to only if you cannot quote. Omit all of them for the whole line.' },
+            to: { type: 'number', description: 'Right edge of the stretch, as a fraction of the line’s width.' },
             note: { type: 'string', description: 'Caption text; required for kind note, optional otherwise. Never include a line label like L4.' },
           },
-          required: ['kind', 'line'],
+          required: ['tag', 'kind', 'line'],
         },
       },
     },
@@ -454,12 +466,13 @@ Check my work. First verify each line yourself, including steps I did in my head
     if (input.image && known.size > 0) {
       try {
         const { out } = await this.callTool<{ message?: unknown; marks?: unknown }>(
-          { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, 'low'), system: this.system(), messages },
+          { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, REPLY_EFFORT_WITH_PAGE), system: this.system(), messages },
           REPLY_TOOL,
           `Respond only by calling the ${REPLY_TOOL.name} tool.`,
           'reply'
         );
-        const message = cleanReply(typeof out.message === 'string' ? out.message : '').text;
+        // the student cannot see gutter labels; reading order makes "line 3" mean something to them
+        const message = cleanReply(typeof out.message === 'string' ? out.message : '').text.replace(/\bL(\d+)\b/g, 'line $1');
         const marks = sanitizeMarks(out.marks, known);
         console.warn(`[penquire] reply with marks: ${known.size} labelled lines, tutor drew ${marks.length}`);
         if (message) return { text: message, marks };

@@ -27,6 +27,7 @@ import { applyParse } from '../store/parseApply';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
+import { chunkLine } from '../tutor/chunks';
 import { pruneMarks, resolveMarks } from '../tutor/marks';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
@@ -487,6 +488,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       const cap = attachPage ? await capture() : null;
       const image = cap?.image ?? null;
       const level = levelOverride ?? tutorContext(a).helpLevel;
+      const strokeBox = new Map((cap?.strokeList ?? []).map((st) => [st.i, st]));
+      const chunksByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, chunkLine(l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b))]));
       const spend = { total: 0 };
       const reply = await providerFromSettings(spend).reply({
         ...tutorContext(a),
@@ -508,7 +511,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ? {
               ...(x.tutorMarks ?? {}),
               [pageId]: pruneMarks(
-                [...((x.tutorMarks ?? {})[pageId] ?? []), ...resolveMarks(reply.marks, cap?.lines ?? [], x.chat.length + 1, () => newId('t_'))],
+                [...((x.tutorMarks ?? {})[pageId] ?? []), ...resolveMarks(reply.marks, cap?.lines ?? [], chunksByLine, x.chat.length + 1, () => newId('t_'))],
                 x.chat.length + 1
               ),
             }
