@@ -56,7 +56,9 @@ src/verify/leak.ts             answer-leak detector: judges the MATH in hint tex
 src/tutor/ladder.ts           per-issue hint rungs, clamped to policy in code, pruned when fixed
 src/tutor/issues.ts           issue history per page: most help each open issue had; resolved on your own (<= level 1) vs with help
 src/tutor/revealed.ts         reveal kinds allowed per level; overLevel() flags reported reveals above the level (logged, not hidden)
-src/verify/guard.ts           downgrade-only algebra guard on check results; wired in src/ai/index.ts (guarded())
+src/verify/guard.ts           downgrade-only guards: reading (low read_confidence -> unreadable), algebra/units; wired in src/ai/index.ts (guarded())
+src/verify/units.ts           \mathrm{} unit groups -> SI scale + dimension for expr.ts; dropped units and degrees are never judged
+src/check/finalize.ts         guardMerged(): re-runs algebra + leak guards on the page AFTER carry-over merges settled lines
 src/log.ts                      deterministic AI-use disclosure from the event log
 ```
 
@@ -90,7 +92,10 @@ Accuracy and pedagogy (the product's core risk):
 
 Algebra guard rules (src/verify, keep these invariants; tests in physics.test.ts are the false-downgrade gate):
 - Only ever LOWERS a verdict (valid -> partial), never raises; stores `modelVerdict`. Unreadable/unparsed/prose lines and lines after an unreadable line are skipped.
-- Substituting numbers for variables is a normal step: judge a step only when it is a rearrangement (same variables) or a full numeric answer. Tolerance comes from the decimals written (`roundingTol`), so rounded answers written with "=" pass.
+- Substituting numbers for variables is a normal step: judge a step only when it is a rearrangement (same variables) or a full numeric answer. Tolerance comes from the decimals written (`roundingTol`), so rounded answers written with "=" pass; trailing-zero integers allow sig-fig rounding (capped 3%).
+- Units (`units.ts`): compared in SI; a link/step where one side drops its unit is NOT judged; unknown `\text{}` groups and degrees leave the line unparsed. Tolerance is computed from the original text (the SI multipliers' digits must never loosen it).
+- Issue identity (`issueKey`) is part + the line's ink signature, never the model's reading (a re-read must not reset a rung or log a "resolved").
+- Docs: `../docs/09-reliability-and-experience.md` is the plan for staged, measurable pipeline stages and the UI surface. Report eval numbers with n and a Wilson interval.
 - LaTeX in tests/strings: write it with the Write/Edit tools, not shell heredocs (the shell eats backslashes).
 
 Untrusted model output: every check goes through `src/ai/sanitize.ts` (unknown/missing verdict -> "unreadable", never "valid"; bad/duplicate line IDs dropped) before guards or UI. Guards are wrapped in try/catch in guarded() and fall back to the model's own result, and `src/verify/fuzz.test.ts` (parser round-trip, garbage, hostile input, timing) must stay green. Parser input is capped at 400 chars.

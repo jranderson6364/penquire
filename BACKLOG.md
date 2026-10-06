@@ -12,6 +12,28 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [x] **Robustness** (done: retry with backoff on 429/5xx/network, Retry-After honored, 180 s timeout, refusal/max_tokens/empty handled, sanitized output). Still open: a clear "no API key" state in the workspace.
 - [ ] (old text) **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.
 
+## Reliability + experience (../docs/09-reliability-and-experience.md, Oct 6 2026)
+
+Phase 0 (JS-only), branch `reliability-phase0`:
+- [x] Guards re-run on the merged page after carry-over (`src/check/finalize.ts`): new line after a settled line is step-checked; leak guard sees settled readings.
+- [x] Issue/ladder identity from the ink signature, not the reading (`issueKey(part, reading, sig)`), with migration of stored keys. No more false "resolved on your own".
+- [x] Check prompt shows each setup once (`problemsText` → `formatGroups`), with an explicit part-label list; falls back to the flat list on mismatch.
+- [x] `read_confidence` + `uncertain` per line; `applyReadingGuard` turns low-confidence graded lines into `?` with a confirm prompt.
+- [x] Units v1 (`src/verify/units.ts`): SI comparison, dropped units not judged, dimension mismatch caught; readings now carry units in `\mathrm{}`. Sig-fig rounding for trailing-zero integers.
+- [x] Eval hygiene: `run_synth` splits model vs guard flags and prints Wilson 95% CIs.
+- [x] Mark popover → 3 actions + "Something's off" sheet; "Read as" evidence with uncertain characters; one Check button; inline notices instead of Alerts for check outcomes.
+- [ ] Panel 4 tabs → 2 (Tutor stream · Assignment). Help-level chip in the Tutor header.
+- [ ] Part title as the question menu ("3b ▾": prev/next, Place part/setup, expand); ruler into the tool popover.
+- [ ] Check button shows its stage (reading → checking → n marks) once streaming exists.
+- [ ] Calibrate `read_confidence` on real handwriting (synthetic pages all read "high"; no signal there).
+- [ ] Continuation lines that start with "=" are unparsed by `expr.ts`: join them to the previous line's last side.
+- [ ] Bare units (`60 km/h` without `\mathrm`) are left unjudged; consider recognising a trailing unit token.
+- [ ] Dispute flow: require verifier/second-reader agreement before conceding; add a wrongful-concession eval.
+
+Phase 1 (ONE batched native build; ask first): stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
+
+Phase 2: replayable case format (strokes + clean image + per-stage outputs) and a Node `replay` runner; ~200 real gold lines in `../evals-private/`; fused vs split (blind transcription) A/B; Mathpix strokes second reader; animated AI ink (path reveal, pressure outline, single-stroke math, Manim-like timing); TutorTurn `{text, marks, speechCues}`. Tutor draws freely (founder decision): max 3 live marks per turn, older turns fade, one Clear.
+
 ## Learning science (../docs/07-learning-science.md, Oct 2026)
 
 - [x] Prompt rewrite (LIMITS vs HOW TO HELP), renamed help levels with caps unchanged, `obstacle` per line, `revealed` per check + `overLevel`, issue history with on-your-own vs with-help outcomes, repeat-issue nudge, Help me start, dispute a mark, disclosure derived from levels used.
