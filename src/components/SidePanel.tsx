@@ -38,6 +38,10 @@ type Props = {
   sending: boolean;
   onReparse: () => void;
   reparsing: boolean;
+  /** chat turn index -> how many marks the tutor drew on the current page for it */
+  marksByTurn?: Record<number, number>;
+  /** pulse those marks on the page */
+  onShowMarks?: (turn: number) => void;
   /** the part being worked on (flat label) and how to change it from the Problems tab */
   activePart?: string;
   onSelectPart: (label: string | undefined) => void;
@@ -243,6 +247,11 @@ function ChatTab(p: Props) {
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
             {m.role === 'user' ? <Text style={styles.userText}>{m.text}</Text> : <Markdown text={m.text} />}
+            {m.role === 'assistant' && !!p.marksByTurn?.[i] && (
+              <Pressable onPress={() => p.onShowMarks?.(i)} style={styles.showMarks} accessibilityRole="button" accessibilityLabel="Show where the tutor pointed on the page">
+                <Text style={styles.showMarksText}>Show on page · {p.marksByTurn[i]}</Text>
+              </Pressable>
+            )}
             {m.role === 'assistant' && typeof m.costUSD === 'number' && m.costUSD > 0 && <Text style={styles.cost}>{formatCost(m.costUSD)}</Text>}
           </View>
         ))}
@@ -371,5 +380,7 @@ const styles = StyleSheet.create({
   disclosure: { backgroundColor: C.card, borderRadius: R.sm + 2, padding: 12, borderWidth: 1, borderColor: C.line },
   disclosureText: { fontSize: T.body - 1, lineHeight: 20, color: C.ink },
   logItem: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
+  showMarks: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, height: 28, borderRadius: R.pill, backgroundColor: C.primarySoft, justifyContent: 'center' },
+  showMarksText: { fontSize: T.small, fontWeight: '600', color: C.primary },
   cost: { fontSize: T.caption, color: C.sub, fontFamily: F.mono, marginTop: 4 },
 });

@@ -29,12 +29,15 @@ export function guarded(inner: TutorProvider): TutorProvider {
     id: inner.id,
     parseAssignment: (i) => inner.parseAssignment(i),
     reply: async (i) => {
-      const text = await inner.reply(i);
+      const r = await inner.reply(i);
       try {
-        return applyReplyLeakGuard(text, i.lines ?? [], i.helpLevel);
+        const text = applyReplyLeakGuard(r.text, i.lines ?? [], i.helpLevel);
+        // A caption on the page is a tutor sentence like any other: drop a note the leak guard would change.
+        const marks = r.marks.map((m) => (m.note && applyReplyLeakGuard(m.note, i.lines ?? [], i.helpLevel) !== m.note ? { kind: m.kind === 'note' ? '' : m.kind, line: m.line } : m)).filter((m) => m.kind !== '');
+        return { text, marks };
       } catch (e) {
         console.warn('reply leak guard failed', e);
-        return text;
+        return { text: r.text, marks: r.marks.filter((m) => !m.note) };
       }
     },
     check: async (i) => {

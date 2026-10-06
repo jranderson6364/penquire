@@ -7,12 +7,14 @@ import { hasErrors, validateGroups } from '../problems/validate';
 import { sanitizeCheck } from './sanitize';
 import { cleanReply } from './replyText';
 import { effortParam } from './models';
+import { sanitizeMarks } from '../tutor/marks';
 import type {
   CheckInput,
   CheckResult,
   ParseInput,
   ParseResult,
   ReplyInput,
+  ReplyResult,
   TutorProvider,
   Usage,
 } from './types';
@@ -132,6 +134,32 @@ const CHECK_TOOL: Tool = {
       still_open: { type: 'array', items: { type: 'string' }, description: 'Issues that remain open (short phrases, reused next round)' },
     },
     required: ['lines', 'parts', 'feedback', 'question', 'revealed', 'fixed_since_last', 'still_open'],
+  },
+};
+
+const REPLY_TOOL: Tool = {
+  name: 'reply_to_student',
+  description: "Send a short reply to the student, optionally pointing at lines on their page.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      message: { type: 'string', description: 'Your reply: a few sentences of plain markdown prose, one question at most. Never JSON. The student cannot see the gutter labels (L1, L2...), so never write them in the message or in a note: say "this line" or "the line I circled" and let the mark show which.' },
+      marks: {
+        type: 'array',
+        description:
+          "0 to 3 drawings on the student's page that point at where to look. Only POINT: never write the fix, an answer or a corrected expression. Use none when pointing would not help, and never mark a correct line unless the student asked about it.",
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['highlight', 'circle', 'underline', 'note'], description: 'highlight = wash over the line; circle = ring around it; underline = line under it; note = a short caption beside it (7 words or fewer, a pointer or a question, never the fix).' },
+            line: { type: 'string', description: 'The gutter label of the line, e.g. "L4".' },
+            note: { type: 'string', description: 'Caption text; required for kind note, optional otherwise. Never include a line label like L4.' },
+          },
+          required: ['kind', 'line'],
+        },
+      },
+    },
+    required: ['message', 'marks'],
   },
 };
 
@@ -394,7 +422,7 @@ Check my work. First verify each line yourself, including steps I did in my head
     return sanitizeCheck(out as unknown as Record<string, unknown>, res.model, ClaudeProvider.usage(res), input.problems.length ? input.problems.map((p) => p.label) : undefined);
   }
 
-  async reply(input: ReplyInput): Promise<string> {
+  async reply(input: ReplyInput): Promise<ReplyResult> {
     const last = input.lastCheck
       ? `\n\nLATEST CHECK RESULT:\n${input.lastCheck.feedback}\nStill open: ${input.lastCheck.stillOpen.join('; ') || 'none'}`
       : '';
@@ -419,6 +447,23 @@ Check my work. First verify each line yourself, including steps I did in my head
       text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.)`,
     });
     messages.push({ role: 'user', content: finalContent });
+
+    // With a labelled page image the tutor may also point at lines. If it will not use the tool, fall back to prose.
+    const known = new Set((input.markLineIds ?? []).map((id) => id.toUpperCase()));
+    if (input.image && known.size > 0) {
+      try {
+        const { out } = await this.callTool<{ message?: unknown; marks?: unknown }>(
+          { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, 'low'), system: this.system(), messages },
+          REPLY_TOOL,
+          `Respond only by calling the ${REPLY_TOOL.name} tool.`,
+          'reply'
+        );
+        const message = cleanReply(typeof out.message === 'string' ? out.message : '').text;
+        if (message) return { text: message, marks: sanitizeMarks(out.marks, known) };
+      } catch (e) {
+        console.warn('reply with marks failed; answering in prose', e);
+      }
+    }
 
     const ask = async (msgs: Message[]) => {
       const res = await this.call(
@@ -449,6 +494,6 @@ Check my work. First verify each line yourself, including steps I did in my head
       cleaned = cleanReply(raw);
     }
     if (!cleaned.text) throw new Error(stop === 'max_tokens' ? 'The reply was cut off before it finished. Try again.' : 'The model returned an empty reply. Try again.');
-    return cleaned.text;
+    return { text: cleaned.text, marks: [] };
   }
 }

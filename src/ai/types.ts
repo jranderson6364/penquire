@@ -118,7 +118,15 @@ export type ReplyInput = TutorContext & {
   intent?: ReplyIntent;
   /** the part the student is working on, for intent 'start' */
   part?: string;
+  /**
+   * Line IDs drawn in the gutter of the attached page image. When present the tutor may point at them with marks
+   * (highlight / circle / underline / note); without a labelled page image it cannot.
+   */
+  markLineIds?: string[];
 };
+
+/** A chat reply: the message, plus where on the page the tutor pointed (model output, sanitised, not yet placed). */
+export type ReplyResult = { text: string; marks: import('../tutor/marks').RawMark[] };
 
 export type ParseInput = {
   title: string;
@@ -144,5 +152,5 @@ export interface TutorProvider {
   readonly id: string;
   parseAssignment(input: ParseInput): Promise<ParseResult>;
   check(input: CheckInput): Promise<CheckResult>;
-  reply(input: ReplyInput): Promise<string>;
+  reply(input: ReplyInput): Promise<ReplyResult>;
 }

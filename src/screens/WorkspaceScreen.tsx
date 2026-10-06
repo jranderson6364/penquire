@@ -13,6 +13,7 @@ import { TopBar } from '../components/TopBar';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { BlocksLayer } from '../components/BlocksLayer';
+import { TutorMarksLayer } from '../components/TutorMarksLayer';
 import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, partContent, setupContent, type PageBlock } from '../blocks';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
@@ -26,6 +27,7 @@ import { applyParse } from '../store/parseApply';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
+import { pruneMarks, resolveMarks } from '../tutor/marks';
 import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -350,6 +352,23 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     };
     updateAssignment(a.id, (x) => ({ ...x, blocks: { ...(x.blocks ?? {}), [pageId]: [...((x.blocks ?? {})[pageId] ?? []), block] } }));
   };
+  const tutorMarks = (a?.tutorMarks && a.tutorMarks[pageId]) || [];
+  const [focusTurn, setFocusTurn] = React.useState<number | undefined>(undefined);
+  const marksByTurn = React.useMemo(() => tutorMarks.reduce<Record<number, number>>((m, t) => ((m[t.turn] = (m[t.turn] ?? 0) + 1), m), {}), [tutorMarks]);
+  const showTurnMarks = (turn: number) => {
+    setFocusTurn(turn);
+    if (narrow) setPanelOpen(false);
+    setTimeout(() => setFocusTurn((t) => (t === turn ? undefined : t)), 3500);
+  };
+  const dismissMark = React.useCallback(
+    (id: string) => {
+      updateAssignment(assignmentId, (x) => ({ ...x, tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: ((x.tutorMarks ?? {})[pageId] ?? []).filter((m) => m.id !== id) } }));
+    },
+    [assignmentId, pageId]
+  );
+  const clearMarks = React.useCallback(() => {
+    updateAssignment(assignmentId, (x) => ({ ...x, tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: [] } }));
+  }, [assignmentId, pageId]);
   const moveBlock = React.useCallback(
     (id: string, bx: number, by: number) => {
       updateAssignment(assignmentId, (x) => {
@@ -465,7 +484,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setSending(true);
     setDraft('');
     try {
-      const image = attachPage ? (await capture()).image : null;
+      const cap = attachPage ? await capture() : null;
+      const image = cap?.image ?? null;
       const level = levelOverride ?? tutorContext(a).helpLevel;
       const spend = { total: 0 };
       const reply = await providerFromSettings(spend).reply({
@@ -478,11 +498,21 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
         intent,
         part: activePart,
+        markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
       });
       const type = intent === 'start' ? 'start' : intent === 'dispute' ? 'dispute' : 'reply';
       updateAssignment(a.id, (x) => ({
         ...x,
-        chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply, costUSD: spend.total }],
+        chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply.text, costUSD: spend.total }],
+        tutorMarks: reply.marks.length
+          ? {
+              ...(x.tutorMarks ?? {}),
+              [pageId]: pruneMarks(
+                [...((x.tutorMarks ?? {})[pageId] ?? []), ...resolveMarks(reply.marks, cap?.lines ?? [], x.chat.length + 1, () => newId('t_'))],
+                x.chat.length + 1
+              ),
+            }
+          : x.tutorMarks,
         events: [
           ...x.events,
           { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : undefined, costUSD: spend.total },
@@ -616,6 +646,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           reparsing={reparsing}
           activePart={activePart}
           onSelectPart={setActivePart}
+          marksByTurn={marksByTurn}
+          onShowMarks={showTurnMarks}
           header={
             <View style={styles.sideHeader}>
               <Button small kind="primary" title={checking ? 'Checking…' : 'Check this page'} loading={checking} onPress={runCheck} />
@@ -684,6 +716,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         {modern && pageBlocks.length > 0 && size.w > 0 && (
           <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.4 : 1 }]}>
             <BlocksLayer blocks={pageBlocks} viewport={viewport} onMove={moveBlock} onRemove={removeBlock} />
+          </View>
+        )}
+        {modern && tutorMarks.length > 0 && size.w > 0 && (
+          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.35 : 1 }]}>
+            <TutorMarksLayer marks={tutorMarks} viewport={viewport} focusTurn={focusTurn} onDismiss={dismissMark} onClear={clearMarks} />
           </View>
         )}
         {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
