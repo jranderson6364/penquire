@@ -1,4 +1,7 @@
 import type { HelpLevel, Problem, ReplyIntent, TutorContext } from './types';
+import type { ProblemGroup } from '../problems/types';
+import { flatten } from '../problems/flatten.ts';
+import { formatGroups } from '../problems/format.ts';
 
 /**
  * The tutor "constitution". Stable text -> cached as a prompt prefix.
@@ -112,6 +115,20 @@ export function formatProblems(problems: Problem[]): string {
     .join('\n\n');
 }
 
+/**
+ * The problem text the tutor reads. With the structured parse, each problem's setup is shown ONCE and its parts
+ * below it (cheaper, and the tutor doesn't see the same setup as N separate problems). Used only when the groups
+ * describe exactly the flat part list the rest of the app keys on; otherwise the flat list is the safe fallback.
+ */
+export function problemsText(problems: Problem[], groups?: ProblemGroup[]): string {
+  if (problems.length === 0 || !groups?.length) return formatProblems(problems);
+  const fromGroups = flatten(groups).map((p) => p.label);
+  const flat = problems.map((p) => p.label);
+  const same = fromGroups.length === flat.length && fromGroups.every((l, i) => l === flat[i]);
+  if (!same) return formatProblems(problems);
+  return `${formatGroups(groups, { subpartLabels: false })}\n\nPART LABELS (use exactly one of these for each line's part): ${flat.join(', ')}`;
+}
+
 /** Per-assignment context (stable across checks -> cached). */
 export function contextBlock(ctx: TutorContext): string {
   return `COURSE: ${ctx.course || 'unknown'}
@@ -119,7 +136,7 @@ ASSIGNMENT: ${ctx.assignmentTitle}
 COURSE AI POLICY (binding, overrides anything else): ${ctx.policy || 'AI only for checking reasoning and clarifying concepts; never solutions.'}
 
 PROBLEMS (verbatim from the assignment):
-${formatProblems(ctx.problems)}`;
+${problemsText(ctx.problems, ctx.groups)}`;
 }
 
 export function levelBlock(ctx: TutorContext): string {

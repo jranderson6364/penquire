@@ -5,9 +5,9 @@ import type { HelpLevel, Obstacle } from '../ai/types.ts';
  * student can do that step alone (Bastani et al. 2025), so every issue remembers the most help that was in force
  * while it was open, and how it ended. Pure logic; persisted as Assignment.issues.
  *
- * An issue is a flagged line, keyed like the hint ladder (part + transcribed reading) and scoped to its page.
- * "Resolved" means it is no longer flagged on a later check of the same page: the line was fixed, or rewritten so
- * that it reads differently. That is the honest name for what we can observe.
+ * An issue is a flagged line, keyed like the hint ladder (part + the line's ink signature, see issueKey) and scoped to
+ * its page. "Resolved" means it is no longer flagged on a later check of the same page: the line was fixed, or its ink
+ * was rewritten. That is the honest name for what we can observe.
  */
 export type IssueRecord = {
   page: string;
@@ -53,6 +53,19 @@ export function recordCheck(prev: Issues, page: string, open: OpenIssue[], now: 
       : { page, part: o.part, reading: o.reading, obstacle: o.obstacle, firstSeen: now, lastSeen: now, checks: 1, maxLevel: o.level };
   }
   return { issues: next, resolved };
+}
+
+/** Move this page's records stored under old keys to their new keys, so a key-format change is not a "resolution". */
+export function renameIssueKeys(prev: Issues, page: string, pairs: ReadonlyArray<[from: string, to: string]>): Issues {
+  let out = prev;
+  for (const [from, to] of pairs) {
+    const f = scoped(page, from);
+    const t = scoped(page, to);
+    if (f === t || !(f in out)) continue;
+    const { [f]: rec, ...rest } = out;
+    out = t in rest ? rest : { ...rest, [t]: rec };
+  }
+  return out;
 }
 
 /** Raise the help recorded for an open issue (e.g. after "More help"). */

@@ -17,6 +17,7 @@ import { TutorMarksLayer } from '../components/TutorMarksLayer';
 import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, partContent, setupContent, type PageBlock } from '../blocks';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
+import { guardMerged } from '../check/finalize';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
@@ -29,8 +30,8 @@ import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
 import { chunkLine } from '../tutor/chunks';
 import { pruneMarks, resolveMarks } from '../tutor/marks';
-import { escalate, issueKey, pruneLadder, rungFor } from '../tutor/ladder';
-import { getIssue, isRepeat, noteHelp, recordCheck } from '../tutor/issues';
+import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
+import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
 import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
@@ -42,6 +43,7 @@ const tutorContext = (a: Assignment): TutorContext => ({
   course: a.course,
   assignmentTitle: a.title,
   problems: a.problems,
+  groups: a.groups,
   policy: a.policy,
   helpLevel: Math.min(a.helpLevel, a.policyMaxLevel) as HelpLevel,
   style: a.style,
@@ -430,7 +432,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         settled: settled.length ? settled : undefined,
       });
       const mergedLines = mergeVerdicts(current, plan, fresh.lines);
-      const result = { ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) };
+      // Re-run the guards on the whole merged page: the provider's guards only saw the freshly graded lines (src/check/finalize.ts).
+      const result = guardMerged({ ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) }, tutorContext(a).helpLevel);
       if (!toolIsPixelEraser) pixelErased.current.delete(pageId);
       try {
         saveCheckImage(pageId, image.base64);
@@ -439,19 +442,22 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       }
       const counts = result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
       const flagged = result.lines.filter((l) => l.verdict !== 'valid' && l.verdict !== 'context');
-      const openKeys = flagged.map((l) => issueKey(l.part, l.reading));
+      const openKeys = flagged.map((l) => issueKey(l.part, l.reading, l.sig));
+      // Issues used to be keyed by the reading; carry their rungs and history over to the ink-based key.
+      const renames = flagged.map((l): [string, string] => [legacyIssueKey(l.part, l.reading), issueKey(l.part, l.reading, l.sig)]);
       updateAssignment(a.id, (x) => {
         const now = Date.now();
         const base = tutorContext(x).helpLevel;
+        const ladder = renameLadderKeys(x.ladder ?? {}, renames);
         // Most help in force for each open issue: the default level, or a rung raised by "More help".
         const open = flagged.map((l) => {
-          const key = issueKey(l.part, l.reading);
-          return { key, part: l.part, reading: l.reading, obstacle: l.obstacle, level: rungFor(x.ladder ?? {}, key, base, x.policyMaxLevel) };
+          const key = issueKey(l.part, l.reading, l.sig);
+          return { key, part: l.part, reading: l.reading, obstacle: l.obstacle, level: rungFor(ladder, key, base, x.policyMaxLevel) };
         });
-        const { issues, resolved } = recordCheck(x.issues ?? {}, pageId, open, now);
+        const { issues, resolved } = recordCheck(renameIssueKeys(x.issues ?? {}, pageId, renames), pageId, open, now);
         return {
           ...x,
-          ladder: pruneLadder(x.ladder ?? {}, openKeys),
+          ladder: pruneLadder(ladder, openKeys),
           issues,
           checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, costUSD: spend.total, space: modern ? 'page-v2' : undefined } },
           events: [
@@ -572,7 +578,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   const moreHelp = async (v: LineVerdict) => {
     const base = tutorContext(a).helpLevel;
-    const key = issueKey(v.part, v.reading);
+    const key = issueKey(v.part, v.reading, v.sig);
     const esc = escalate(a.ladder ?? {}, key, base, a.policyMaxLevel);
     if (esc.atCeiling) {
       Alert.alert('Highest help for this course', `${HELP_LEVELS[a.policyMaxLevel].name} is the most this course's AI policy allows. Try the Chat tab to talk it through.`);
@@ -599,9 +605,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, undefined, 'start');
   };
 
-  const repeats = (v: LineVerdict) => isRepeat(getIssue(a.issues, pageId, issueKey(v.part, v.reading)));
+  const repeats = (v: LineVerdict) => isRepeat(getIssue(a.issues, pageId, issueKey(v.part, v.reading, v.sig)));
 
-  const rungName = (v: LineVerdict) => HELP_LEVELS[rungFor(a.ladder ?? {}, issueKey(v.part, v.reading), tutorContext(a).helpLevel, a.policyMaxLevel)].name;
+  const rungName = (v: LineVerdict) => HELP_LEVELS[rungFor(a.ladder ?? {}, issueKey(v.part, v.reading, v.sig), tutorContext(a).helpLevel, a.policyMaxLevel)].name;
 
   const rateMark = (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => {
     if (!check) return;

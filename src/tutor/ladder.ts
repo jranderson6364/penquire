@@ -7,9 +7,29 @@ import type { HelpLevel } from '../ai/types';
  */
 export type Ladder = Record<string, HelpLevel>;
 
-/** Stable key for an issue: problem part + the line as transcribed (line IDs change between checks). */
-export function issueKey(part: string | undefined, reading: string): string {
+/**
+ * Stable key for an issue (line IDs change between checks). Keyed on the INK when the line has a stroke signature
+ * (src/check/carry.ts): the same ink transcribed differently is the same issue, so a re-read never resets a rung or
+ * logs a false "resolved". Lines without a signature (older checks) fall back to part + the reading.
+ */
+export function issueKey(part: string | undefined, reading: string, sig?: string): string {
+  return sig ? `${part ?? ''}|ink:${sig}` : legacyIssueKey(part, reading);
+}
+
+/** The pre-signature key: part + transcribed reading. Used to migrate stored rungs and issue records. */
+export function legacyIssueKey(part: string | undefined, reading: string): string {
   return `${part ?? ''}|${reading.replace(/\s+/g, '').toLowerCase()}`;
+}
+
+/** Move rungs stored under old keys to their new keys (an existing rung on the new key wins). */
+export function renameLadderKeys(ladder: Ladder, pairs: ReadonlyArray<[from: string, to: string]>): Ladder {
+  let out = ladder;
+  for (const [from, to] of pairs) {
+    if (from === to || !(from in out)) continue;
+    const { [from]: level, ...rest } = out;
+    out = to in rest ? rest : { ...rest, [to]: level };
+  }
+  return out;
 }
 
 const clamp = (n: number, max: HelpLevel): HelpLevel => Math.max(0, Math.min(n, max)) as HelpLevel;

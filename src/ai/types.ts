@@ -83,6 +83,8 @@ export type TutorContext = {
   course: string;
   assignmentTitle: string;
   problems: Problem[];
+  /** structured problems (setup once); when they match `problems`, the tutor reads these instead (prompts.ts problemsText) */
+  groups?: import('../problems/types').ProblemGroup[];
   /** Free text course AI policy, e.g. "AI only in Socratic mode: clarify concepts or check reasoning" */
   policy: string;
   helpLevel: HelpLevel;
