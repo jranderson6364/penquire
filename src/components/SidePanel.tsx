@@ -258,6 +258,14 @@ function ChatTab(p: Props) {
         {sending && <ActivityIndicator style={{ marginTop: 8 }} />}
       </ScrollView>
       <View style={styles.inputRow}>
+        <View style={styles.quickRow}>
+          <Pressable onPress={() => onSend('Show me on my page where I should look first.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
+            <Text style={styles.quickText}>Show me where to look</Text>
+          </Pressable>
+          <Pressable onPress={() => onSend('Circle the line you are most unsure about and tell me why.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
+            <Text style={styles.quickText}>Circle what's unclear</Text>
+          </Pressable>
+        </View>
         <View style={styles.attachRow}>
           <Switch value={attach} onValueChange={setAttach} />
           <Text style={styles.attachText}>Include current page</Text>
@@ -380,6 +388,9 @@ const styles = StyleSheet.create({
   disclosure: { backgroundColor: C.card, borderRadius: R.sm + 2, padding: 12, borderWidth: 1, borderColor: C.line },
   disclosureText: { fontSize: T.body - 1, lineHeight: 20, color: C.ink },
   logItem: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
+  quickRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  quick: { height: 30, paddingHorizontal: 12, borderRadius: R.pill, backgroundColor: C.primarySoft, justifyContent: 'center' },
+  quickText: { fontSize: T.small, fontWeight: '600', color: C.primary },
   showMarks: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, height: 28, borderRadius: R.pill, backgroundColor: C.primarySoft, justifyContent: 'center' },
   showMarksText: { fontSize: T.small, fontWeight: '600', color: C.primary },
   cost: { fontSize: T.caption, color: C.sub, fontFamily: F.mono, marginTop: 4 },

@@ -147,7 +147,7 @@ const REPLY_TOOL: Tool = {
       marks: {
         type: 'array',
         description:
-          "0 to 3 drawings on the student's page that point at where to look. Only POINT: never write the fix, an answer or a corrected expression. Use none when pointing would not help, and never mark a correct line unless the student asked about it.",
+          "0 to 3 drawings on the student's page that point at where to look. Only POINT: never write the fix, an answer or a corrected expression. If the student asks you to show, point at, highlight, circle or underline something, you MUST draw it. Otherwise use none when pointing would not help, and do not mark a correct line unless the student asked about it.",
         items: {
           type: 'object',
           properties: {
@@ -450,6 +450,7 @@ Check my work. First verify each line yourself, including steps I did in my head
 
     // With a labelled page image the tutor may also point at lines. If it will not use the tool, fall back to prose.
     const known = new Set((input.markLineIds ?? []).map((id) => id.toUpperCase()));
+    if (!(input.image && known.size > 0)) console.warn(`[penquire] reply without marks: image=${!!input.image}, labelled lines=${known.size}`);
     if (input.image && known.size > 0) {
       try {
         const { out } = await this.callTool<{ message?: unknown; marks?: unknown }>(
@@ -459,7 +460,9 @@ Check my work. First verify each line yourself, including steps I did in my head
           'reply'
         );
         const message = cleanReply(typeof out.message === 'string' ? out.message : '').text;
-        if (message) return { text: message, marks: sanitizeMarks(out.marks, known) };
+        const marks = sanitizeMarks(out.marks, known);
+        console.warn(`[penquire] reply with marks: ${known.size} labelled lines, tutor drew ${marks.length}`);
+        if (message) return { text: message, marks };
       } catch (e) {
         console.warn('reply with marks failed; answering in prose', e);
       }
