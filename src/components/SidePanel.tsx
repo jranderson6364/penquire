@@ -6,7 +6,6 @@ import {
   ScrollView,
   Share,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -60,26 +59,32 @@ const STATUS_STYLE: Record<PartStatus['status'], { color: string; bg: string; la
   not_started: { color: C.unknown, bg: C.unknownSoft, label: 'not started' },
 };
 
+/**
+ * Two surfaces instead of four tabs (docs/09): TUTOR is one stream (the latest check, then the conversation, one input)
+ * and ASSIGNMENT holds the problems and the AI-use log. The old Tab values are kept so callers can still say "show the
+ * feedback" (tutor stream, scrolled to the check) or "show the chat" (tutor stream, scrolled to the end).
+ */
 export function SidePanel(p: Props) {
+  const surface = p.tab === 'feedback' || p.tab === 'chat' ? 'tutor' : 'assignment';
   return (
     <View style={styles.panel}>
       {p.header}
       <View style={styles.tabs}>
-        {(['feedback', 'chat', 'problems', 'log'] as Tab[]).map((t) => (
-          <Pressable key={t} onPress={() => p.onTab(t)} style={[styles.tab, p.tab === t && styles.tabActive]}>
-            <Text style={[styles.tabText, p.tab === t && styles.tabTextActive]}>{t[0].toUpperCase() + t.slice(1)}</Text>
+        {(
+          [
+            ['tutor', 'Tutor', 'chat'],
+            ['assignment', 'Assignment', 'problems'],
+          ] as const
+        ).map(([s, label, tab]) => (
+          <Pressable key={s} onPress={() => p.onTab(tab)} style={[styles.tab, surface === s && styles.tabActive]} accessibilityRole="tab" accessibilityState={{ selected: surface === s }}>
+            <Text style={[styles.tabText, surface === s && styles.tabTextActive]}>{label}</Text>
           </Pressable>
         ))}
-        <Pressable onPress={p.onClose} hitSlop={10} style={styles.close}>
+        <Pressable onPress={p.onClose} hitSlop={10} style={styles.close} accessibilityLabel="Close the tutor panel">
           <Text style={styles.closeText}>✕</Text>
         </Pressable>
       </View>
-      {p.tab === 'feedback' && <FeedbackTab {...p} />}
-      {p.tab === 'chat' && <ChatTab {...p} />}
-      {p.tab === 'problems' && (
-        <ProblemsView assignment={p.assignment} activePart={p.activePart} onSelectPart={p.onSelectPart} onReparse={p.onReparse} reparsing={p.reparsing} />
-      )}
-      {p.tab === 'log' && <LogTab {...p} />}
+      {surface === 'tutor' ? <TutorStream {...p} /> : <AssignmentView {...p} />}
     </View>
   );
 }
@@ -140,21 +145,27 @@ function PartCard({ part, lines, active }: { part: PartStatus; lines: LineVerdic
   );
 }
 
-function FeedbackTab(p: Props) {
+/** The latest check as one card at the top of the tutor stream: the question first, details one tap down. */
+function CheckCard(p: Props & { check: StoredCheck }) {
   const { check, stale } = p;
+  const [open, setOpen] = React.useState(true);
   const [summary, setSummary] = React.useState(false);
-  if (!check) {
-    return (
-      <View style={[styles.empty, { gap: 12 }]}>
-        <Text style={styles.emptyText}>Write your work, then tap Check. Feedback for this page shows up here and as marks in the margin.</Text>
-        <StartButton {...p} />
-      </View>
-    );
-  }
   const r = check.result;
   const counts = r.lines.reduce<Record<string, number>>((acc, l) => ((acc[l.verdict] = (acc[l.verdict] ?? 0) + 1), acc), {});
   return (
-    <ScrollView contentContainerStyle={styles.scroll}>
+    <View style={styles.checkCard}>
+      <Pressable onPress={() => setOpen((v) => !v)} style={styles.checkHead} accessibilityRole="button" accessibilityLabel={open ? 'Collapse the latest check' : 'Expand the latest check'}>
+        <Text style={styles.checkTitle}>Latest check · {new Date(check.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</Text>
+        <View style={styles.countRow}>
+          {(['valid', 'partial', 'incorrect', 'unreadable'] as const).map((v) =>
+            counts[v] ? (
+              <Text key={v} style={[styles.count, { color: VERDICT_STYLE[v].color, backgroundColor: VERDICT_STYLE[v].bg }]}>
+                {VERDICT_STYLE[v].symbol} {counts[v]}
+              </Text>
+            ) : null
+          )}
+        </View>
+      </Pressable>
       {stale && <Text style={styles.staleBanner}>Page changed since this check. Tap Check again.</Text>}
       {!!r.question && (
         <View style={styles.questionCard}>
@@ -162,89 +173,83 @@ function FeedbackTab(p: Props) {
           <Text style={styles.question}>{r.question}</Text>
         </View>
       )}
-      <View style={styles.countRow}>
-        {(['valid', 'partial', 'incorrect', 'unreadable'] as const).map((v) =>
-          counts[v] ? (
-            <Text key={v} style={[styles.count, { color: VERDICT_STYLE[v].color, backgroundColor: VERDICT_STYLE[v].bg }]}>
-              {VERDICT_STYLE[v].symbol} {counts[v]}
+      {open && (
+        <>
+          {r.parts.length > 0 && (
+            <View style={styles.cards}>
+              {r.parts.map((part) => (
+                <PartCard key={part.label} part={part} lines={r.lines.filter((l) => l.part === part.label)} active={part.label === p.activePart} />
+              ))}
+            </View>
+          )}
+          {r.lines.filter((l) => !l.part && l.verdict !== 'valid' && l.verdict !== 'context').length > 0 && (
+            <PartCard part={{ label: 'Other', status: 'in_progress', missing: [] }} lines={r.lines.filter((l) => !l.part)} active={false} />
+          )}
+          {r.fixedSinceLast.length > 0 && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: C.valid }]}>Fixed since last check</Text>
+              {r.fixedSinceLast.map((f, i) => (
+                <Text key={i} style={styles.listItem}>
+                  ✓ {f}
+                </Text>
+              ))}
+            </View>
+          )}
+          {r.stillOpen.length > 0 && (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: C.incorrect }]}>Still open</Text>
+              {r.stillOpen.map((f, i) => (
+                <Text key={i} style={styles.listItem}>
+                  • {f}
+                </Text>
+              ))}
+            </View>
+          )}
+          <Pressable onPress={() => setSummary((v) => !v)} accessibilityRole="button" style={styles.summaryToggle}>
+            <Text style={styles.summaryToggleText}>{summary ? 'Hide full summary' : 'Show full summary'}</Text>
+          </Pressable>
+          {summary && (
+            <View style={styles.section}>
+              <Markdown text={r.feedback} />
+            </View>
+          )}
+          {!!r.revealed?.length && (
+            <Text style={styles.meta}>
+              This feedback showed: {[...new Set(r.revealed.map((x) => REVEAL_LABEL[x.kind] ?? x.kind))].join(', ')}
+              {r.overLevel?.length ? ' (more than your help level allows; logged)' : ''}
             </Text>
-          ) : null
-        )}
-      </View>
-      {typeof check.costUSD === 'number' && check.costUSD > 0 && (
-        <Text style={styles.cost}>
-          This check {formatCost(check.costUSD)} · this assignment {formatCost(assignmentSpend(p.assignment.events))}
-        </Text>
-      )}
-      {r.parts.length > 0 && (
-        <View style={styles.cards}>
-          {r.parts.map((part) => (
-            <PartCard key={part.label} part={part} lines={r.lines.filter((l) => l.part === part.label)} active={part.label === p.activePart} />
-          ))}
-        </View>
-      )}
-      {r.lines.some((l) => !l.part) && r.lines.filter((l) => !l.part && l.verdict !== 'valid' && l.verdict !== 'context').length > 0 && (
-        <PartCard part={{ label: 'Other', status: 'in_progress', missing: [] }} lines={r.lines.filter((l) => !l.part)} active={false} />
-      )}
-      {r.fixedSinceLast.length > 0 && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: C.valid }]}>Fixed since last check</Text>
-          {r.fixedSinceLast.map((f, i) => (
-            <Text key={i} style={styles.listItem}>
-              ✓ {f}
+          )}
+          {typeof check.costUSD === 'number' && check.costUSD > 0 && (
+            <Text style={styles.meta}>
+              This check {formatCost(check.costUSD)} · this assignment {formatCost(assignmentSpend(p.assignment.events))}
             </Text>
-          ))}
-        </View>
+          )}
+        </>
       )}
-      {r.stillOpen.length > 0 && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: C.incorrect }]}>Still open</Text>
-          {r.stillOpen.map((f, i) => (
-            <Text key={i} style={styles.listItem}>
-              • {f}
-            </Text>
-          ))}
-        </View>
-      )}
-      <Pressable onPress={() => setSummary((v) => !v)} accessibilityRole="button" style={styles.summaryToggle}>
-        <Text style={styles.summaryToggleText}>{summary ? 'Hide full summary' : 'Show full summary'}</Text>
-      </Pressable>
-      {summary && (
-        <View style={styles.section}>
-          <Markdown text={r.feedback} />
-        </View>
-      )}
-      {!!r.revealed?.length && (
-        <Text style={styles.meta}>
-          This feedback showed: {[...new Set(r.revealed.map((x) => REVEAL_LABEL[x.kind] ?? x.kind))].join(', ')}
-          {r.overLevel?.length ? ' (more than your help level allows; logged)' : ''}
-        </Text>
-      )}
-      <Text style={styles.meta}>
-        {new Date(check.at).toLocaleTimeString()} · {r.model}
-        {r.usage ? ` · ${r.usage.inputTokens + r.usage.cacheReadTokens} in / ${r.usage.outputTokens} out` : ''}
-      </Text>
-    </ScrollView>
+    </View>
   );
 }
 
-function ChatTab(p: Props) {
-  const { assignment, draft, onDraft, onSend, sending, onInputFocus, onInputBlur } = p;
-  const [attach, setAttach] = React.useState(true);
+/** One stream: the latest check, then the conversation, one input. The page is always attached (the tutor needs it). */
+function TutorStream(p: Props) {
+  const { assignment, check, draft, onDraft, onSend, sending, onInputFocus, onInputBlur } = p;
   const scrollRef = React.useRef<ScrollView>(null);
+  // "feedback" = a check just finished: show it from the top. Anything else: follow the conversation.
+  React.useEffect(() => {
+    if (p.tab === 'feedback') scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [p.tab, check?.id]);
+  const empty = !check && assignment.chat.length === 0;
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }} keyboardVerticalOffset={80}>
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={styles.scroll}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-      >
-        {assignment.chat.length === 0 && (
-          <Text style={styles.emptyText}>
-            Ask a question, push back on feedback, or describe a fix in words ("I changed L4 to 26/7 − 3").
-          </Text>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} onContentSizeChange={() => p.tab !== 'feedback' && scrollRef.current?.scrollToEnd({ animated: true })}>
+        {empty && (
+          <View style={{ gap: 12 }}>
+            <Text style={styles.emptyText}>Write your work, then tap Check. Marks appear in the margin and the tutor's feedback shows up here. You can also ask anything, push back on a mark, or describe a fix in words.</Text>
+            <StartButton {...p} />
+          </View>
         )}
-        {assignment.chat.length === 0 && <StartButton {...p} />}
+        {check && <CheckCard {...p} check={check} />}
+        {!empty && assignment.chat.length === 0 && <StartButton {...p} />}
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
             {m.role === 'user' ? (
@@ -257,46 +262,48 @@ function ChatTab(p: Props) {
                 <Text style={styles.showMarksText}>Show on page · {p.marksByTurn[i].length}</Text>
               </Pressable>
             )}
-            {m.role === 'assistant' && typeof m.costUSD === 'number' && m.costUSD > 0 && <Text style={styles.cost}>{formatCost(m.costUSD)}</Text>}
           </View>
         ))}
         {sending && <ActivityIndicator style={{ marginTop: 8 }} />}
       </ScrollView>
       <View style={styles.inputRow}>
-        <View style={styles.quickRow}>
-          <Pressable onPress={() => onSend('Show me on my page where I should look first.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
-            <Text style={styles.quickText}>Show me where to look</Text>
-          </Pressable>
-          <Pressable onPress={() => onSend('Circle the line you are most unsure about and tell me why.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
-            <Text style={styles.quickText}>Circle what's unclear</Text>
-          </Pressable>
-        </View>
-        <View style={styles.attachRow}>
-          <Switch value={attach} onValueChange={setAttach} />
-          <Text style={styles.attachText}>Include current page</Text>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
           <TextInput
             style={styles.input}
             value={draft}
             onChangeText={onDraft}
-            placeholder="Message your tutor…"
+            placeholder="Ask your tutor…"
             multiline
             onFocus={onInputFocus}
             onBlur={onInputBlur}
           />
-          <Button
-            kind="primary"
-            title="Send"
-            disabled={!draft.trim()}
-            loading={sending}
-            onPress={() => {
-              onSend(draft.trim(), attach);
-            }}
-          />
+          <Button kind="primary" title="Send" disabled={!draft.trim()} loading={sending} onPress={() => onSend(draft.trim(), true)} />
         </View>
+        {!draft.trim() && (
+          <Pressable onPress={() => onSend('Show me on my page where I should look first.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
+            <Text style={styles.quickText}>Show me where to look</Text>
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
+  );
+}
+
+/** The assignment: its problems (the default) and, one tap away, the AI-use disclosure and log. */
+function AssignmentView(p: Props) {
+  const showLog = p.tab === 'log';
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.subTabs}>
+        <Pressable onPress={() => p.onTab('problems')} style={[styles.subTab, !showLog && styles.subTabOn]} accessibilityRole="tab" accessibilityState={{ selected: !showLog }}>
+          <Text style={[styles.subTabText, !showLog && styles.subTabTextOn]}>Problems</Text>
+        </Pressable>
+        <Pressable onPress={() => p.onTab('log')} style={[styles.subTab, showLog && styles.subTabOn]} accessibilityRole="tab" accessibilityState={{ selected: showLog }}>
+          <Text style={[styles.subTabText, showLog && styles.subTabTextOn]}>AI-use log</Text>
+        </Pressable>
+      </View>
+      {showLog ? <LogTab {...p} /> : <ProblemsView assignment={p.assignment} activePart={p.activePart} onSelectPart={p.onSelectPart} onReparse={p.onReparse} reparsing={p.reparsing} />}
+    </View>
   );
 }
 
@@ -372,9 +379,15 @@ const styles = StyleSheet.create({
   userBubble: { backgroundColor: C.primary, alignSelf: 'flex-end' },
   botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line },
   userText: { color: '#fff', fontSize: T.body, lineHeight: 21 },
-  inputRow: { padding: 10, gap: 6, borderTopWidth: 1, borderColor: C.line, backgroundColor: C.card },
-  attachRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  attachText: { color: C.sub, fontSize: T.small },
+  inputRow: { padding: 10, gap: 8, borderTopWidth: 1, borderColor: C.line, backgroundColor: C.card },
+  checkCard: { gap: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, marginBottom: 4 },
+  checkHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  checkTitle: { ...LABEL, color: C.sub },
+  subTabs: { flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingTop: 10 },
+  subTab: { paddingHorizontal: 12, height: 30, borderRadius: R.pill, justifyContent: 'center' },
+  subTabOn: { backgroundColor: C.primarySoft },
+  subTabText: { fontSize: T.small, fontWeight: '600', color: C.sub },
+  subTabTextOn: { color: C.primary },
   input: {
     flex: 1,
     minHeight: 44,
