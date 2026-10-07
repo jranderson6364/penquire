@@ -472,7 +472,7 @@ Check my work. First verify each line yourself, including steps I did in my head
     }
     finalContent.push({
       type: 'text',
-      text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.)`,
+      text: `${levelBlock(input)}${input.intent ? `\n\n${intentBlock(input.intent, input.part, input.evidence)}` : ''}\n\nSTUDENT: ${input.message}\n\n(Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.)`,
     });
     messages.push({ role: 'user', content: finalContent });
 

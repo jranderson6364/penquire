@@ -144,13 +144,18 @@ export function levelBlock(ctx: TutorContext): string {
   return `${HELP_LEVELS[ctx.helpLevel].rule}${style}`;
 }
 
+const DISPUTE = `THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix. Disagreement alone is not evidence: change your verdict only for a reason you can name.`;
+
 /** Extra instructions for a chat reply that came from a button rather than free text. */
-export function intentBlock(intent: ReplyIntent | undefined, part?: string): string {
+export function intentBlock(intent: ReplyIntent | undefined, part?: string, evidence?: string): string {
   switch (intent) {
+    case 'dispute':
+      if (evidence)
+        // Models tend to back down when a student pushes back. A deterministic check is not the model's opinion.
+        return `${DISPUTE}\n\nINDEPENDENT CHECK: code (not you) also checked this line and found: "${evidence.slice(0, 300)}". Do not concede just because the student disagrees. Concede only if you can see that the line was misread (say what it actually says) or that the check doesn't apply (say why). Otherwise explain where to look, without giving the fix.`;
+      return DISPUTE;
     case 'start':
       return `THE STUDENT DOESN'T KNOW HOW TO START${part ? ` PART ${part}` : ''}. Don't ask them to show an attempt first; there may be nothing to show. Ask ONE question that gets them to name what is given and what is asked, or what kind of problem this is. If it's clear they're missing a prerequisite and the help level is 2 or higher, state it in 2–3 sentences first. End with a first move that is theirs to make. Never set up the solution for them.`;
-    case 'dispute':
-      return `THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix.`;
     case 'more_help':
       return `THE STUDENT ASKED FOR MORE HELP ON THIS ISSUE. Your earlier help didn't get them moving, so don't rephrase it. Use what this help level newly allows, and change the kind of help.`;
     default:

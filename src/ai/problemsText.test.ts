@@ -40,3 +40,13 @@ test('flat list without groups is unchanged', () => {
   const flat = flatten(groups);
   assert.equal(count(problemsText(flat), 'frictionless ramp'), 2);
 });
+
+test('a dispute with deterministic evidence tells the tutor not to concede on disagreement alone', async () => {
+  const { intentBlock } = await import('./prompts.ts');
+  const plain = intentBlock('dispute');
+  assert.match(plain, /Disagreement alone is not evidence/);
+  assert.doesNotMatch(plain, /INDEPENDENT CHECK/);
+  const withEv = intentBlock('dispute', undefined, 'Algebra check: this does not follow from L1.');
+  assert.match(withEv, /INDEPENDENT CHECK[^\n]*does not follow from L1/);
+  assert.match(withEv, /Do not concede just because the student disagrees/);
+});

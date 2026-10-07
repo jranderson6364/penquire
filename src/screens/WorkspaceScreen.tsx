@@ -508,7 +508,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     }
   };
 
-  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent) => {
+  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent, evidence?: string) => {
     setSending(true);
     setDraft('');
     try {
@@ -527,6 +527,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
         intent,
+        evidence,
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
       });
@@ -611,7 +612,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     rateMark({ lineId: v.id, rating: 'wrong', comment: 'student disputed the mark' });
     setTab('chat');
     setPanelOpen(true);
-    await send(`I think the mark on ${v.id} ("${v.reading}") is wrong. Can you re-check it?`, true, undefined, 'dispute');
+    // what the deterministic guard found, so the tutor doesn't simply back down (src/ai/prompts.ts intentBlock)
+    const evidence = v.guard === 'algebra' ? /(Algebra|Units) check:.*$/.exec(v.note)?.[0] : undefined;
+    await send(`I think the mark on ${v.id} ("${v.reading}") is wrong. Can you re-check it?`, true, undefined, 'dispute', evidence);
   };
 
   /** "Help me start": no attempt needed; a policy-capped first move for the active part. */
