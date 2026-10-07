@@ -399,6 +399,12 @@ export class ClaudeProvider implements TutorProvider {
           .map((s) => `${s.id} [${s.part || 'none'}]: ${s.reading}`)
           .join('\n')}\nDo NOT re-grade, re-transcribe or return an entry for a settled line, and do not mention settled lines or their parts anywhere in the feedback or question, not even to say they are unchanged or still fine. Write only about the lines you grade. If a graded line shows that a settled line was wrong after all, say so in the feedback (the settled line will be re-checked next time).`
       : '';
+    // The student told us what these lines say (and the ink hasn't changed since): grade what they wrote, don't re-read it.
+    const confirmed = input.confirmed?.length
+      ? `READINGS CONFIRMED BY THE STUDENT (the ink is unchanged since they confirmed): use exactly this text as the line's reading, with read_confidence "high", then grade it normally. A confirmed reading is what they wrote, not a claim that it is correct.\n${input.confirmed
+          .map((c) => `${c.id}: ${c.reading.slice(0, 200)}`)
+          .join('\n')}\n\n`
+      : '';
     const gradeList = settledIds.size ? `\nLines to grade: ${input.lines.filter((l) => !settledIds.has(l.id)).map((l) => l.id).join(', ')}` : '';
 
     const { res, out } = await this.callTool<{
@@ -428,7 +434,7 @@ This is page ${input.pageNumber} of the student's work.${input.focusPart ? ` The
 Detected lines (boxes in page points; labels are drawn in the gutter):
 ${lineList}${gradeList}
 
-${settled ? settled + '\n\n' : ''}${previous}
+${confirmed}${settled ? settled + '\n\n' : ''}${previous}
 
 Check my work. First verify each line yourself, including steps I did in my head. Label every line you are asked to grade, and give each one its problem part. Diagnose an obstacle only on a line that is actually wrong, incomplete or ambiguous. Report part status (including parts the page should address but doesn't). Give one question or next action ONLY if there is a real issue; if my work holds up, leave the question empty and say so in the feedback. List what you revealed.`,
             },

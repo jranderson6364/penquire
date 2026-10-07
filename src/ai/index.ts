@@ -44,7 +44,8 @@ export function guarded(inner: TutorProvider): TutorProvider {
       const r = await inner.check(i);
       // A guard bug must never lose a check the student already paid for: fall back to the model's own result.
       try {
-        return withRevealCheck(applyLeakGuard({ ...r, lines: applyAlgebraGuard(applyReadingGuard(r.lines)) }, i.helpLevel), i.helpLevel);
+        const confirmed = new Set((i.confirmed ?? []).map((c) => c.id));
+        return withRevealCheck(applyLeakGuard({ ...r, lines: applyAlgebraGuard(applyReadingGuard(r.lines, confirmed)) }, i.helpLevel), i.helpLevel);
       } catch (e) {
         console.warn('verification guards failed; returning the unguarded check', e);
         return r;

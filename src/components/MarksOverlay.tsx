@@ -26,6 +26,8 @@ type Props = {
   rungName: (v: LineVerdict) => string;
   feedbackFor: (lineId: string) => MarkFeedback | undefined;
   onRate: (fb: Omit<MarkFeedback, 'checkId' | 'at'>) => void;
+  /** the student says what this (unchanged) line reads: the next check grades it as written */
+  onConfirmReading?: (v: LineVerdict, reading: string) => void;
   onInputBlur?: () => void;
 };
 
@@ -45,7 +47,7 @@ const POPOVER_H = 340;
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, rungName, feedbackFor, onRate, onInputBlur }: Props) {
+export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
@@ -136,6 +138,7 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
               setReading={setReading}
               onRate={(fb) => {
                 onRate({ lineId: active.v.id, ...fb });
+                if (fb.rating === 'misread' && fb.correctReading) onConfirmReading?.(active.v, fb.correctReading);
                 setCorrecting(null);
                 setOffOpen(false);
               }}
@@ -164,10 +167,21 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
                   />
                 </>
               )}
-              {active.v.verdict === 'unreadable' && (
+              {active.v.verdict === 'unreadable' && active.v.guard === 'reading' && !!active.v.reading && !!onConfirmReading && (
                 <Button
                   small
                   kind="primary"
+                  title="Yes, that's what I wrote"
+                  onPress={() => {
+                    onConfirmReading(active.v, active.v.reading);
+                    setOpen(null);
+                  }}
+                />
+              )}
+              {active.v.verdict === 'unreadable' && (
+                <Button
+                  small
+                  kind={active.v.guard === 'reading' ? 'secondary' : 'primary'}
                   title="That's not what I wrote"
                   onPress={() => {
                     setCorrecting('misread');

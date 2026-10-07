@@ -108,6 +108,8 @@ export type CheckInput = TutorContext & {
   previous?: { feedback: string; stillOpen: string[] };
   /** lines verified by an earlier check and unchanged since (src/check/carry.ts): context only, not to be graded */
   settled?: { id: string; part?: string; reading: string }[];
+  /** readings the student confirmed or corrected for unchanged ink ("That's what I wrote" / "It misread me") */
+  confirmed?: { id: string; reading: string }[];
 };
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string; /** estimated cost of the call that produced this reply */ costUSD?: number };

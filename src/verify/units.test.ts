@@ -64,6 +64,35 @@ test('sums of quantities with units: numbers compared, dimension not inferred', 
   assert.equal(checkLineUnits('d = 2\\,\\mathrm{m} + 3\\,\\mathrm{m}'), null);
 });
 
+test('upright labels in subscripts/superscripts are not units (no false downgrade)', () => {
+  const correct = [
+    'F_{\\mathrm{N}} = F_{\\mathrm{g}}\\cos\\theta',
+    '(AB)^{\\mathrm{T}} = B^{\\mathrm{T}}A^{\\mathrm{T}}',
+    'F_{\\mathrm{N}} = m_{\\mathrm{A}} g',
+    'E_{\\mathrm{k}} = \\frac{1}{2} m v^2',
+    'A^\\mathrm{T} = A',
+    'F_\\mathrm{N} = mg\\cos\\theta',
+  ];
+  for (const s of correct) {
+    assert.notEqual(checkLineUnits(s)?.kind, 'inconsistent', s);
+    assert.notEqual(checkChain(s + ' = ' + s.split('=')[1])?.kind, 'inconsistent', s);
+    assert.deepEqual(verdicts(applyAlgebraGuard([L('L1', s)])), ['valid'], s);
+  }
+  assert.deepEqual(verdicts(applyAlgebraGuard([L('L1', 'F_{\\mathrm{N}} = mg\\cos\\theta'), L('L2', 'F_{\\mathrm{N}} = m g \\cos\\theta')])), ['valid', 'valid']);
+});
+
+test('a unit group only counts after a number (not at the start of a side or after a symbol)', () => {
+  assert.equal(unitize('\\mathrm{N} = \\mathrm{J}'), null);
+  assert.equal(checkLineUnits('x = \\mathrm{m} = \\mathrm{s}'), null);
+  assert.notEqual(unitize('F = (2\\,\\mathrm{kg})(9.8\\,\\mathrm{m/s^2})'), null);
+  assert.notEqual(unitize('d = \\frac{3}{2}\\,\\mathrm{m}'), null);
+});
+
+test('scientific notation does not loosen the rounding tolerance', () => {
+  assert.ok(roundingTol('E = 3 \\times 10^{8}') < 1e-6);
+  assert.ok(roundingTol('E = 3 \\cdot 10^8') < 1e-6);
+});
+
 // ---------------------------------------------------------------- real errors are caught
 
 test('different units on the two sides of "=" are caught', () => {

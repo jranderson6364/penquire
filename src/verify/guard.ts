@@ -52,13 +52,21 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
  * confirm what they wrote, quoting only their own characters. A false ✓ from a misread is the worst bug, and a false
  * ✗ on a misread costs trust. Downgrade-only; medium/high or missing confidence is left alone.
  */
-export function applyReadingGuard(lines: LineVerdict[]): LineVerdict[] {
+export function applyReadingGuard(lines: LineVerdict[], confirmed: ReadonlySet<string> = new Set()): LineVerdict[] {
   let changed = false;
   const out = lines.map((l) => {
-    if (l.readConfidence !== 'low' || l.verdict === 'context' || l.verdict === 'unreadable') return l;
+    // a reading the student confirmed is what they wrote: grade it as read
+    if (l.readConfidence !== 'low' || l.verdict === 'context' || l.verdict === 'unreadable' || confirmed.has(l.id)) return l;
     changed = true;
     const what = l.uncertain ? `“${l.uncertain}” in this line` : 'this line';
-    return { ...l, verdict: 'unreadable' as const, guard: 'reading' as const, modelVerdict: l.verdict, obstacle: undefined, note: `I'm not sure I read ${what} right. Is it what you wrote?` };
+    return {
+      ...l,
+      verdict: 'unreadable' as const,
+      guard: 'reading' as const,
+      modelVerdict: l.verdict,
+      obstacle: undefined,
+      note: `I'm not sure I read ${what} right. Confirm what you wrote below, then check again.`,
+    };
   });
   return changed ? out : lines;
 }

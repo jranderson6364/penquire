@@ -310,7 +310,8 @@ export function roundingTol(src: string, base = 1e-9): number {
   // 2 s.f., "9.8 · 31 = 300" at 1 s.f.), the ambiguity STACK's NumSigFigs also allows. Not scaled by the safety
   // factor and capped lower, so it only covers honest rounding.
   let sig = 0;
-  for (const m of src.matchAll(/(?<![\d.])([1-9]\d*?)(0+)(?![\d.])/g)) {
+  // (a base 10 of scientific notation, "\times 10^{8}", is exact, not a rounded value)
+  for (const m of src.matchAll(/(?<![\d.])([1-9]\d*?)(0+)(?![\d.]|\s*\^)/g)) {
     const v = Number(m[0]);
     sig = Math.max(sig, (0.5 * Math.pow(10, m[2].length)) / v);
   }

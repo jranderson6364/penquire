@@ -70,6 +70,8 @@ export type Assignment = {
   chat: ChatTurn[];
   /** latest check per page id */
   checks: Record<string, StoredCheck>;
+  /** per page id: line ink signature -> the reading the student confirmed or corrected (src/check/confirmed.ts) */
+  confirmedReadings?: Record<string, Record<string, string>>;
   /** hint-ladder rung per open issue (see src/tutor/ladder.ts); absent on older assignments */
   ladder?: Ladder;
   /** open issues with the most help each has had (src/tutor/issues.ts); absent on older assignments */

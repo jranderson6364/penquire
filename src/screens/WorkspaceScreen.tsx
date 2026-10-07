@@ -18,6 +18,7 @@ import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, pa
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { guardMerged } from '../check/finalize';
+import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
@@ -429,6 +430,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         return;
       }
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
+      // Readings the student confirmed for ink that hasn't changed (src/check/confirmed.ts).
+      const conf = confirmedFor(a.confirmedReadings?.[pageId], current);
       const spend = { total: 0 };
       const fresh = await providerFromSettings(spend).check({
         ...tutorContext(a),
@@ -438,6 +441,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         focusPart: activePart && a.problems.some((p) => p.label === activePart) ? activePart : undefined,
         previous: prev ? { feedback: prev.result.feedback, stillOpen: prev.result.stillOpen } : undefined,
         settled: settled.length ? settled : undefined,
+        confirmed: conf.input.length ? conf.input : undefined,
       });
       const mergedLines = mergeVerdicts(current, plan, fresh.lines);
       // Re-run the guards on the whole merged page: the provider's guards only saw the freshly graded lines (src/check/finalize.ts).
@@ -467,6 +471,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ...x,
           ladder: pruneLadder(ladder, openKeys),
           issues,
+          confirmedReadings: { ...(x.confirmedReadings ?? {}), [pageId]: conf.kept },
           checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, costUSD: spend.total, space: modern ? 'page-v2' : undefined } },
           events: [
             ...x.events,
@@ -611,6 +616,16 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setTab('chat');
     setPanelOpen(true);
     await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, undefined, 'start');
+  };
+
+  /** "Yes, that's what I wrote" / a corrected reading: the next check grades this ink as the student says it reads. */
+  const confirmLine = (v: LineVerdict, reading: string) => {
+    if (!v.sig) return;
+    updateAssignment(a.id, (x) => ({
+      ...x,
+      confirmedReadings: { ...(x.confirmedReadings ?? {}), [pageId]: confirmReading(x.confirmedReadings?.[pageId], v.sig, reading) },
+    }));
+    say('Got it. Check again and the tutor will grade it as you wrote it.');
   };
 
   const repeats = (v: LineVerdict) => isRepeat(getIssue(a.issues, pageId, issueKey(v.part, v.reading, v.sig)));
@@ -760,6 +775,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               rungName={rungName}
               feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
               onRate={rateMark}
+              onConfirmReading={confirmLine}
               onInputBlur={() => canvasRef.current?.focus()}
             />
           </View>

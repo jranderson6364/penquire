@@ -131,6 +131,16 @@ function hasTopLevelSum(s: string): boolean {
   return false;
 }
 
+/** Is the text before a unit group a quantity it can attach to: "9.8\,", "(2)", "\frac{3}{2} "? Never a sub/superscript. */
+function followsFactor(before: string): boolean {
+  const t = before.replace(/(\\,|\\;|\\!|\\ |\s)+$/, '');
+  if (/[_^]\s*\{?\s*$/.test(t)) return false; // F_{\mathrm{N}}, A^\mathrm{T}
+  if (/[0-9]$/.test(t)) return !/[_^]\s*\{?\s*[0-9]+$/.test(t); // 9.8 m, but not x_{1} m
+  if (/[)\]]$/.test(t)) return true; // (2.0) kg
+  if (/\}$/.test(t)) return /\\frac\s*\{[^{}]*\}\s*\{[^{}]*\}$/.test(t); // \frac{3}{2} m; not a closed subscript
+  return false;
+}
+
 /**
  * Rewrite a line's unit groups to SI multipliers. Returns null when the line has no unit groups at all (callers keep
  * the old behaviour), or when a unit group is not a recognised unit (callers must not judge the line: return the
@@ -145,9 +155,11 @@ export function unitize(src: string): { sides: SideUnits[]; joined: string } | n
     let ok = true;
     let hasUnits = false;
     let dim: Dim = D();
-    const rewritten = side.replace(GROUP, (_m, inner: string) => {
+    const rewritten = side.replace(GROUP, (_m, inner: string, at: number) => {
       const u = parseUnit(inner);
-      if (!u) {
+      // Upright text is also how labels are written: F_{\mathrm{N}}, A^{\mathrm{T}}, m_\mathrm{A}. Only a group that
+      // directly follows a number (or a closing bracket of one) is a unit; anything else leaves the line unjudged.
+      if (!u || !followsFactor(side.slice(0, at))) {
         ok = false;
         return _m;
       }
