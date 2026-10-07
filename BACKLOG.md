@@ -28,7 +28,8 @@ Phase 0 (JS-only), branch `reliability-phase0`:
 - [ ] Calibrate `read_confidence` on real handwriting (synthetic pages all read "high"; no signal there).
 - [x] Continuation lines that start with "=" are checked as a chain (`checkContinuation`); the link to the previous line only when both sides write units.
 - [ ] Bare units (`60 km/h` without `\mathrm`) are left unjudged; consider recognising a trailing unit token.
-- [x] Dispute: guard evidence goes to the tutor as an independent check; "disagreement alone is not evidence".`n- [ ] Wrongful-concession eval (model in the loop): disputes on truly wrong lines must not concede; disputes on misreads/valid alternatives must.
+- [x] Dispute: guard evidence goes to the tutor as an independent check; "disagreement alone is not evidence".
+- [ ] Wrongful-concession eval (model in the loop): disputes on truly wrong lines must not concede; disputes on misreads/valid alternatives must.
 - [x] A flag dropped on unchanged ink is logged as `withdrawn` (tutor reversal), not "resolved on your own"; disclosure and Log tab count it apart.
 - [x] "?" lines are answerable: "Yes, that's what I wrote" / corrected reading stored by ink signature (`src/check/confirmed.ts`) and passed to the next check.
 
@@ -77,7 +78,8 @@ Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, 
 
 ## Next: v0.2 features (see ../docs/03-features.md)
 
-- [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, `note{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
+- [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, 
+ote{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
   - *Done when:* 95% of annotations land on the intended line in 20 test pages.
 - [ ] **Backend proxy** (`../backend/worker`, Cloudflare Worker + Hono). Add `/check`, `/reply`, `/parse` holding the API key. App setting: "Use Penquire server," with URL and a simple device token.
   - *Done when:* a TestFlight build works with no key on the device.
