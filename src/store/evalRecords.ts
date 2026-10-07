@@ -65,7 +65,12 @@ export type EvalExport = {
   format: 'penquire-evals';
   version: 1;
   exportedAt: string;
-  checks: (CheckSnapshot & { imageBase64: string | null; feedback: MarkFeedback[] })[];
+  checks: (CheckSnapshot & {
+    imageBase64: string | null;
+    feedback: MarkFeedback[];
+    /** the ink at check time (native apiVersion >= 3): makes the case replayable through line grouping and reading */
+    strokes?: unknown;
+  })[];
 };
 
 /** Self-contained export: each rated check with its page image (PNG base64) and its ratings. */

@@ -13,6 +13,7 @@ const root = new Directory(Paths.document, 'penquire');
 const checkImagesDir = new Directory(root, 'checks');
 const evalsDir = new Directory(root, 'evals');
 const imagesDir = new Directory(evalsDir, 'images');
+const strokesDir = new Directory(evalsDir, 'strokes');
 const storeFile = new File(evalsDir, 'feedback.json');
 
 let cache: EvalStore | null = null;
@@ -49,8 +50,20 @@ export function saveCheckImage(pageId: string, pngBase64: string) {
   f.write(pngBase64, { encoding: 'base64' });
 }
 
+/** Keep the ink (stroke points, native apiVersion >= 3) of the latest check, so a rated check can be replayed. */
+export function saveCheckStrokes(pageId: string, strokes: unknown | null) {
+  ensure(checkImagesDir);
+  const f = new File(checkImagesDir, `${pageId}.strokes.json`);
+  if (strokes == null) {
+    if (f.exists) f.delete();
+    return;
+  }
+  if (!f.exists) f.create({ intermediates: true });
+  f.write(JSON.stringify(strokes));
+}
+
 /**
- * Record a rating. The first rating of a check copies its page image into evals/images.
+ * Record a rating. The first rating of a check copies its page image into evals/images (and its ink into evals/strokes).
  * `snapshot.image` is ignored; it's filled in here from the saved check image, if one exists.
  */
 export function recordFeedback(pageId: string, snapshot: Omit<CheckSnapshot, 'image'>, fb: MarkFeedback) {
@@ -65,6 +78,12 @@ export function recordFeedback(pageId: string, snapshot: Omit<CheckSnapshot, 'im
       if (!dest.exists) src.copySync(dest);
       image = name;
     }
+    const ink = new File(checkImagesDir, `${pageId}.strokes.json`);
+    if (ink.exists) {
+      ensure(strokesDir);
+      const dest = new File(strokesDir, `${snapshot.checkId}.json`);
+      if (!dest.exists) ink.copySync(dest);
+    }
   }
   cache = upsertFeedback(store, { ...snapshot, image }, fb);
   ensure(evalsDir);
@@ -75,10 +94,22 @@ export function recordFeedback(pageId: string, snapshot: Omit<CheckSnapshot, 'im
 
 /** Write a self-contained JSON export (images embedded) and return its file:// URI for the share sheet. */
 export function writeExport(): string {
-  const data = buildExport(loadEvals(), (name) => {
+  const built = buildExport(loadEvals(), (name) => {
     const f = new File(imagesDir, name);
     return f.exists ? f.base64Sync() : null;
   });
+  const data = {
+    ...built,
+    checks: built.checks.map((c) => {
+      const f = new File(strokesDir, `${c.checkId}.json`);
+      if (!f.exists) return c;
+      try {
+        return { ...c, strokes: JSON.parse(f.textSync()) as unknown };
+      } catch {
+        return c;
+      }
+    }),
+  };
   ensure(evalsDir);
   const stamp = data.exportedAt.replace(/[:.]/g, '-');
   const f = new File(evalsDir, `export-${stamp}.json`);

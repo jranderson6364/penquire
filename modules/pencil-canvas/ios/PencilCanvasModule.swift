@@ -9,8 +9,9 @@ public class PencilCanvasModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PencilCanvas")
 
+    // 3: getStrokePoints (visible ink points), exportPage (jpeg, crop, no gutter)
     Constant("apiVersion") {
-      return 2
+      return 3
     }
 
     View(PencilCanvasView.self) {
@@ -89,6 +90,17 @@ public class PencilCanvasModule: Module {
       // linesJSON: [{ id, x, y, w, h }] in page space. Returns { base64, width, height, gutter, scale }.
       AsyncFunction("exportImage") { (view: PencilCanvasView, linesJSON: String, maxDimension: Double) -> String in
         return MainActor.assumeIsolated { view.exportImageJSON(linesJSON: linesJSON, maxDimension: maxDimension) }
+      }
+
+      // apiVersion >= 3. [{ i, t, pts: [[x, y, ms, force]][] }]: visible runs only (pixel-erased parts are dropped).
+      AsyncFunction("getStrokePoints") { (view: PencilCanvasView) -> String in
+        return MainActor.assumeIsolated { view.strokePointsJSON() }
+      }
+
+      // apiVersion >= 3. options: { lines?, maxDimension?, format?: "png"|"jpeg", quality?, cropBottom? }
+      // Returns { base64, mediaType, width, height, gutter, scale, pageHeight }.
+      AsyncFunction("exportPage") { (view: PencilCanvasView, optionsJSON: String) -> String in
+        return MainActor.assumeIsolated { view.exportPageJSON(optionsJSON: optionsJSON) }
       }
     }
   }

@@ -22,6 +22,27 @@ export type ExportedImage = {
   scale: number; // pixels per point
 };
 
+/** apiVersion >= 3: the ink of one stroke, visible runs only (pixel-erased parts dropped). */
+export type StrokePoints = {
+  /** index in the PKDrawing stroke list (same as StrokeBox.i) */
+  i: number;
+  /** creation time, ms since epoch */
+  t: number;
+  /** visible runs; each point is [x, y, ms since the stroke began, force] in page space */
+  pts: [number, number, number, number][][];
+};
+
+export type ExportPageOptions = {
+  lines?: LineBoxInput[];
+  maxDimension?: number;
+  format?: 'png' | 'jpeg';
+  quality?: number;
+  /** cut the blank page below the lowest ink; the origin stays put, so line boxes keep their coordinates */
+  cropBottom?: boolean;
+};
+
+export type ExportedPage = ExportedImage & { mediaType: 'image/png' | 'image/jpeg'; pageHeight: number };
+
 export type PaperStyle = 'grid' | 'lined' | 'blank';
 
 /** Reported by the native canvas: screen = page * scale + (tx, ty). */
@@ -68,4 +89,8 @@ export type PencilCanvasHandle = {
   setRulerActive(active: boolean): Promise<void>;
   fitToWidth(): Promise<void>;
   getViewport(): Promise<ViewportEvent | null>;
+  /** null on a binary older than apiVersion 3 */
+  getStrokePoints(): Promise<StrokePoints[] | null>;
+  /** null on a binary older than apiVersion 3 (callers fall back to exportImage) */
+  exportPage(options: ExportPageOptions): Promise<ExportedPage | null>;
 };

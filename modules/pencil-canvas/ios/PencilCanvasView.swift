@@ -451,6 +451,47 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     return jsonString(out)
   }
 
+  /// The ink itself, for stroke-based reading and replayable eval cases (apiVersion >= 3).
+  /// [{ i, t, pts: [[x, y, ms, force], ...][] }] in PAGE space: one point list per VISIBLE run of the stroke, so
+  /// pixel-erased parts (masked, not removed, in PencilKit) are never sent. Fully erased strokes are skipped.
+  /// Points are sampled on the curve every ~2 page points; ms is the time since the stroke began.
+  func strokePointsJSON() -> String {
+    var out: [[String: Any]] = []
+    for (index, stroke) in canvas.drawing.strokes.enumerated() {
+      let path = stroke.path
+      guard path.count > 0 else { continue }
+      let ranges: [ClosedRange<CGFloat>?]
+      if stroke.mask == nil {
+        ranges = [nil]
+      } else {
+        let visible = stroke.maskedPathRanges
+        if visible.isEmpty { continue }
+        ranges = visible.map { Optional($0) }
+      }
+      var runs: [[[Double]]] = []
+      for range in ranges {
+        var run: [[Double]] = []
+        for p in path.interpolatedPoints(in: range, by: .distance(2)) {
+          let loc = p.location.applying(stroke.transform)
+          run.append([
+            (Double(loc.x) * 10).rounded() / 10,
+            (Double(loc.y) * 10).rounded() / 10,
+            (p.timeOffset * 1000).rounded(),
+            (Double(p.force) * 100).rounded() / 100,
+          ])
+        }
+        if !run.isEmpty { runs.append(run) }
+      }
+      if runs.isEmpty { continue }
+      out.append([
+        "i": index,
+        "t": path.creationDate.timeIntervalSince1970 * 1000.0,
+        "pts": runs,
+      ])
+    }
+    return jsonString(out)
+  }
+
   func drawingBase64() -> String {
     return canvas.drawing.dataRepresentation().base64EncodedString()
   }
@@ -489,13 +530,43 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   /// Renders the PAGE (fixed logical size, independent of zoom and window) on white with a left gutter
   /// containing line labels (L1, L2, ...) and faint dashed boxes, so the model can refer to lines by ID.
   func exportImageJSON(linesJSON: String, maxDimension: Double) -> String {
-    let size = pageSize
+    return exportPage(linesJSON: linesJSON, maxDimension: maxDimension, jpegQuality: nil, cropBottom: false)
+  }
+
+  /// exportImage with options (apiVersion >= 3):
+  /// { lines?: [{id,x,y,w,h}], maxDimension?, format?: "png"|"jpeg", quality?: 0...1, cropBottom?: bool }.
+  /// cropBottom cuts the blank page below the lowest ink (plus a margin); the origin stays at the page's top-left, so
+  /// line boxes keep their page coordinates. Fewer image tokens per check. No lines = a clean page, no gutter.
+  func exportPageJSON(optionsJSON: String) -> String {
+    let opts = (optionsJSON.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+    var linesJSON = "[]"
+    if let lines = opts["lines"], JSONSerialization.isValidJSONObject(lines),
+       let data = try? JSONSerialization.data(withJSONObject: lines), let s = String(data: data, encoding: .utf8) {
+      linesJSON = s
+    }
+    let maxDim = (opts["maxDimension"] as? NSNumber)?.doubleValue ?? 2000
+    let jpeg = (opts["format"] as? String) == "jpeg"
+    let quality = (opts["quality"] as? NSNumber)?.doubleValue ?? 0.85
+    let crop = (opts["cropBottom"] as? Bool) ?? false
+    return exportPage(linesJSON: linesJSON, maxDimension: maxDim, jpegQuality: jpeg ? min(1, max(0.3, quality)) : nil, cropBottom: crop)
+  }
+
+  private func exportPage(linesJSON: String, maxDimension: Double, jpegQuality: Double?, cropBottom: Bool) -> String {
+    var size = pageSize
     guard size.width > 1, size.height > 1 else { return "null" }
 
     var lines: [LineBox] = []
     if let data = linesJSON.data(using: .utf8),
        let decoded = try? JSONDecoder().decode([LineBox].self, from: data) {
       lines = decoded
+    }
+
+    if cropBottom {
+      let ink = canvas.drawing.bounds
+      var bottom = ink.isNull || ink.isEmpty ? 0 : ink.maxY
+      for line in lines { bottom = max(bottom, CGFloat(line.y + line.h)) }
+      // keep at least a quarter page so a nearly empty page still reads as a page
+      size.height = min(pageSize.height, max(pageSize.height / 4, bottom + 48))
     }
 
     let gutter: CGFloat = lines.isEmpty ? 0 : 56
@@ -548,13 +619,21 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       }
     }
 
-    guard let png = image.pngData() else { return "null" }
+    let encoded: Data?
+    if let q = jpegQuality {
+      encoded = image.jpegData(compressionQuality: CGFloat(q))
+    } else {
+      encoded = image.pngData()
+    }
+    guard let bytes = encoded else { return "null" }
     return jsonString([
-      "base64": png.base64EncodedString(),
+      "base64": bytes.base64EncodedString(),
+      "mediaType": jpegQuality == nil ? "image/png" : "image/jpeg",
       "width": Double(outSize.width * scale),
       "height": Double(outSize.height * scale),
       "gutter": Double(gutter),
       "scale": Double(scale),
+      "pageHeight": Double(size.height),
     ])
   }
 }

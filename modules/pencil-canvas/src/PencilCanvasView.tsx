@@ -2,7 +2,7 @@ import { requireNativeView, requireOptionalNativeModule } from 'expo';
 import * as React from 'react';
 import type { NativeSyntheticEvent } from 'react-native';
 
-import type { NativeToolSpec, PencilCanvasHandle, PencilCanvasProps, ViewportEvent } from './types';
+import type { ExportedPage, NativeToolSpec, PencilCanvasHandle, PencilCanvasProps, StrokePoints, ViewportEvent } from './types';
 
 type NativeMethods = {
   getStrokes(): Promise<string>;
@@ -18,6 +18,9 @@ type NativeMethods = {
   setRulerActive?(active: boolean): Promise<void>;
   fitToWidth?(): Promise<void>;
   getViewport?(): Promise<string>;
+  // apiVersion >= 3
+  getStrokePoints?(): Promise<string>;
+  exportPage?(optionsJSON: string): Promise<string>;
 };
 
 type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged' | 'onViewportChanged' | 'onPencilDoubleTap'> & {
@@ -115,6 +118,8 @@ export function PencilCanvas({
           await n().fitToWidth?.();
         },
         getViewport: async () => (n().getViewport ? parse<ViewportEvent | null>(await n().getViewport!(), null) : null),
+        getStrokePoints: async () => (n().getStrokePoints ? parse<StrokePoints[] | null>(await n().getStrokePoints!(), null) : null),
+        exportPage: async (options) => (n().exportPage ? parse<ExportedPage | null>(await n().exportPage!(JSON.stringify(options)), null) : null),
       };
     },
     []

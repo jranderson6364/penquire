@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Alert, AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type StrokeBox, type ViewportEvent } from '../../modules/pencil-canvas';
+import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type StrokeBox, type StrokePoints, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -23,7 +23,7 @@ import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
-import { loadEvals, recordFeedback, saveCheckImage, subscribeEvals } from '../store/evals';
+import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { applyParse } from '../store/parseApply';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
@@ -287,16 +287,18 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   }, [savePage]);
 
   // ---- capture -----------------------------------------------------------
-  const capture = async (): Promise<{ lines: Line[]; image: ExportedImage | null; strokes: number; strokeList: StrokeBox[] }> => {
+  const capture = async (): Promise<{ lines: Line[]; image: ExportedImage | null; strokes: number; strokeList: StrokeBox[]; points: StrokePoints[] | null }> => {
     const c = canvasRef.current;
     if (!c) throw new Error('Canvas not ready');
     const strokes = await c.getStrokes();
     const lines = groupLines(strokes);
-    const image = await c.exportImage(
-      lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
-      2000
-    );
-    return { lines, image, strokes: strokes.length, strokeList: strokes };
+    const boxes = lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+    // apiVersion >= 3: crop the blank page below the ink (fewer image tokens; same coordinates). PNG on purpose:
+    // lossy compression hurts handwriting legibility, and image tokens depend on pixels, not bytes.
+    const image = (nativeApiVersion >= 3 ? await c.exportPage({ lines: boxes, maxDimension: 2000, format: 'png', cropBottom: true }) : null) ?? (await c.exportImage(boxes, 2000));
+    // the ink itself, so a rated check can be replayed through line grouping and reading later (null on older builds)
+    const points = nativeApiVersion >= 3 ? await c.getStrokePoints().catch(() => null) : null;
+    return { lines, image, strokes: strokes.length, strokeList: strokes, points };
   };
 
   if (!nativeCanvasAvailable) {
@@ -411,7 +413,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setChecking(true);
     try {
       await savePage();
-      const { lines, image, strokes, strokeList } = await capture();
+      const { lines, image, strokes, strokeList, points } = await capture();
       if (strokes === 0 || !image) {
         say('Nothing to check yet. Write something on this page first.');
         return;
@@ -449,6 +451,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       if (!toolIsPixelEraser) pixelErased.current.delete(pageId);
       try {
         saveCheckImage(pageId, image.base64);
+        saveCheckStrokes(pageId, points);
       } catch (e) {
         console.warn('saving check image failed', e);
       }
