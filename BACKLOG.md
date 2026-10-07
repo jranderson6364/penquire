@@ -78,8 +78,7 @@ Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, 
 
 ## Next: v0.2 features (see ../docs/03-features.md)
 
-- [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, 
-ote{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
+- [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, `note{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
   - *Done when:* 95% of annotations land on the intended line in 20 test pages.
 - [ ] **Backend proxy** (`../backend/worker`, Cloudflare Worker + Hono). Add `/check`, `/reply`, `/parse` holding the API key. App setting: "Use Penquire server," with URL and a simple device token.
   - *Done when:* a TestFlight build works with no key on the device.
