@@ -22,14 +22,14 @@ Phase 0 (JS-only), branch `reliability-phase0`:
 - [x] Units v1 (`src/verify/units.ts`): SI comparison, dropped units not judged, dimension mismatch caught; readings now carry units in `\mathrm{}`. Sig-fig rounding for trailing-zero integers.
 - [x] Eval hygiene: `run_synth` splits model vs guard flags and prints Wilson 95% CIs.
 - [x] Mark popover → 3 actions + "Something's off" sheet; "Read as" evidence with uncertain characters; one Check button; inline notices instead of Alerts for check outcomes.
-- [ ] Panel 4 tabs → 2 (Tutor stream · Assignment). Help-level chip in the Tutor header.
-- [ ] Part title as the question menu ("3b ▾": prev/next, Place part/setup, expand); ruler into the tool popover.
+- [x] Panel 4 tabs → 2 (Tutor stream: latest check card + conversation; Assignment: problems + AI-use log). Help-level chip stays in the panel header.
+- [x] Part title as the question menu ("3b · Problem 3 ▾"); Place part/setup behind ⋯; tap the question to expand; ruler toggle in the pen/highlighter options (shown in the tray only while on).
 - [ ] Check button shows its stage (reading → checking → n marks) once streaming exists.
 - [ ] Calibrate `read_confidence` on real handwriting (synthetic pages all read "high"; no signal there).
-- [ ] Continuation lines that start with "=" are unparsed by `expr.ts`: join them to the previous line's last side.
+- [x] Continuation lines that start with "=" are checked as a chain (`checkContinuation`); the link to the previous line only when both sides write units.
 - [ ] Bare units (`60 km/h` without `\mathrm`) are left unjudged; consider recognising a trailing unit token.
-- [ ] Dispute flow: require verifier/second-reader agreement before conceding; add a wrongful-concession eval.
-- [ ] Log "tutor reversed itself" separately from "fixed": with ink keys, an issue whose ink is unchanged but is no longer flagged (e.g. a conceded dispute) is a reversal, not a resolution on your own. Today it inflates the unaided count in the disclosure.
+- [x] Dispute: guard evidence goes to the tutor as an independent check; "disagreement alone is not evidence".`n- [ ] Wrongful-concession eval (model in the loop): disputes on truly wrong lines must not concede; disputes on misreads/valid alternatives must.
+- [x] A flag dropped on unchanged ink is logged as `withdrawn` (tutor reversal), not "resolved on your own"; disclosure and Log tab count it apart.
 - [x] "?" lines are answerable: "Yes, that's what I wrote" / corrected reading stored by ink signature (`src/check/confirmed.ts`) and passed to the next check.
 
 Phase 1 (ONE batched native build; ask first): stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
