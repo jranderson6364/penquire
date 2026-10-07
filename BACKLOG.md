@@ -29,6 +29,8 @@ Phase 0 (JS-only), branch `reliability-phase0`:
 - [ ] Continuation lines that start with "=" are unparsed by `expr.ts`: join them to the previous line's last side.
 - [ ] Bare units (`60 km/h` without `\mathrm`) are left unjudged; consider recognising a trailing unit token.
 - [ ] Dispute flow: require verifier/second-reader agreement before conceding; add a wrongful-concession eval.
+- [ ] Log "tutor reversed itself" separately from "fixed": with ink keys, an issue whose ink is unchanged but is no longer flagged (e.g. a conceded dispute) is a reversal, not a resolution on your own. Today it inflates the unaided count in the disclosure.
+- [x] "?" lines are answerable: "Yes, that's what I wrote" / corrected reading stored by ink signature (`src/check/confirmed.ts`) and passed to the next check.
 
 Phase 1 (ONE batched native build; ask first): stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
 
