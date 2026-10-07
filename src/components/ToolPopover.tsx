@@ -76,6 +76,11 @@ export function ToolPopover({ tool, anchor, windowWidth, onChange, onClose }: Pr
                 );
               })}
             </View>
+            {/* the ruler only matters while inking, so it lives with the ink options, not in the toolbar */}
+            <Pressable onPress={() => onChange({ ...tool, ruler: !tool.ruler })} style={[styles.rulerRow, tool.ruler && styles.segOn]} accessibilityRole="switch" accessibilityLabel="Ruler" accessibilityState={{ checked: tool.ruler }}>
+              <Icon name="ruler" size={18} color={tool.ruler ? C.primary : C.sub} />
+              <Text style={[styles.segText, tool.ruler && { color: C.primary }]}>{tool.ruler ? 'Ruler on' : 'Ruler'}</Text>
+            </Pressable>
           </>
         )}
 
@@ -133,6 +138,7 @@ const styles = StyleSheet.create({
   segItem: { flex: 1, minHeight: 36, borderRadius: R.sm + 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 6 },
   segOn: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line },
   segText: { fontSize: T.small, fontWeight: '600', color: C.sub },
+  rulerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 36, paddingHorizontal: 10, borderRadius: R.sm, backgroundColor: C.bg },
   swatches: { flexDirection: 'row', flexWrap: 'wrap' },
   swatchHit: { width: 68, height: 40, alignItems: 'center', justifyContent: 'center' },
   swatch: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(15,20,25,0.15)' },

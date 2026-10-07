@@ -121,10 +121,12 @@ export function TopBar(p: Props) {
           </Pressable>
         );
       })}
-      <View style={styles.trayDivider} />
-      <Pressable onPress={() => p.onToolChange({ ...p.tool, ruler: !p.tool.ruler })} style={[styles.tool, p.tool.ruler && styles.toolOn]} accessibilityRole="button" accessibilityLabel="Ruler" accessibilityState={{ selected: p.tool.ruler }}>
-        <Icon name="ruler" size={22} color={p.tool.ruler ? C.primary : C.sub} />
-      </Pressable>
+      {/* the ruler toggle lives in the pen/highlighter options (ToolPopover); a dot here shows it is on */}
+      {p.tool.ruler && (
+        <Pressable onPress={() => p.onToolChange({ ...p.tool, ruler: false })} style={[styles.tool, styles.toolOn]} accessibilityRole="button" accessibilityLabel="Ruler is on. Tap to hide it.">
+          <Icon name="ruler" size={22} color={C.primary} />
+        </Pressable>
+      )}
     </View>
   ) : (
     <Text style={styles.oldBuild}>Old app build: install the latest build for zoom, rotation and the new tools</Text>

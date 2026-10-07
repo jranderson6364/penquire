@@ -33,6 +33,7 @@ const SHEET_MAX = 320;
 /** The question being worked on: the shared setup of the whole problem (one line), then just the current part. */
 export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, onPlaceSetup, onRetract, insetLeft, insetRight }: Props) {
   const [expanded, setExpanded] = React.useState(false);
+  const [more, setMore] = React.useState(false);
   const { groups, problems } = assignment;
   const labels = problems.map((p) => p.label);
   const idx = activePart ? labels.indexOf(activePart) : -1;
@@ -67,34 +68,26 @@ export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, 
         <Pressable onPress={() => go(1)} hitSlop={8} style={styles.nav} accessibilityRole="button" accessibilityLabel="Next question">
           <Icon name="chevron-right" size={16} color={C.primary} />
         </Pressable>
-        {!!found?.part && (
-          <Text style={styles.partTag}>
-            {found.group.label}
-            {found.part.label}
-          </Text>
-        )}
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
+        {/* the title IS the question menu: one control instead of a tag, a title and a separate picker */}
+        <PartPicker parts={choices} value={activePart} onChange={onChange} label={activePart ? (found?.part ? `${activePart} · ${title}` : title) : 'Choose a question'} />
         <View style={{ flex: 1 }} />
-        {!!activePart && (
+        {!!activePart && more && (
           <>
-            <Pressable onPress={onPlacePart} style={styles.action} accessibilityRole="button" accessibilityLabel="Place this part on the page">
+            <Pressable onPress={() => (onPlacePart(), setMore(false))} style={styles.action} accessibilityRole="button" accessibilityLabel="Place this part on the page">
               <Icon name="pin" size={16} color={C.primary} />
               <Text style={styles.actionText}>Place part</Text>
             </Pressable>
             {!!setup && hasPart && (
-              <Pressable onPress={onPlaceSetup} style={styles.action} accessibilityRole="button" accessibilityLabel="Place the setup of the whole problem on the page">
+              <Pressable onPress={() => (onPlaceSetup(), setMore(false))} style={styles.action} accessibilityRole="button" accessibilityLabel="Place the setup of the whole problem on the page">
                 <Icon name="pin" size={16} color={C.primary} />
                 <Text style={styles.actionText}>Place setup</Text>
               </Pressable>
             )}
           </>
         )}
-        <PartPicker parts={choices} value={activePart} onChange={onChange} />
         {!!activePart && (
-          <Pressable onPress={() => setExpanded((e) => !e)} style={styles.nav} accessibilityRole="button" accessibilityLabel={expanded ? 'Close details' : 'Show every detail of this question'}>
-            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.primary} />
+          <Pressable onPress={() => setMore((m) => !m)} style={[styles.nav, more && { backgroundColor: C.primarySoft }]} accessibilityRole="button" accessibilityLabel={more ? 'Hide question actions' : 'More: place the question on the page'}>
+            <Text style={styles.moreText}>⋯</Text>
           </Pressable>
         )}
         <Pressable onPress={onRetract} hitSlop={6} style={styles.nav} accessibilityRole="button" accessibilityLabel="Hide the question strip">
@@ -103,12 +96,13 @@ export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, 
       </View>
 
       {!activePart ? (
-        <Text style={styles.hintText}>Pick the question you are working on with the arrows or the list. The tutor checks your page against it.</Text>
+        <Text style={styles.hintText}>Pick the question you are working on. The tutor checks your page against it.</Text>
       ) : (
-        <>
+        // tap the question to read all of it (setup, sub-parts, hints)
+        <Pressable onPress={() => setExpanded((e) => !e)} accessibilityRole="button" accessibilityLabel={expanded ? 'Close the full question' : 'Show the full question'}>
           {hasPart && !!setup && <MathText text={setup} style={styles.setupLine} numberOfLines={1} />}
           <MathText text={partLine} style={styles.partText} numberOfLines={hasPart && setup ? 2 : 3} />
-        </>
+        </Pressable>
       )}
 
       {expanded && !!activePart && (
@@ -153,11 +147,10 @@ const styles = StyleSheet.create({
   wrap: { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line, paddingTop: 6, gap: 3, zIndex: 20, overflow: 'visible' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   nav: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' },
-  partTag: { fontSize: T.small, fontWeight: '700', color: C.primary, backgroundColor: C.primarySoft, borderRadius: R.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden', marginLeft: 4 },
-  title: { fontSize: T.body, fontWeight: '600', color: C.ink, maxWidth: 320, letterSpacing: -0.2 },
   action: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 30, paddingHorizontal: 10, borderRadius: R.pill, backgroundColor: C.primarySoft },
   actionText: { fontSize: T.small, fontWeight: '600', color: C.primary },
   hintText: { color: C.sub, fontSize: T.body - 1 },
+  moreText: { fontSize: 18, lineHeight: 20, fontWeight: '700', color: C.primary },
   setupLine: { fontSize: T.small, lineHeight: 18, color: C.sub },
   pill: { position: 'absolute', top: 8, zIndex: 15, flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderRadius: R.pill, backgroundColor: C.card, borderWidth: 1, borderColor: C.line, shadowColor: '#0F1419', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
   pillText: { fontSize: T.small, fontWeight: '600', color: C.ink },
