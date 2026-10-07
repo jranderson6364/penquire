@@ -396,12 +396,12 @@ export function checkLineUnits(src: string): StepRelation | null {
 }
 
 /** a = b = c ... : every adjacent pair must be identically equal. Returns null if the line isn't a chain. */
-export function checkChain(raw: string): StepRelation | null {
+export function checkChain(raw: string, minSides = 3): StepRelation | null {
   // Units are compared in SI (src/verify/units.ts); a link between a side with units and one without is not judged.
   const u = unitize(raw);
   const src = u ? u.joined : raw;
   const parts = splitEq(src);
-  if (parts.length < 3 || parts.some((p) => p.includes('??'))) return null;
+  if (parts.length < minSides || parts.some((p) => p.includes('??'))) return null;
   if (u && u.sides.length !== parts.length) return { kind: 'unparsed', detail: 'units: sides did not line up' };
   const asts: Node[] = [];
   for (const part of parts) {
@@ -425,6 +425,38 @@ export function checkChain(raw: string): StepRelation | null {
   return skipped
     ? { kind: 'unrelated', detail: `${skipped} link(s) not judged` }
     : { kind: 'equivalent', detail: 'every link of the chain is an identity' };
+}
+
+const CONTINUES = /^\s*(=|\\approx|≈)/;
+
+/**
+ * A line that starts with "=" continues the previous line's chain ("v = 90/1.5 = 60" then "= 60·1000/3600 = 16.7").
+ * Judges it as a chain: its own links always, and the link to the previous line's last side ONLY when both sides
+ * write their units. Without units that first "=" is often a silent conversion (60 [km/h] = 60·1000/3600 [m/s]),
+ * and flagging it would be a false downgrade. Returns null if the line is not a continuation.
+ */
+export function checkContinuation(prevSrc: string, curSrc: string): StepRelation | null {
+  if (!CONTINUES.test(curSrc) || prevSrc.trim() === '') return null;
+  const own = curSrc.trim().replace(CONTINUES, '').trim();
+  const prevSides = prevSrc.split(/\\approx|≈|=/);
+  const last = prevSides[prevSides.length - 1].trim();
+  const ownSides = own.split(/\\approx|≈|=/);
+  if (!last || !ownSides[0].trim()) return { kind: 'unparsed', detail: 'empty side' };
+  const link = `${last} = ${ownSides[0].trim()}`;
+  const u = unitize(link);
+  if (u && u.sides.length === 2 && u.sides.every((s) => s.hasUnits)) {
+    const units = checkLineUnits(link);
+    if (units) return { ...units, detail: 'units differ from the line it continues' };
+    const r = checkChain(link, 2);
+    if (r?.kind === 'inconsistent') return { kind: 'inconsistent', detail: 'does not equal the end of the line it continues' };
+  }
+  if (ownSides.length >= 2) {
+    const units = checkLineUnits(own);
+    if (units) return units;
+    const r = checkChain(own, 2);
+    if (r) return r;
+  }
+  return { kind: 'unrelated', detail: 'continuation not judged' };
 }
 
 /** Does the step prev -> next follow by simple algebra? Conservative: 'unrelated' is not an accusation. */

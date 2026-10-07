@@ -70,3 +70,25 @@ test('reading guard returns the same array when nothing is low confidence', asyn
   const input = [{ ...L('L1', 'x=2'), readConfidence: 'high' as const }, L('L2', 'y=3')];
   assert.equal(applyReadingGuard(input), input);
 });
+
+test('a line starting with "=" is checked as the chain it continues', () => {
+  const ok = applyAlgebraGuard([L('L1', 'v = 90/1.5 = 60'), L('L2', '= 60 \\cdot 1000/3600 = 16.7')]);
+  assert.deepEqual(verdicts(ok), ['valid', 'valid']);
+  const bad = applyAlgebraGuard([L('L1', 'v = 90/1.5 = 60'), L('L2', '= 60 \\cdot 1000/60 = 100')]);
+  assert.deepEqual(verdicts(bad), ['valid', 'partial']);
+  assert.match(bad[1].note, /continuing L1/);
+  // without units, the link to the previous line may be a silent conversion: never judged
+  assert.deepEqual(verdicts(applyAlgebraGuard([L('L1', 'x = 3 \\cdot 4'), L('L2', '= 13')])), ['valid', 'valid']);
+});
+
+test('a continuation with units is compared in SI', () => {
+  const out = applyAlgebraGuard([L('L1', 'v = 60\\,\\mathrm{km/h}'), L('L2', '= 16.7\\,\\mathrm{m/s}')]);
+  assert.deepEqual(verdicts(out), ['valid', 'valid']);
+  const wrong = applyAlgebraGuard([L('L1', 'v = 60\\,\\mathrm{km/h}'), L('L2', '= 60\\,\\mathrm{m/s}')]);
+  assert.deepEqual(verdicts(wrong), ['valid', 'partial']);
+});
+
+test('a continuation in another part, or after an unreadable line, is not joined', () => {
+  assert.deepEqual(verdicts(applyAlgebraGuard([L('L1', 'x = 3'), L('L2', '= 13', 'valid', '1b')])), ['valid', 'valid']);
+  assert.deepEqual(verdicts(applyAlgebraGuard([L('L1', 'x = 3'), L('L2', '??', 'unreadable'), L('L3', '= 13')])), ['valid', 'unreadable', 'valid']);
+});

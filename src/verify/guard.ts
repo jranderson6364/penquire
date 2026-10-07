@@ -1,6 +1,6 @@
 import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
 import { fallbackQuestion, scrubText, type Leak, type LeakContext } from './leak.ts';
-import { checkChain, checkLineUnits, checkStep } from './expr.ts';
+import { checkChain, checkContinuation, checkLineUnits, checkStep } from './expr.ts';
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
 /** Tolerate a malformed transcription (missing or non-string) rather than throwing. */
@@ -24,6 +24,13 @@ export function applyAlgebraGuard(lines: LineVerdict[]): LineVerdict[] {
       continue;
     }
     if (cur.verdict === 'valid') {
+      // "= 60·1000/3600 = 16.7" under "v = 90/1.5 = 60": judge it as the chain it continues, not as a new step
+      const cont = prev && (prev.part ?? '') === (cur.part ?? '') ? checkContinuation(rd(prev), rd(cur)) : null;
+      if (cont) {
+        if (cont.kind === 'inconsistent') lowered.set(cur.id, `Algebra check: one "=" in this line (continuing ${prev!.id}) is not true (${cont.detail}). Which link?`);
+        prev = cur;
+        continue;
+      }
       const chain = checkChain(rd(cur));
       if (checkLineUnits(rd(cur))?.kind === 'inconsistent') {
         lowered.set(cur.id, 'Units check: the two sides of an "=" on this line have different units. Which side is right?');
