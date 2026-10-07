@@ -25,9 +25,10 @@ export type LogEvent = {
   t: number;
   /**
    * resolved = a flagged issue is no longer flagged (level = most help it had); dispute = "I think this is right";
-   * start = "Help me start" on a part
+   * start = "Help me start" on a part; withdrawn = the tutor stopped flagging an issue whose ink was unchanged (it
+   * changed its mind, e.g. after a dispute), so it is NOT counted as resolved by the student
    */
-  type: 'parse' | 'check' | 'reply' | 'level_change' | 'resolved' | 'dispute' | 'start';
+  type: 'parse' | 'check' | 'reply' | 'level_change' | 'resolved' | 'withdrawn' | 'dispute' | 'start';
   page?: number;
   level?: HelpLevel;
   detail?: string;

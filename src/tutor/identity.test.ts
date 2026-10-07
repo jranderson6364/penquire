@@ -39,3 +39,29 @@ test('stored reading-keyed rungs and records migrate to the ink key without a fa
 test('a rung already on the new key wins over a migrated one', () => {
   assert.deepEqual(renameLadderKeys({ a: 1, b: 3 }, [['a', 'b']]), { b: 3 });
 });
+
+test('an issue on unchanged ink that is no longer flagged is withdrawn by the tutor, not resolved by the student', async () => {
+  const { recordCheck } = await import('./issues.ts');
+  const r1 = recordCheck({}, 'p1', [{ key: 'k1', part: '1a', reading: '2x=10', level: 1, sig: 'sigA' }, { key: 'k2', part: '1a', reading: 'y=3', level: 1, sig: 'sigB' }], 1);
+  // next check: sigA is still on the page but no longer flagged (re-check conceded); sigB's ink was rewritten
+  const r2 = recordCheck(r1.issues, 'p1', [], 2, new Set(['sigA', 'sigC']));
+  assert.deepEqual(r2.withdrawn.map((w) => w.key), ['p1#k1']);
+  assert.deepEqual(r2.resolved.map((w) => w.key), ['p1#k2']);
+  assert.deepEqual(r2.issues, {});
+});
+
+test('disclosure counts withdrawn flags apart from issues the student resolved', async () => {
+  const { disclosureSummary, issueOutcomes } = await import('../log.ts');
+  const a = {
+    title: 'PS1', course: '', events: [
+      { t: 1, type: 'check', level: 1 },
+      { t: 2, type: 'resolved', level: 1 },
+      { t: 2, type: 'withdrawn', level: 1 },
+    ], issues: {},
+  } as never;
+  assert.equal(issueOutcomes(a).unaided, 1);
+  assert.equal(issueOutcomes(a).withdrawn, 1);
+  const s = disclosureSummary(a);
+  assert.match(s, /Of 1 issue the tutor flagged, 1 was resolved on my own/);
+  assert.match(s, /withdrew 1 flag on work I had not changed/);
+});

@@ -20,11 +20,13 @@ export type IssueRecord = {
   checks: number;
   /** most help in force while it was open (default level or a ladder rung) */
   maxLevel: HelpLevel;
+  /** the flagged line's ink signature (absent on older records) */
+  sig?: string;
 };
 
 export type Issues = Record<string, IssueRecord>;
 
-export type OpenIssue = { key: string; part?: string; reading: string; obstacle?: Obstacle; level: HelpLevel };
+export type OpenIssue = { key: string; part?: string; reading: string; obstacle?: Obstacle; level: HelpLevel; sig?: string };
 
 export type Resolved = { key: string; record: IssueRecord };
 
@@ -37,22 +39,32 @@ const scoped = (page: string, key: string) => `${page}#${key}`;
  * Fold one check of `page` into the history. Issues of this page that are no longer open are returned as resolved
  * (and removed); issues on other pages are untouched.
  */
-export function recordCheck(prev: Issues, page: string, open: OpenIssue[], now: number): { issues: Issues; resolved: Resolved[] } {
+export function recordCheck(
+  prev: Issues,
+  page: string,
+  open: OpenIssue[],
+  now: number,
+  /** ink signatures of every line on the page now; an issue whose ink is still there unchanged was not fixed */
+  presentSigs: ReadonlySet<string> = new Set()
+): { issues: Issues; resolved: Resolved[]; withdrawn: Resolved[] } {
   const next: Issues = {};
   const openKeys = new Set(open.map((o) => scoped(page, o.key)));
   const resolved: Resolved[] = [];
+  const withdrawn: Resolved[] = [];
   for (const [k, rec] of Object.entries(prev)) {
     if (rec.page !== page || openKeys.has(k)) next[k] = rec;
+    // Same ink, no longer flagged: the tutor changed its mind (a re-check, a conceded dispute). Not a fix by the student.
+    else if (rec.sig && presentSigs.has(rec.sig)) withdrawn.push({ key: k, record: rec });
     else resolved.push({ key: k, record: rec });
   }
   for (const o of open) {
     const k = scoped(page, o.key);
     const old = next[k];
     next[k] = old
-      ? { ...old, lastSeen: now, checks: old.checks + 1, maxLevel: Math.max(old.maxLevel, o.level) as HelpLevel, obstacle: o.obstacle ?? old.obstacle }
-      : { page, part: o.part, reading: o.reading, obstacle: o.obstacle, firstSeen: now, lastSeen: now, checks: 1, maxLevel: o.level };
+      ? { ...old, lastSeen: now, checks: old.checks + 1, maxLevel: Math.max(old.maxLevel, o.level) as HelpLevel, obstacle: o.obstacle ?? old.obstacle, sig: o.sig ?? old.sig }
+      : { page, part: o.part, reading: o.reading, obstacle: o.obstacle, firstSeen: now, lastSeen: now, checks: 1, maxLevel: o.level, ...(o.sig ? { sig: o.sig } : {}) };
   }
-  return { issues: next, resolved };
+  return { issues: next, resolved, withdrawn };
 }
 
 /** Move this page's records stored under old keys to their new keys, so a key-format change is not a "resolution". */

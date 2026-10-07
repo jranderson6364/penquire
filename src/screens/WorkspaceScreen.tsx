@@ -464,9 +464,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         // Most help in force for each open issue: the default level, or a rung raised by "More help".
         const open = flagged.map((l) => {
           const key = issueKey(l.part, l.reading, l.sig);
-          return { key, part: l.part, reading: l.reading, obstacle: l.obstacle, level: rungFor(ladder, key, base, x.policyMaxLevel) };
+          return { key, part: l.part, reading: l.reading, obstacle: l.obstacle, sig: l.sig, level: rungFor(ladder, key, base, x.policyMaxLevel) };
         });
-        const { issues, resolved } = recordCheck(renameIssueKeys(x.issues ?? {}, pageId, renames), pageId, open, now);
+        const present = new Set(current.map((c) => c.sig).filter(Boolean));
+        const { issues, resolved, withdrawn } = recordCheck(renameIssueKeys(x.issues ?? {}, pageId, renames), pageId, open, now, present);
         return {
           ...x,
           ladder: pruneLadder(ladder, openKeys),
@@ -482,6 +483,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               level: r.record.maxLevel,
               detail: [r.record.part, r.record.obstacle].filter(Boolean).join(' · ') || undefined,
             })),
+            // the tutor stopped flagging unchanged ink: its own reversal, not the student's fix
+            ...withdrawn.map((r) => ({ t: now, type: 'withdrawn' as const, page: pageIndex + 1, level: r.record.maxLevel, detail: r.record.part || undefined })),
             {
               t: now,
               type: 'check',

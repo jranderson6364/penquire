@@ -14,7 +14,7 @@ const WHAT_IT_DID: Record<HelpLevel, string> = {
 
 const HELPED: LogEvent['type'][] = ['check', 'reply', 'start', 'dispute'];
 
-export type IssueOutcomes = { unaided: number; helped: number; helpedByLevel: Map<HelpLevel, number>; open: number };
+export type IssueOutcomes = { unaided: number; helped: number; helpedByLevel: Map<HelpLevel, number>; open: number; withdrawn: number };
 
 /** Issues resolved on the student's own (marks + pointers) vs. after more help, plus the ones still open. */
 export function issueOutcomes(a: Assignment): IssueOutcomes {
@@ -26,7 +26,8 @@ export function issueOutcomes(a: Assignment): IssueOutcomes {
     else helpedByLevel.set(e.level as HelpLevel, (helpedByLevel.get(e.level as HelpLevel) ?? 0) + 1);
   }
   const helped = resolved.length - unaided;
-  return { unaided, helped, helpedByLevel, open: Object.keys(a.issues ?? {}).length };
+  const withdrawn = a.events.filter((e) => e.type === 'withdrawn').length;
+  return { unaided, helped, helpedByLevel, open: Object.keys(a.issues ?? {}).length, withdrawn };
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -61,6 +62,8 @@ export function disclosureSummary(a: Assignment): string {
         o.helped ? `, ${o.helped} after more help (${helpedText})` : ''
       }${o.open ? `, and ${o.open} ${o.open === 1 ? 'is' : 'are'} still open` : ''}.`
     : '';
+  // Withdrawn flags were the tutor's mistakes on unchanged work: not issues the student resolved, so counted apart.
+  const withdrawnText = o.withdrawn ? `The tutor also withdrew ${plural(o.withdrawn, 'flag')} on work I had not changed.` : '';
   const over = a.events.filter((e) => e.overLevel?.length).length;
 
   return [
@@ -68,6 +71,7 @@ export function disclosureSummary(a: Assignment): string {
     `${plural(checks.length, 'work check')} and ${plural(replies.length, 'follow-up question')}.`,
     levelText ? `Help levels used: ${levelText}.` : 'No hints used.',
     outcomes,
+    withdrawnText,
     maxUsed !== undefined ? WHAT_IT_DID[maxUsed] : '',
     over ? `In ${plural(over, 'response')} the tutor reported revealing more than the selected level allows; those are marked in the log.` : '',
     'The tutor is set never to give final answers, and I wrote all of the work myself.',

@@ -310,6 +310,7 @@ function LogTab({ assignment }: Props) {
           <Text style={[styles.count, { color: C.valid, backgroundColor: C.validSoft }]}>{o.unaided} on your own</Text>
           <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.helped} with help</Text>
           <Text style={[styles.count, { color: C.unknown, backgroundColor: C.unknownSoft }]}>{o.open} open</Text>
+          {o.withdrawn > 0 && <Text style={[styles.count, { color: C.faint, backgroundColor: C.bg }]}>{o.withdrawn} withdrawn by the tutor</Text>}
         </View>
       )}
       <Text style={styles.sectionTitle}>AI use disclosure</Text>
