@@ -33,7 +33,7 @@ Phase 0 (JS-only), branch `reliability-phase0`:
 - [x] A flag dropped on unchanged ink is logged as `withdrawn` (tutor reversal), not "resolved on your own"; disclosure and Log tab count it apart.
 - [x] "?" lines are answerable: "Yes, that's what I wrote" / corrected reading stored by ink signature (`src/check/confirmed.ts`) and passed to the next check.
 
-Phase 1 (ONE batched native build; ask first): stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
+Phase 1: Build 3 started Oct 6 (apiVersion 3; CI Swift compile passed). Done in it: stroke points with masked ranges dropped, bottom-cropped export (checks use it), strokes saved with each check and carried into the eval export, Reanimated/svg/haptics installed. Not in it: stable stroke ids, timing beyond per-point ms. Original scope: stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
 
 Phase 2: replayable case format (strokes + clean image + per-stage outputs) and a Node `replay` runner; ~200 real gold lines in `../evals-private/`; fused vs split (blind transcription) A/B; Mathpix strokes second reader; animated AI ink (path reveal, pressure outline, single-stroke math, Manim-like timing); TutorTurn `{text, marks, speechCues}`. Tutor draws freely (founder decision): max 3 live marks per turn, older turns fade, one Clear.
 
