@@ -65,6 +65,8 @@ const providerFromSettings = (spend?: { total: number }) => {
       recordUsage(e);
       const c = costUSD(e.model, e.usage);
       if (spend && c !== null) spend.total += c;
+      // dev log only (not shown in the app): lets "what did that session cost?" be answered from the Metro logs
+      console.log(`[penquire:cost] ${e.kind} ${e.model} ${c === null ? 'unpriced' : `$${c.toFixed(4)}`} in=${e.usage.inputTokens} cached=${e.usage.cacheReadTokens} out=${e.usage.outputTokens}`);
     },
   });
 };

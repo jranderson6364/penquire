@@ -366,6 +366,14 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     guard let data = json.data(using: .utf8), let spec = try? JSONDecoder().decode(ToolSpec.self, from: data) else {
       return false
     }
+    // Changing tools must never move the page: remember where the student is and put it back if anything nudged it.
+    let keepOffset = canvas.contentOffset
+    let keepZoom = canvas.zoomScale
+    defer {
+      if canvas.zoomScale == keepZoom && canvas.contentOffset != keepOffset {
+        canvas.setContentOffset(keepOffset, animated: false)
+      }
+    }
     switch spec.kind {
     case "eraser":
       switch spec.eraser {
