@@ -68,7 +68,16 @@ function useDrawOn(ms: number, delay: number): Animated.Value {
 }
 
 function MarkView({ mark, delay, k, emphasised, onDismiss }: { mark: TutorMark; delay: number; k: number; emphasised: boolean; onDismiss: (id: string) => void }) {
-  const progress = useDrawOn(mark.kind === 'highlight' ? 420 : mark.kind === 'note' ? 360 : 620, delay);
+  const ms = mark.kind === 'highlight' ? 420 : mark.kind === 'note' ? 360 : 620;
+  const progress = useDrawOn(ms, delay);
+  // tapped from the chat: the tutor draws this mark again, so the eye finds it
+  React.useEffect(() => {
+    if (!emphasised) return;
+    progress.setValue(0);
+    const anim = Animated.timing(progress, { toValue: 1, duration: ms, easing: Easing.inOut(Easing.cubic), useNativeDriver: false });
+    anim.start();
+    return () => anim.stop();
+  }, [emphasised, progress, ms]);
   const col = tagColor(mark.tag);
   const b = boxToLayer(mark.box, k);
   const thick = (emphasised ? 4.4 : 3.2) * Math.max(0.75, Math.min(1.4, k));

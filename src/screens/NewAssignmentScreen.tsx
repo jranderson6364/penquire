@@ -123,10 +123,10 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
         </View>
 
         <Field label="Title">
-          <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Pset 3" />
+          <TextInput placeholderTextColor={C.faint} style={styles.input} value={title} onChangeText={setTitle} placeholder="Pset 3" />
         </Field>
         <Field label="Course">
-          <TextInput style={styles.input} value={course} onChangeText={setCourse} placeholder="PHYSICS 61" />
+          <TextInput placeholderTextColor={C.faint} style={styles.input} value={course} onChangeText={setCourse} placeholder="PHYSICS 61" />
         </Field>
 
         <Field label="Assignment PDF" hint="The pset itself, or a textbook. The tutor reads the exact wording, including figures.">
@@ -147,7 +147,7 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
                 : 'Leave empty to read the whole document.'
             }
           >
-            <TextInput
+            <TextInput placeholderTextColor={C.faint}
               style={[styles.input, needsRange && !pages.trim() && styles.inputWarn]}
               value={pages}
               onChangeText={setPages}
@@ -160,14 +160,14 @@ export function NewAssignmentScreen({ onCancel, onCreated }: Props) {
         ) : null}
 
         <Field label="Only these problems (optional)" hint="Useful for textbook chapters, e.g. 3.8, 3.10, 3.12">
-          <TextInput style={styles.input} value={only} onChangeText={setOnly} placeholder="3.8, 3.10, 3.12" />
+          <TextInput placeholderTextColor={C.faint} style={styles.input} value={only} onChangeText={setOnly} placeholder="3.8, 3.10, 3.12" />
         </Field>
         <Field label="…or paste problem text (optional)">
-          <TextInput style={[styles.input, styles.multi]} value={pasted} onChangeText={setPasted} multiline placeholder="Paste problems here" />
+          <TextInput placeholderTextColor={C.faint} style={[styles.input, styles.multi]} value={pasted} onChangeText={setPasted} multiline placeholder="Paste problems here" />
         </Field>
 
         <Field label="Course AI policy" hint="The tutor treats this as binding.">
-          <TextInput style={[styles.input, styles.multi]} value={policy} onChangeText={setPolicy} multiline />
+          <TextInput placeholderTextColor={C.faint} style={[styles.input, styles.multi]} value={policy} onChangeText={setPolicy} multiline />
         </Field>
         <Field label="Maximum help level this policy allows">
           <View style={{ gap: 6 }}>
@@ -204,6 +204,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 14, fontWeight: '700', color: C.ink },
   hint: { fontSize: 13, color: C.sub },
   input: {
+    color: C.ink,
     backgroundColor: C.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.line,

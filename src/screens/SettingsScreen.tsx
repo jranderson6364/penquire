@@ -33,7 +33,7 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
 
       <Text style={styles.section}>AI (dev only: the key is stored on this iPad)</Text>
       <Text style={styles.label}>Anthropic API key</Text>
-      <TextInput
+      <TextInput placeholderTextColor={C.faint}
         style={styles.input}
         value={s.apiKey}
         onChangeText={(v) => set('apiKey', v.trim())}
@@ -43,7 +43,7 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         autoCorrect={false}
       />
       <Text style={styles.label}>Check / chat model</Text>
-      <TextInput
+      <TextInput placeholderTextColor={C.faint}
         style={styles.input}
         value={s.checkModel}
         onChangeText={(v) => set('checkModel', v.trim())}
@@ -52,7 +52,7 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         autoCorrect={false}
       />
       <Text style={styles.label}>Assignment parsing model</Text>
-      <TextInput
+      <TextInput placeholderTextColor={C.faint}
         style={styles.input}
         value={s.parseModel}
         onChangeText={(v) => set('parseModel', v.trim())}
@@ -130,6 +130,7 @@ const styles = StyleSheet.create({
   section: { fontSize: 13, fontWeight: '800', color: C.sub, textTransform: 'uppercase', marginTop: 16 },
   label: { fontSize: 15, fontWeight: '600', color: C.ink },
   input: {
+    color: C.ink,
     backgroundColor: C.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.line,

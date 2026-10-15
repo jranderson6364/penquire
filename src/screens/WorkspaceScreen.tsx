@@ -26,6 +26,7 @@ import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type Too
 import { buildPdfRequest } from '../export/pdf';
 import { listen, speak, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
 import { pointedLine, sentences, speakable } from '../voice/text';
+import { done as hapticDone, tick } from '../ui/haptics';
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
@@ -347,7 +348,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   if (!a) {
     return (
       <View style={styles.center}>
-        <Text>Assignment not found.</Text>
+        <Text style={{ color: C.ink }}>Assignment not found.</Text>
         <Button title="Back" onPress={onBack} />
       </View>
     );
@@ -408,14 +409,30 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [focusTurn, setFocusTurn] = React.useState<number | undefined>(undefined);
   const [focusTag, setFocusTag] = React.useState<number | undefined>(undefined);
   const marksByTurn = React.useMemo(() => tutorMarks.reduce<Record<number, number[]>>((m, t) => ((m[t.turn] = [...(m[t.turn] ?? []), t.tag]), m), {}), [tutorMarks]);
+  /**
+   * Chat -> page: a colored phrase (or "Show on page") brings its marks into view and has the tutor draw them again.
+   * Stays emphasised until tapped again or another phrase is tapped; says so when those marks are no longer on the page.
+   */
   const showTurnMarks = (turn: number, tag?: number) => {
+    if (focusTurn === turn && focusTag === tag) {
+      setFocusTurn(undefined);
+      setFocusTag(undefined);
+      return;
+    }
+    const ms = tutorMarks.filter((m) => m.turn === turn && (tag === undefined || m.tag === tag));
+    if (ms.length === 0) {
+      say('Those marks were cleared from the page. Ask again to see them.');
+      return;
+    }
+    tick();
     setFocusTurn(turn);
     setFocusTag(tag);
     if (narrow) setPanelOpen(false);
-    setTimeout(() => {
-      setFocusTurn((t) => (t === turn ? undefined : t));
-      setFocusTag(undefined);
-    }, 3500);
+    const x0 = Math.min(...ms.map((m) => m.box.x));
+    const y0 = Math.min(...ms.map((m) => m.box.y));
+    const x1 = Math.max(...ms.map((m) => m.box.x + m.box.w));
+    const y1 = Math.max(...ms.map((m) => m.box.y + m.box.h));
+    void canvasRef.current?.scrollToPageRect({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 }).catch(() => undefined);
   };
   const dismissMark = React.useCallback(
     (id: string) => {
@@ -545,6 +562,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ],
         };
       });
+      hapticDone();
       setShowMarks(true);
       setTab('feedback');
       setPanelOpen(true);

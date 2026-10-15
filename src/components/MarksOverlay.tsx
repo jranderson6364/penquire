@@ -269,7 +269,7 @@ function SomethingOff({ verdict, saved, correcting, setCorrecting, reading, setR
         </View>
       )}
       {correcting === 'misread' && (
-        <TextInput
+        <TextInput placeholderTextColor={C.faint}
           style={styles.fbInput}
           value={reading}
           onChangeText={setReading}
@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: C.ink },
   chipTextOn: { color: C.primary, fontWeight: '700' },
   fbLabel: { fontSize: 12, color: C.sub },
-  fbInput: { borderWidth: StyleSheet.hairlineWidth, borderColor: C.line, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14, backgroundColor: C.bg },
+  fbInput: { color: C.ink, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14, backgroundColor: C.bg },
   fbSaved: { fontSize: 12, color: C.valid },
   mark: {
     position: 'absolute',

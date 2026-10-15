@@ -269,7 +269,7 @@ function TutorStream(p: Props) {
       </ScrollView>
       <View style={styles.inputRow}>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
-          <TextInput
+          <TextInput placeholderTextColor={C.faint}
             style={styles.input}
             value={draft}
             onChangeText={onDraft}
@@ -390,6 +390,7 @@ const styles = StyleSheet.create({
   subTabText: { fontSize: T.small, fontWeight: '600', color: C.sub },
   subTabTextOn: { color: C.primary },
   input: {
+    color: C.ink,
     flex: 1,
     minHeight: 44,
     maxHeight: 120,
