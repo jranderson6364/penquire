@@ -20,9 +20,11 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [x] Native build 4: exportPDF, SF Symbols, speech in/out, Pencil Pro squeeze, per-frame viewport events, surround color.
 - [x] Export PDF (share button), SF Symbols icons, voice v1 (hold Check / squeeze to talk; spoken reply; writing stops it; "this" = last-written line).
 - [ ] Verify on device: layer smoothness at 120 Hz (if it trails, move the transform to the UI thread with Reanimated), write-on reveal, PDF is Letter with blocks, speech volume after listening, Match iPad appearance.
-- [ ] Tutor orb replaces the floating Tutor button (one entry to the tutor).
+- [x] Floating Tutor button removed: panel toggle beside Check with a count of lines that need a look. (Full orb with status ring still open.)
 - [ ] Streaming replies and "read as" first.
-- [ ] Check as you write (opt-in, capped per hour, cost shown).
+- [x] Check as you write (Settings, opt-in, quiet, 20/hour cap). Cost display deliberately not added; dev log [penquire:cost] per call.
+- [x] Build 5: palm protection (two-finger scroll, pan paused while the Pencil draws), tool changes keep scroll, scrollToPageRect; stamp placed questions; PAGE_TYPE sizes; themed inputs; chat phrase -> scroll + redraw + haptic.
+- [ ] Verify the tool-change jump is gone; if not, read [penquire:jump] in the Metro logs.
 - [ ] Hands-free conversation: continuous listening, silence endpointing, barge-in by voice.
 - [ ] Evals for the new prompts: spoken-reply style and the "pointing at" hint.
 - [ ] Top bar: pages move into the title menu; auto-dim chrome while the Pencil is down.
