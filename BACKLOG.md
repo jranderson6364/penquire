@@ -12,6 +12,21 @@ Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs 
 - [x] **Robustness** (done: retry with backoff on 429/5xx/network, Retry-After honored, 180 s timeout, refusal/max_tokens/empty handled, sanitized output). Still open: a clear "no API key" state in the workspace.
 - [ ] (old text) **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.
 
+## Experience, tutor, voice (../docs/10-experience-tutor-voice.md, Oct 14 2026)
+
+- [x] One page layer for all overlays (no per-frame re-layout, nothing hides mid-gesture); SVG pressure-shaped tutor strokes with a pen-path reveal.
+- [x] Light/dark mode (dynamic tokens, Codex-like neutral palette, Appearance setting); paper stays white with fixed PAPER colors.
+- [x] Question menu: anchored popover, problems as rows, parts as chips.
+- [x] Native build 4: exportPDF, SF Symbols, speech in/out, Pencil Pro squeeze, per-frame viewport events, surround color.
+- [x] Export PDF (share button), SF Symbols icons, voice v1 (hold Check / squeeze to talk; spoken reply; writing stops it; "this" = last-written line).
+- [ ] Verify on device: layer smoothness at 120 Hz (if it trails, move the transform to the UI thread with Reanimated), write-on reveal, PDF is Letter with blocks, speech volume after listening, Match iPad appearance.
+- [ ] Tutor orb replaces the floating Tutor button (one entry to the tutor).
+- [ ] Streaming replies and "read as" first.
+- [ ] Check as you write (opt-in, capped per hour, cost shown).
+- [ ] Hands-free conversation: continuous listening, silence endpointing, barge-in by voice.
+- [ ] Evals for the new prompts: spoken-reply style and the "pointing at" hint.
+- [ ] Top bar: pages move into the title menu; auto-dim chrome while the Pencil is down.
+
 ## Reliability + experience (../docs/09-reliability-and-experience.md, Oct 6 2026)
 
 Phase 0 (JS-only), branch `reliability-phase0`:
