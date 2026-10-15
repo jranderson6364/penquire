@@ -21,6 +21,8 @@ export type PageBlock = {
   w: number;
   /** estimated height when placed (for stacking the next block); the block lays itself out */
   h?: number;
+  /** stamped in place with ✓: no handles, every touch goes to the Pencil, drawn as a cached image. Place again to move. */
+  locked?: boolean;
 };
 
 export const BLOCK_WIDTH = 720;

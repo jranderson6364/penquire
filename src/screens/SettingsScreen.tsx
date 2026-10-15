@@ -112,6 +112,10 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         ))}
       </View>
       <View style={styles.row}>
+        <Text style={styles.label}>Two fingers to scroll (palm protection)</Text>
+        <Switch value={s.twoFingerScroll !== false} onValueChange={(v) => set('twoFingerScroll', v)} />
+      </View>
+      <View style={styles.row}>
         <Text style={styles.label}>Allow finger drawing</Text>
         <Switch value={s.allowFingerDrawing} onValueChange={(v) => set('allowFingerDrawing', v)} />
       </View>

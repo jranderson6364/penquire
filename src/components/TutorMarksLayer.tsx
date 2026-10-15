@@ -4,7 +4,7 @@ import Svg, { Defs, Mask, Path } from 'react-native-svg';
 
 import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { boxToLayer, PAGE_WIDTH } from '../page';
-import { C, R, T } from '../theme';
+import { C, PAGE_TYPE, R, T } from '../theme';
 import { centerPath, outlinePath, ring, toSegments, underline, wash, type Stroke } from '../tutor/handdrawn';
 import { tagColor, type TutorMark } from '../tutor/marks';
 import { latexToUnicode } from '../ui/mathText';
@@ -114,11 +114,12 @@ function MarkView({ mark, delay, k, emphasised, onDismiss }: { mark: TutorMark; 
   // note: a handwritten aside to the right of the stretch (below it when the page edge is too close)
   const text = mark.note ? latexToUnicode(mark.note) : '';
   const room = PAGE_WIDTH * k - (b.x + b.w);
-  const right = room > 170;
-  const size = 17 * Math.max(0.85, Math.min(1.3, k));
+  const right = room > 170 * k;
+  // page units, like the placed questions: the note reads at the same size as the rest of the page at any zoom
+  const size = PAGE_TYPE.note * k;
   return (
     <Animated.View
-      style={[styles.noteWrap, right ? { left: b.x + b.w + 10, top: b.y + b.h / 2 - size } : { left: Math.max(6, Math.min(b.x, PAGE_WIDTH * k - 240)), top: b.y + b.h + 6 }, { opacity: progress }]}
+      style={[styles.noteWrap, { maxWidth: 230 * k }, right ? { left: b.x + b.w + 10 * k, top: b.y + b.h / 2 - size } : { left: Math.max(6 * k, Math.min(b.x, PAGE_WIDTH * k - 240 * k)), top: b.y + b.h + 6 * k }, { opacity: progress }]}
     >
       <Pressable onPress={() => onDismiss(mark.id)} accessibilityRole="button" accessibilityLabel={`Tutor note: ${text}. Tap to dismiss.`}>
         <Text style={[styles.noteText, { color: col.pen, fontSize: size, lineHeight: size * 1.2 }, emphasised && styles.noteOn]}>{text}</Text>
@@ -187,7 +188,7 @@ function SegmentStroke({ stroke, color, thickness, progress }: { stroke: Stroke;
 }
 
 const styles = StyleSheet.create({
-  noteWrap: { position: 'absolute', maxWidth: 230, transform: [{ rotate: '-1.5deg' }] },
+  noteWrap: { position: 'absolute', transform: [{ rotate: '-1.5deg' }] },
   noteText: { fontFamily: 'Bradley Hand', fontWeight: '700', textShadowColor: 'rgba(255,255,255,0.9)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 0 } },
   noteOn: { textDecorationLine: 'underline' },
   clear: { position: 'absolute', right: 10, top: 10, flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 10, borderRadius: R.pill, backgroundColor: C.card, borderWidth: 1, borderColor: C.line },

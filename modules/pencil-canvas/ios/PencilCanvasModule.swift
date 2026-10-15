@@ -11,8 +11,9 @@ public class PencilCanvasModule: Module {
 
     // 3: getStrokePoints (visible ink points), exportPage (jpeg, crop, no gutter)
     // 4: exportPDF, onPencilSqueeze, surroundColor, viewport events every frame
+    // 5: twoFingerScroll, pan paused while the Pencil draws, scrollToPageRect, tool changes keep the scroll position
     Constant("apiVersion") {
-      return 4
+      return 5
     }
 
     // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }
@@ -26,6 +27,16 @@ public class PencilCanvasModule: Module {
 
       Prop("surroundColor") { (view: PencilCanvasView, value: String) in
         view.setSurroundColor(value)
+      }
+
+      // apiVersion >= 5: palm protection (two fingers to scroll); panning is always paused while the Pencil draws
+      Prop("twoFingerScroll") { (view: PencilCanvasView, value: Bool) in
+        view.setTwoFingerScroll(value)
+      }
+
+      // apiVersion >= 5: page rect in page points; scrolls only if it is not already visible
+      AsyncFunction("scrollToPageRect") { (view: PencilCanvasView, x: Double, y: Double, w: Double, h: Double) in
+        MainActor.assumeIsolated { view.scrollToPageRect(x: x, y: y, w: w, h: h) }
       }
 
       Prop("allowFingerDrawing") { (view: PencilCanvasView, value: Bool) in

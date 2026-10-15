@@ -86,6 +86,12 @@ export const PAPER_VERDICT = {
   unreadable: { symbol: '?', color: PALETTE.light.unknown, bg: PALETTE.light.unknownSoft, label: "couldn't read" },
 } as const;
 
+/**
+ * Text drawn ON the page, in PAGE units (it scales with the paper, like ink): placed questions and the tutor's notes
+ * use these and nothing else, so everything on the page reads at one consistent size at any zoom.
+ */
+export const PAGE_TYPE = { body: 15, label: 12.5, note: 16, leading: 1.45 } as const;
+
 /** Font sizes (pt). Reading text 15, UI labels 13, captions 12. */
 export const T = { caption: 12, small: 13, body: 15, lead: 17, title: 22, display: 30 } as const;
 

@@ -146,6 +146,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   private var isAdjusting = false
   private var lastViewportSend: CFTimeInterval = 0
   private var settleTask: Task<Void, Never>?
+  private var resumeGestures: Task<Void, Never>?
   private var offsetObservation: NSKeyValueObservation?
   private var zoomObservation: NSKeyValueObservation?
 
@@ -412,6 +413,36 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     if wantsToolPicker && !canvas.isFirstResponder {
       _ = canvas.becomeFirstResponder()
     }
+    // Palm protection: while the Pencil is on the glass, a resting hand must not pan or zoom the page.
+    resumeGestures?.cancel()
+    canvas.panGestureRecognizer.isEnabled = false
+    canvas.pinchGestureRecognizer?.isEnabled = false
+  }
+
+  func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+    // Give the hand a moment to lift before fingers scroll again.
+    resumeGestures?.cancel()
+    resumeGestures = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 350_000_000)
+      guard let self = self, !Task.isCancelled else { return }
+      self.canvas.panGestureRecognizer.isEnabled = true
+      self.canvas.pinchGestureRecognizer?.isEnabled = true
+    }
+  }
+
+  /// Palm protection: with two-finger scrolling, one resting palm or finger never pans the page (pinch is two fingers
+  /// anyway). Off = one finger scrolls, like before.
+  func setTwoFingerScroll(_ on: Bool) {
+    canvas.panGestureRecognizer.minimumNumberOfTouches = on ? 2 : 1
+  }
+
+  /// Bring a page rect (page points) into view if it is not already, without changing the zoom. For "show me" from chat.
+  func scrollToPageRect(x: Double, y: Double, w: Double, h: Double) {
+    let z = canvas.zoomScale
+    let r = CGRect(x: x * z, y: y * z, width: w * z, height: h * z).insetBy(dx: -40, dy: -80)
+    let visible = CGRect(origin: canvas.contentOffset, size: canvas.bounds.size)
+    if visible.contains(r) { return }
+    canvas.scrollRectToVisible(r, animated: true)
   }
 
   func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {

@@ -75,6 +75,8 @@ export type PencilCanvasProps = {
   onPencilDoubleTap?: () => void;
   /** apiVersion >= 4, Apple Pencil Pro: squeeze began / ended (push-to-talk) */
   onPencilSqueeze?: (phase: 'began' | 'ended' | 'cancelled') => void;
+  /** apiVersion >= 5: palm protection, one finger or palm never pans (pan is also paused while the Pencil draws) */
+  twoFingerScroll?: boolean;
   /** apiVersion >= 4: the desk behind the page, "#RRGGBB" */
   surroundColor?: string;
 };
@@ -105,4 +107,6 @@ export type PencilCanvasHandle = {
   getStrokePoints(): Promise<StrokePoints[] | null>;
   /** null on a binary older than apiVersion 3 (callers fall back to exportImage) */
   exportPage(options: ExportPageOptions): Promise<ExportedPage | null>;
+  /** apiVersion >= 5: bring a page rect into view (no-op if visible or on older binaries) */
+  scrollToPageRect(r: { x: number; y: number; w: number; h: number }): Promise<void>;
 };

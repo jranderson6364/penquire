@@ -134,9 +134,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     const c = canvasRef.current;
     if (!c) return;
     c.setTool(toNativeSpec(toolState)).catch((e) => console.warn('setTool failed', e));
-    c.setRulerActive(toolState.ruler).catch((e) => console.warn('setRulerActive failed', e));
+    // only when it changed: toggling the ruler can make PencilKit adjust the view
+    if (rulerSent.current !== toolState.ruler) {
+      rulerSent.current = toolState.ruler;
+      c.setRulerActive(toolState.ruler).catch((e) => console.warn('setRulerActive failed', e));
+    }
+    toolChangedAt.current = Date.now();
     saveSettings({ toolState });
   }, [modern, toolState]);
+  const rulerSent = React.useRef<boolean | null>(null);
+  // dev diagnostic for "the page jumps when I change tools": log any viewport move right after a tool change
+  const toolChangedAt = React.useRef(0);
 
   React.useEffect(() => {
     if (nativeApiVersion >= 2 || nativeHasNewFunctions || probedModern) return;
@@ -169,6 +177,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const onViewportChanged = React.useCallback(
     (e: ViewportEvent) => {
       const next = parseViewport(e, settledRef.current);
+      if (Date.now() - toolChangedAt.current < 600 && Math.abs(next.ty - settledRef.current.ty) > 0.5) {
+        console.log(`[penquire:jump] viewport moved ${(next.ty - settledRef.current.ty).toFixed(1)} pt right after a tool change (view ${next.viewWidth}x${next.viewHeight})`);
+      }
       followViewport(live, next, settledRef.current.scale);
       if (next.interacting) return;
       setViewport((prev) => {
@@ -361,8 +372,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       return;
     }
     const label = kind === 'part' ? activePart : (a.groups && findPart(a.groups, activePart)?.group.label) || activePart;
-    if (pageBlocks.some((b) => b.kind === kind && b.label === label)) {
-      Alert.alert('Already on this page', 'Drag it by its handle, or remove it with ✕ and place it again.');
+    const existing = pageBlocks.find((b) => b.kind === kind && b.label === label);
+    if (existing) {
+      // already here: placing it again picks a stamped block back up so it can be moved
+      if (existing.locked) {
+        setBlockLocked(existing.id, false);
+        say('Drag it into place, then tap ✓ to stamp it.');
+      } else {
+        say('It is already on this page: drag it by ⠿, then tap ✓ to stamp it.');
+      }
       return;
     }
     let inkBottom = 0;
@@ -414,6 +432,12 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         const list = ((x.blocks ?? {})[pageId] ?? []).map((b) => (b.id === id ? { ...b, ...clampBlock({ x: bx, y: by, w: b.w }, PAGE_WIDTH, PAGE_HEIGHT) } : b));
         return { ...x, blocks: { ...(x.blocks ?? {}), [pageId]: list } };
       });
+    },
+    [assignmentId, pageId]
+  );
+  const setBlockLocked = React.useCallback(
+    (id: string, locked: boolean) => {
+      updateAssignment(assignmentId, (x) => ({ ...x, blocks: { ...(x.blocks ?? {}), [pageId]: ((x.blocks ?? {})[pageId] ?? []).map((b) => (b.id === id ? { ...b, locked } : b)) } }));
     },
     [assignmentId, pageId]
   );
@@ -879,13 +903,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           showToolPicker={!modern}
           onDrawingChanged={onDrawingChanged}
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
+          {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
         />
         {/* One layer over the page for every overlay: laid out once per settled zoom, moved by a single transform
             while panning and pinching (src/components/PageLayer.tsx). Nothing re-renders or hides mid-gesture. */}
         {size.w > 0 && (
           <PageLayer live={live} settled={viewport}>
-            {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} />}
+            {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
             {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={viewport.scale} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
             {check && marksUsable && showMarks && (
             <MarksOverlay

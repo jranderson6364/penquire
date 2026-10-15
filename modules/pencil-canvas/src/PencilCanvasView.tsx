@@ -21,6 +21,8 @@ type NativeMethods = {
   // apiVersion >= 3
   getStrokePoints?(): Promise<string>;
   exportPage?(optionsJSON: string): Promise<string>;
+  // apiVersion >= 5
+  scrollToPageRect?(x: number, y: number, w: number, h: number): Promise<void>;
 };
 
 type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged' | 'onViewportChanged' | 'onPencilDoubleTap' | 'onPencilSqueeze'> & {
@@ -130,6 +132,9 @@ export function PencilCanvas({
         },
         getViewport: async () => (n().getViewport ? parse<ViewportEvent | null>(await n().getViewport!(), null) : null),
         getStrokePoints: async () => (n().getStrokePoints ? parse<StrokePoints[] | null>(await n().getStrokePoints!(), null) : null),
+        scrollToPageRect: async (r) => {
+          await n().scrollToPageRect?.(r.x, r.y, r.w, r.h);
+        },
         exportPage: async (options) => (n().exportPage ? parse<ExportedPage | null>(await n().exportPage!(JSON.stringify(options)), null) : null),
       };
     },

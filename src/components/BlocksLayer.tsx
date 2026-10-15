@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { BLOCK_FONT, type PageBlock } from '../blocks';
+import type { PageBlock } from '../blocks';
 import { boxToLayer } from '../page';
-import { PAPER } from '../theme';
+import { PAGE_TYPE, PAPER } from '../theme';
 import { Icon } from './Icon';
 import { MathText } from './MathText';
 
@@ -13,70 +13,90 @@ type Props = {
   k: number;
   onMove: (id: string, x: number, y: number) => void;
   onRemove: (id: string) => void;
+  /** ✓: stamp the block where it is (no handles, every touch to the Pencil) */
+  onStamp: (id: string) => void;
 };
 
 /**
- * Question blocks typeset on the page. They are drawn above the ink but let every touch through (so the Pencil
- * writes right over them); only the small handle in each block's corner takes touches, to drag or remove it.
+ * Question blocks typeset on the page, above the ink. While a block is being placed it shows three handles (drag ⠿,
+ * stamp ✓, remove ✕); everything else lets touches through so the Pencil writes right over it. Once stamped it has no
+ * handles at all, takes no touches, and is cached as a still image (it never re-renders while you write).
+ * Text sizes are page units (PAGE_TYPE), so a block reads at the same size as the rest of the page at any zoom.
  */
-export function BlocksLayer({ blocks, k, onMove, onRemove }: Props) {
+export function BlocksLayer({ blocks, k, onMove, onRemove, onStamp }: Props) {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {blocks.map((b) => (
-        <Block key={b.id} block={b} k={k} onMove={onMove} onRemove={onRemove} />
+        <Block key={b.id} block={b} k={k} onMove={onMove} onRemove={onRemove} onStamp={onStamp} />
       ))}
     </View>
   );
 }
 
-function Block({ block, k, onMove, onRemove }: { block: PageBlock; k: number } & Pick<Props, 'onMove' | 'onRemove'>) {
+function Block({ block, k, onMove, onRemove, onStamp }: { block: PageBlock; k: number } & Pick<Props, 'onMove' | 'onRemove' | 'onStamp'>) {
   // the layer is at rest while a block is dragged, so a screen point is a layer unit and a page point is 1/k of one
-  const s = k;
-  const [drag, setDrag] = React.useState({ dx: 0, dy: 0 });
-  const live = React.useRef({ block, s });
-  live.current = { block, s };
+  const drag = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const live = React.useRef({ block, k });
+  live.current = { block, k };
 
   const pan = React.useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onPanResponderMove: (_e, g) => setDrag({ dx: g.dx, dy: g.dy }),
+        onPanResponderMove: (_e, g) => drag.setValue({ x: g.dx, y: g.dy }), // moves the block without re-rendering it
         onPanResponderRelease: (_e, g) => {
-          const { block: b, s: sc } = live.current;
-          setDrag({ dx: 0, dy: 0 });
+          const { block: b, k: sc } = live.current;
+          drag.setValue({ x: 0, y: 0 });
           onMove(b.id, b.x + g.dx / sc, b.y + g.dy / sc);
         },
-        onPanResponderTerminate: () => setDrag({ dx: 0, dy: 0 }),
+        onPanResponderTerminate: () => drag.setValue({ x: 0, y: 0 }),
       }),
-    [onMove]
+    [onMove, drag]
   );
 
   const box = boxToLayer({ x: block.x, y: block.y, w: block.w, h: block.h ?? 80 }, k);
-  const font = BLOCK_FONT * s;
+  const body = PAGE_TYPE.body * k;
+  const locked = !!block.locked;
   return (
-    <View pointerEvents="box-none" style={[styles.block, { left: box.x + drag.dx, top: box.y + drag.dy, width: box.w, paddingHorizontal: 12 * s, paddingVertical: 8 * s, borderRadius: 8 * s }]}>
+    <Animated.View
+      pointerEvents={locked ? 'none' : 'box-none'}
+      shouldRasterizeIOS={locked}
+      style={[
+        styles.block,
+        locked && styles.stamped,
+        { left: box.x, top: box.y, width: box.w, paddingHorizontal: 12 * k, paddingVertical: 8 * k, borderRadius: 8 * k, transform: drag.getTranslateTransform() },
+      ]}
+    >
       <View pointerEvents="none">
-        <Text style={[styles.heading, { fontSize: font * 0.85 }]}>{block.heading}</Text>
+        <Text style={[styles.heading, { fontSize: PAGE_TYPE.label * k, lineHeight: PAGE_TYPE.label * k * 1.3 }]}>{block.heading}</Text>
         {block.lines.map((l, i) => (
-          <MathText key={i} onPaper text={l} style={{ fontSize: font, lineHeight: font * 1.45, marginTop: i === 0 ? 2 * s : 4 * s }} />
+          <MathText key={i} onPaper text={l} style={{ fontSize: body, lineHeight: body * PAGE_TYPE.leading, marginTop: (i === 0 ? 2 : 4) * k }} />
         ))}
       </View>
-      <View style={[styles.handle, { top: 4, right: 4 }]}>
-        <View {...pan.panHandlers} style={styles.handleBtn} accessibilityLabel="Move this block" accessibilityRole="adjustable">
-          <Text style={styles.grip}>⠿</Text>
+      {!locked && (
+        <View style={styles.handle}>
+          <View {...pan.panHandlers} style={styles.handleBtn} accessibilityLabel="Move this question" accessibilityRole="adjustable">
+            <Text style={styles.grip}>⠿</Text>
+          </View>
+          <Pressable onPress={() => onStamp(block.id)} hitSlop={6} style={[styles.handleBtn, styles.stampBtn]} accessibilityRole="button" accessibilityLabel="Stamp the question here">
+            <Icon name="check" size={15} color="#FFFFFF" weight="semibold" />
+          </Pressable>
+          <Pressable onPress={() => onRemove(block.id)} hitSlop={6} style={styles.handleBtn} accessibilityRole="button" accessibilityLabel="Remove this question from the page">
+            <Icon name="close" size={14} color={PAPER.sub} />
+          </Pressable>
         </View>
-        <Pressable onPress={() => onRemove(block.id)} hitSlop={6} style={styles.handleBtn} accessibilityRole="button" accessibilityLabel="Remove this block from the page">
-          <Icon name="close" size={14} color={PAPER.sub} />
-        </Pressable>
-      </View>
-    </View>
+      )}
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   block: { position: 'absolute', backgroundColor: PAPER.wash, borderLeftWidth: 3, borderLeftColor: PAPER.primary },
+  // stamped: printed on the page, quieter than a block still being placed
+  stamped: { backgroundColor: 'transparent' },
   heading: { fontWeight: '700', color: PAPER.primary, letterSpacing: -0.1 },
-  handle: { position: 'absolute', flexDirection: 'row', gap: 2, opacity: 0.85 },
-  handleBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: PAPER.handle },
+  handle: { position: 'absolute', top: 4, right: 4, flexDirection: 'row', gap: 4 },
+  handleBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: PAPER.handle, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(0,0,0,0.08)' },
+  stampBtn: { backgroundColor: PAPER.primary, borderColor: PAPER.primary },
   grip: { fontSize: 16, color: PAPER.sub, marginTop: -2 },
 });
