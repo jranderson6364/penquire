@@ -10,8 +10,12 @@ import { latexToUnicode } from '../ui/mathText';
 import { Button } from './Button';
 
 type Props = {
+  /** layer size (page * settled zoom): the marks live inside PageLayer and move with the page */
   width: number;
   height: number;
+  /** the on-screen part of the layer, so the popover opens where it can be read */
+  visible: { x: number; y: number; w: number; h: number };
+  /** line boxes in layer units */
   lines: Line[];
   verdicts: LineVerdict[];
   stale: boolean;
@@ -47,7 +51,7 @@ const POPOVER_H = 340;
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
+export function MarksOverlay({ width, height, visible: view, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
@@ -64,9 +68,7 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
   const visible = verdicts
     .filter((v) => v.verdict !== 'context')
     .map((v) => ({ v, line: byId.get(v.id) }))
-    .filter((p): p is { v: LineVerdict; line: Line } => !!p.line)
-    // zoomed or panned away: no mark for a line that is outside the view
-    .filter((p) => p.line.x + p.line.w > 0 && p.line.x < width && p.line.y + p.line.h > 0 && p.line.y < height);
+    .filter((p): p is { v: LineVerdict; line: Line } => !!p.line);
   const sizeOf = (v: LineVerdict) => (v.verdict === 'valid' ? MARK_OK : MARK);
   const spots = placeMarks(
     visible.map(({ v, line }) => ({ id: v.id, box: line, size: sizeOf(v), priority: v.verdict !== 'valid' })),
@@ -106,8 +108,8 @@ export function MarksOverlay({ width, height, lines, verdicts, stale, onAsk, onM
           style={[
             styles.popover,
             {
-              left: Math.max(8, Math.min(active.x - POPOVER_W + active.size, width - POPOVER_W - 8)),
-              top: active.y + active.size + 6 > height - POPOVER_H ? Math.max(8, active.y - POPOVER_H + active.size) : active.y + active.size + 6,
+              left: Math.max(view.x + 8, Math.min(active.x - POPOVER_W + active.size, view.x + view.w - POPOVER_W - 8)),
+              top: active.y + active.size + 6 > view.y + view.h - POPOVER_H ? Math.max(view.y + 8, active.y - POPOVER_H + active.size) : active.y + active.size + 6,
             },
           ]}
         >

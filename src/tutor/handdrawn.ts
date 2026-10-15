@@ -91,7 +91,65 @@ export function wash(box: Box, seed: string): Wash {
   };
 }
 
-/** A polyline with per-point thickness factors -> segments to draw as rounded rectangles. */
+const f1 = (n: number) => (Math.round(n * 10) / 10).toString();
+
+/**
+ * The stroke as ONE filled shape whose width follows the per-point thickness (a pen pressed harder in the middle,
+ * lighter at the ends), with round caps: what a real pen leaves, instead of a chain of beads. Edges are smoothed with
+ * quadratic curves through the midpoints. SVG path data in the stroke's own units.
+ */
+export function outlinePath(s: Stroke, base: number): string {
+  const n = s.pts.length;
+  if (n < 2) return '';
+  const left: Pt[] = [];
+  const right: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = s.pts[Math.max(0, i - 1)];
+    const b = s.pts[Math.min(n - 1, i + 1)];
+    let tx = b.x - a.x;
+    let ty = b.y - a.y;
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len;
+    ty /= len;
+    const r = (base * (s.th[i] ?? 1)) / 2;
+    left.push({ x: s.pts[i].x - ty * r, y: s.pts[i].y + tx * r });
+    right.push({ x: s.pts[i].x + ty * r, y: s.pts[i].y - tx * r });
+  }
+  const smooth = (pts: Pt[], first: boolean) => {
+    let d = first ? `M${f1(pts[0].x)} ${f1(pts[0].y)}` : `L${f1(pts[0].x)} ${f1(pts[0].y)}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i].y + pts[i + 1].y) / 2;
+      d += `Q${f1(pts[i].x)} ${f1(pts[i].y)} ${f1(mx)} ${f1(my)}`;
+    }
+    const last = pts[pts.length - 1];
+    return d + `L${f1(last.x)} ${f1(last.y)}`;
+  };
+  const rEnd = (base * (s.th[n - 1] ?? 1)) / 2;
+  const rStart = (base * (s.th[0] ?? 1)) / 2;
+  const back = [...right].reverse();
+  // left edge forward, round cap, right edge back, round cap
+  return (
+    smooth(left, true) +
+    `A${f1(rEnd)} ${f1(rEnd)} 0 0 1 ${f1(back[0].x)} ${f1(back[0].y)}` +
+    smooth(back, false).replace(/^L[^QL]*/, '') +
+    `A${f1(rStart)} ${f1(rStart)} 0 0 1 ${f1(left[0].x)} ${f1(left[0].y)}Z`
+  );
+}
+
+/** The pen's path through the stroke (for a write-on reveal), and its length. */
+export function centerPath(s: Stroke): { d: string; length: number } {
+  if (s.pts.length < 2) return { d: '', length: 0 };
+  let d = `M${f1(s.pts[0].x)} ${f1(s.pts[0].y)}`;
+  let length = 0;
+  for (let i = 1; i < s.pts.length; i++) {
+    d += `L${f1(s.pts[i].x)} ${f1(s.pts[i].y)}`;
+    length += Math.hypot(s.pts[i].x - s.pts[i - 1].x, s.pts[i].y - s.pts[i - 1].y);
+  }
+  return { d, length };
+}
+
+/** A polyline with per-point thickness factors -> segments to draw as rounded rectangles (fallback renderer). */
 export function toSegments(s: Stroke, baseThickness: number): Seg[] {
   const out: Seg[] = [];
   for (let i = 0; i < s.pts.length - 1; i++) {

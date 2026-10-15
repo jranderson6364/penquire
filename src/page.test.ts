@@ -77,3 +77,15 @@ test('a persisted tool state from another app version is tolerated', () => {
   assert.equal(toNativeSpec(s).kind, 'ink');
   assert.equal(s.eraserSizeIdx, 0);
 });
+
+test('layer coordinates: page * k with no translation; the visible part is the negated offset', async () => {
+  const { boxToLayer, visibleInLayer, boxToScreen } = await import('./page.ts');
+  const v = { scale: 1.5, tx: -40, ty: -300, viewWidth: 900, viewHeight: 1100, interacting: false };
+  const b = { x: 100, y: 200, w: 50, h: 20 };
+  const l = boxToLayer(b, v.scale);
+  assert.deepEqual(l, { x: 150, y: 300, w: 75, h: 30 });
+  // the layer translated by (tx, ty) lands exactly where the old per-frame mapping put it
+  const s = boxToScreen(b, v);
+  assert.deepEqual({ x: l.x + v.tx, y: l.y + v.ty }, { x: s.x, y: s.y });
+  assert.deepEqual(visibleInLayer(v), { x: 40, y: 300, w: 900, h: 1100 });
+});

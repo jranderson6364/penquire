@@ -13,14 +13,15 @@ import { TopBar } from '../components/TopBar';
 import { ENV } from '../config';
 import { MarksOverlay } from '../components/MarksOverlay';
 import { BlocksLayer } from '../components/BlocksLayer';
-import { TutorMarksLayer } from '../components/TutorMarksLayer';
+import { ClearMarksButton, TutorMarksLayer } from '../components/TutorMarksLayer';
+import { PageLayer, followViewport, useLiveViewport } from '../components/PageLayer';
 import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, partContent, setupContent, type PageBlock } from '../blocks';
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { guardMerged } from '../check/finalize';
 import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
-import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToScreen, parseViewport, sameViewport, type Viewport } from '../page';
+import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, sameViewport, visibleInLayer, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
@@ -155,12 +156,23 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     };
   }, [probedModern]);
 
-  const onViewportChanged = React.useCallback((e: ViewportEvent) => {
-    setViewport((prev) => {
-      const next = parseViewport(e, prev);
-      return sameViewport(prev, next) ? prev : next;
-    });
-  }, []);
+  // Every event moves the overlay layer (no render). Only a SETTLED viewport is React state: overlays re-lay out once
+  // at the new zoom when the gesture ends, never per frame.
+  const live = useLiveViewport();
+  const settledRef = React.useRef<Viewport>(IDENTITY_VIEWPORT);
+  const onViewportChanged = React.useCallback(
+    (e: ViewportEvent) => {
+      const next = parseViewport(e, settledRef.current);
+      followViewport(live, next, settledRef.current.scale);
+      if (next.interacting) return;
+      setViewport((prev) => {
+        const v = sameViewport(prev, next) ? prev : next;
+        settledRef.current = v;
+        return v;
+      });
+    },
+    [live]
+  );
 
   // Apple Pencil double-tap: flip to the eraser and back
   const onPencilDoubleTap = React.useCallback(() => {
@@ -329,7 +341,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   // old view-sized space and cannot be mapped onto the page, so they are not drawn (run Check again).
   const marksUsable = !!check && (!modern || check.space === 'page-v2');
   const oldCheck = !!check && modern && check.space !== 'page-v2';
-  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToScreen(l, viewport) })) : check.lines) : [];
+  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToLayer(l, viewport.scale) })) : check.lines) : [];
 
   // ---- question blocks on the page ---------------------------------------
   const pageBlocks: PageBlock[] = (a?.blocks && a.blocks[pageId]) || [];
@@ -758,22 +770,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           onDrawingChanged={onDrawingChanged}
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
         />
-        {modern && pageBlocks.length > 0 && size.w > 0 && (
-          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.4 : 1 }]}>
-            <BlocksLayer blocks={pageBlocks} viewport={viewport} onMove={moveBlock} onRemove={removeBlock} />
-          </View>
-        )}
-        {modern && tutorMarks.length > 0 && size.w > 0 && (
-          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0.35 : 1 }]}>
-            <TutorMarksLayer marks={tutorMarks} viewport={viewport} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} onClear={clearMarks} />
-          </View>
-        )}
-        {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
-        {check && marksUsable && showMarks && size.w > 0 && (
-          <View pointerEvents={viewport.interacting ? 'none' : 'box-none'} style={[StyleSheet.absoluteFill, { opacity: viewport.interacting ? 0 : 1 }]}>
+        {/* One layer over the page for every overlay: laid out once per settled zoom, moved by a single transform
+            while panning and pinching (src/components/PageLayer.tsx). Nothing re-renders or hides mid-gesture. */}
+        {size.w > 0 && (
+          <PageLayer live={live} settled={viewport}>
+            {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} />}
+            {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={viewport.scale} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
+            {check && marksUsable && showMarks && (
             <MarksOverlay
-              width={size.w}
-              height={size.h}
+              width={PAGE_WIDTH * viewport.scale}
+              height={PAGE_HEIGHT * viewport.scale}
+              visible={visibleInLayer(viewport)}
               lines={markLines}
               verdicts={check.result.lines}
               stale={stale}
@@ -787,8 +794,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
               onConfirmReading={confirmLine}
               onInputBlur={() => canvasRef.current?.focus()}
             />
-          </View>
+            )}
+          </PageLayer>
         )}
+        {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}
+        {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
         {notice && (
           <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
             <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>

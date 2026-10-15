@@ -51,6 +51,19 @@ export function boxToScreen(b: Box, v: Viewport): Box {
   return { x: pageToScreenX(b.x, v), y: pageToScreenY(b.y, v), w: b.w * v.scale, h: b.h * v.scale };
 }
 
+/**
+ * The overlay LAYER (src/components/PageLayer.tsx): page space scaled by the settled zoom k, with no translation.
+ * Overlays lay out in layer units once per settled zoom; one transform on the whole layer follows pan and pinch.
+ */
+export function boxToLayer(b: Box, k: number): Box {
+  return { x: b.x * k, y: b.y * k, w: b.w * k, h: b.h * k };
+}
+
+/** The part of the layer that is on screen when the layer sits at the settled viewport (for clamping popovers). */
+export function visibleInLayer(v: Viewport): Box {
+  return { x: -v.tx, y: -v.ty, w: v.viewWidth, h: v.viewHeight };
+}
+
 /** Does any part of a screen-space box overlap the visible view? */
 export function intersectsView(b: Box, v: Viewport): boolean {
   return b.x < v.viewWidth && b.x + b.w > 0 && b.y < v.viewHeight && b.y + b.h > 0;

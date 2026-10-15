@@ -47,3 +47,19 @@ test('segments chain the points, with positive lengths and thickness', () => {
   for (const s of segs) assert.ok(s.len > 0 && s.th > 0);
   assert.deepEqual(toSegments({ pts: [{ x: 0, y: 0 }, { x: 0, y: 0 }], th: [1, 1] }, 3), []);
 });
+
+test('a stroke becomes one closed, finite outline with round caps, and a center path with its length', async () => {
+  const { outlinePath, centerPath } = await import('./handdrawn.ts');
+  const s = ring({ x: 100, y: 200, w: 60, h: 24 }, 'mark-1');
+  const d = outlinePath(s, 3.2);
+  assert.match(d, /^M[\d.-]+ [\d.-]+/);
+  assert.match(d, /A/);
+  assert.match(d, /Z$/);
+  assert.doesNotMatch(d, /NaN|Infinity/);
+  assert.equal(outlinePath({ pts: [{ x: 0, y: 0 }], th: [1] }, 3), '');
+  const c = centerPath(underline({ x: 0, y: 0, w: 100, h: 10 }, 'u'));
+  assert.ok(c.length > 100 && c.length < 140, String(c.length));
+  assert.match(c.d, /^M/);
+  // deterministic: same mark, same shape
+  assert.equal(outlinePath(ring({ x: 100, y: 200, w: 60, h: 24 }, 'mark-1'), 3.2), d);
+});

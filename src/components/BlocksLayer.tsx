@@ -2,14 +2,15 @@ import * as React from 'react';
 import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BLOCK_FONT, type PageBlock } from '../blocks';
-import { boxToScreen, type Viewport } from '../page';
+import { boxToLayer } from '../page';
 import { C } from '../theme';
 import { Icon } from './Icon';
 import { MathText } from './MathText';
 
 type Props = {
   blocks: PageBlock[];
-  viewport: Viewport;
+  /** settled zoom: the blocks are laid out in layer units (page * k) inside PageLayer */
+  k: number;
   onMove: (id: string, x: number, y: number) => void;
   onRemove: (id: string) => void;
 };
@@ -18,18 +19,19 @@ type Props = {
  * Question blocks typeset on the page. They are drawn above the ink but let every touch through (so the Pencil
  * writes right over them); only the small handle in each block's corner takes touches, to drag or remove it.
  */
-export function BlocksLayer({ blocks, viewport, onMove, onRemove }: Props) {
+export function BlocksLayer({ blocks, k, onMove, onRemove }: Props) {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {blocks.map((b) => (
-        <Block key={b.id} block={b} viewport={viewport} onMove={onMove} onRemove={onRemove} />
+        <Block key={b.id} block={b} k={k} onMove={onMove} onRemove={onRemove} />
       ))}
     </View>
   );
 }
 
-function Block({ block, viewport, onMove, onRemove }: { block: PageBlock; viewport: Viewport } & Pick<Props, 'onMove' | 'onRemove'>) {
-  const s = viewport.scale;
+function Block({ block, k, onMove, onRemove }: { block: PageBlock; k: number } & Pick<Props, 'onMove' | 'onRemove'>) {
+  // the layer is at rest while a block is dragged, so a screen point is a layer unit and a page point is 1/k of one
+  const s = k;
   const [drag, setDrag] = React.useState({ dx: 0, dy: 0 });
   const live = React.useRef({ block, s });
   live.current = { block, s };
@@ -49,7 +51,7 @@ function Block({ block, viewport, onMove, onRemove }: { block: PageBlock; viewpo
     [onMove]
   );
 
-  const box = boxToScreen({ x: block.x, y: block.y, w: block.w, h: block.h ?? 80 }, viewport);
+  const box = boxToLayer({ x: block.x, y: block.y, w: block.w, h: block.h ?? 80 }, k);
   const font = BLOCK_FONT * s;
   return (
     <View pointerEvents="box-none" style={[styles.block, { left: box.x + drag.dx, top: box.y + drag.dy, width: box.w, paddingHorizontal: 12 * s, paddingVertical: 8 * s, borderRadius: 8 * s }]}>
