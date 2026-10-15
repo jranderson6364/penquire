@@ -6,7 +6,7 @@ import type { Assignment } from '../store/types';
 import { C, F, R, T } from '../theme';
 import { Icon } from './Icon';
 import { MathText } from './MathText';
-import { PartPicker } from './PartPicker';
+import { QuestionMenu } from './QuestionMenu';
 
 type Props = {
   assignment: Assignment;
@@ -45,10 +45,6 @@ export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, 
 
   const found = activePart && groups ? findPart(groups, activePart) : undefined;
   const flat = activePart ? problems.find((p) => p.label === activePart) : undefined;
-  const choices = problems.map((p) => {
-    const f = groups ? findPart(groups, p.label) : undefined;
-    return { label: p.label, text: f?.part ? f.part.text || f.group.context : f?.group.context ?? p.text };
-  });
 
   const hasPart = !!found?.part && !!found.part.text;
   const setup = found?.group.context ?? '';
@@ -69,7 +65,7 @@ export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, 
           <Icon name="chevron-right" size={16} color={C.primary} />
         </Pressable>
         {/* the title IS the question menu: one control instead of a tag, a title and a separate picker */}
-        <PartPicker parts={choices} value={activePart} onChange={onChange} label={activePart ? (found?.part ? `${activePart} · ${title}` : title) : 'Choose a question'} />
+        <QuestionMenu groups={groups} problems={problems} value={activePart} onChange={onChange} label={activePart ? (found?.part ? `${activePart} · ${title}` : title) : 'Choose a question'} />
         <View style={{ flex: 1 }} />
         {!!activePart && more && (
           <>
