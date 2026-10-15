@@ -5,7 +5,7 @@ import type { LineVerdict, Verdict } from '../ai/types';
 import type { MarkFeedback, Rating } from '../store/evalRecords';
 import type { Line } from '../ink/lines';
 import { placeMarks } from '../check/placeMarks';
-import { C, VERDICT_STYLE } from '../theme';
+import { C, PAPER_VERDICT, VERDICT_STYLE } from '../theme';
 import { latexToUnicode } from '../ui/mathText';
 import { Button } from './Button';
 
@@ -83,7 +83,8 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, st
   return (
     <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { width, height }]}>
       {placed.map(({ v, line, x, y, size }) => {
-        const s = VERDICT_STYLE[v.verdict as keyof typeof VERDICT_STYLE];
+        // the circle sits on white paper in both modes; the popover below follows the theme
+        const s = PAPER_VERDICT[v.verdict as keyof typeof PAPER_VERDICT];
         return (
           <React.Fragment key={v.id}>
             {open === v.id && (

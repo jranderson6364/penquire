@@ -551,7 +551,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         intent,
         evidence,
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
-        pointingAt: cap ? pointedLine(cap.lines, cap.strokeList) : undefined,
+        pointingAt: cap && (spoken || /\b(this|here|that|these|those)\b/i.test(message)) ? pointedLine(cap.lines, cap.strokeList) : undefined,
         spoken,
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
@@ -588,6 +588,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [voice, setVoice] = React.useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [heard, setHeard] = React.useState('');
   const listening = React.useRef<Listening | null>(null);
+  const starting = React.useRef(false);
+  const releasedEarly = React.useRef(false);
   const vocabulary = React.useMemo(() => [...a.problems.map((p) => p.label), 'theta', 'omega', 'vector', 'derivative', 'integral', 'line', 'part'], [a.problems]);
 
   const startTalk = async () => {
@@ -595,20 +597,30 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       say('Voice needs the newest app build. Install it from the Expo build page.', 'warn');
       return;
     }
-    if (listening.current) return;
+    if (listening.current || starting.current) return;
     stopSpeaking();
     setHeard('');
     setVoice('listening');
+    starting.current = true;
+    releasedEarly.current = false;
     try {
       listening.current = await listen(setHeard, vocabulary);
       if (!listening.current) setVoice('idle');
     } catch (e) {
       setVoice('idle');
       say(String(e instanceof Error ? e.message : e), 'warn');
+    } finally {
+      starting.current = false;
     }
+    // The button (or Pencil squeeze) was released while the permission prompt was up: finish now, don't leave the mic on.
+    if (releasedEarly.current && listening.current) void endTalk();
   };
 
   const endTalk = async () => {
+    if (starting.current) {
+      releasedEarly.current = true;
+      return;
+    }
     const l = listening.current;
     if (!l) return;
     listening.current = null;

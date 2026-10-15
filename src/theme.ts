@@ -66,6 +66,26 @@ export const PALETTE = {
 type Token = keyof typeof PALETTE.light;
 export const C = Object.fromEntries((Object.keys(PALETTE.light) as Token[]).map((k) => [k, pair(PALETTE.light[k], PALETTE.dark[k])])) as Record<Token, ColorValue>;
 
+/**
+ * Colors for things drawn ON the paper (question blocks, verdict circles, block handles). The page is white in both
+ * modes, so these never follow dark mode: dynamic tokens there would put near-white text on white paper.
+ */
+export const PAPER = {
+  ink: PALETTE.light.ink,
+  sub: PALETTE.light.sub,
+  primary: PALETTE.light.primary,
+  wash: 'rgba(243,244,247,0.55)',
+  handle: 'rgba(255,255,255,0.92)',
+  figure: PALETTE.light.unknownSoft,
+} as const;
+
+export const PAPER_VERDICT = {
+  valid: { symbol: '✓', color: PALETTE.light.valid, bg: PALETTE.light.validSoft, label: 'valid' },
+  partial: { symbol: '~', color: PALETTE.light.partial, bg: PALETTE.light.partialSoft, label: 'partially valid' },
+  incorrect: { symbol: '✗', color: PALETTE.light.incorrect, bg: PALETTE.light.incorrectSoft, label: 'incorrect' },
+  unreadable: { symbol: '?', color: PALETTE.light.unknown, bg: PALETTE.light.unknownSoft, label: "couldn't read" },
+} as const;
+
 /** Font sizes (pt). Reading text 15, UI labels 13, captions 12. */
 export const T = { caption: 12, small: 13, body: 15, lead: 17, title: 22, display: 30 } as const;
 

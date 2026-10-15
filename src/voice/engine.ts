@@ -68,6 +68,12 @@ export async function speak(sentences: string[], opts: { onStart?: () => void; o
   if (!lib || sentences.length === 0) return;
   await pickVoice(lib);
   await lib.stop();
+  // Listening leaves the session in playAndRecord/"measurement", which plays speech very quietly. Switch to playback.
+  try {
+    recognition()?.ExpoSpeechRecognitionModule.setCategoryIOS({ category: 'playback', categoryOptions: ['duckOthers'], mode: 'spokenAudio' });
+  } catch (e) {
+    console.warn('could not switch the audio session to playback', e);
+  }
   opts.onStart?.();
   for (let i = 0; i < sentences.length; i++) {
     const done = await new Promise<boolean>((resolve) => {

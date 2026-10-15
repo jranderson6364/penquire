@@ -3,7 +3,7 @@ import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BLOCK_FONT, type PageBlock } from '../blocks';
 import { boxToLayer } from '../page';
-import { C } from '../theme';
+import { PAPER } from '../theme';
 import { Icon } from './Icon';
 import { MathText } from './MathText';
 
@@ -58,7 +58,7 @@ function Block({ block, k, onMove, onRemove }: { block: PageBlock; k: number } &
       <View pointerEvents="none">
         <Text style={[styles.heading, { fontSize: font * 0.85 }]}>{block.heading}</Text>
         {block.lines.map((l, i) => (
-          <MathText key={i} text={l} style={{ fontSize: font, lineHeight: font * 1.45, marginTop: i === 0 ? 2 * s : 4 * s }} />
+          <MathText key={i} onPaper text={l} style={{ fontSize: font, lineHeight: font * 1.45, marginTop: i === 0 ? 2 * s : 4 * s }} />
         ))}
       </View>
       <View style={[styles.handle, { top: 4, right: 4 }]}>
@@ -66,7 +66,7 @@ function Block({ block, k, onMove, onRemove }: { block: PageBlock; k: number } &
           <Text style={styles.grip}>⠿</Text>
         </View>
         <Pressable onPress={() => onRemove(block.id)} hitSlop={6} style={styles.handleBtn} accessibilityRole="button" accessibilityLabel="Remove this block from the page">
-          <Icon name="close" size={14} color={C.sub} />
+          <Icon name="close" size={14} color={PAPER.sub} />
         </Pressable>
       </View>
     </View>
@@ -74,9 +74,9 @@ function Block({ block, k, onMove, onRemove }: { block: PageBlock; k: number } &
 }
 
 const styles = StyleSheet.create({
-  block: { position: 'absolute', backgroundColor: 'rgba(243,244,247,0.55)', borderLeftWidth: 3, borderLeftColor: C.primary },
-  heading: { fontWeight: '700', color: C.primary, letterSpacing: -0.1 },
+  block: { position: 'absolute', backgroundColor: PAPER.wash, borderLeftWidth: 3, borderLeftColor: PAPER.primary },
+  heading: { fontWeight: '700', color: PAPER.primary, letterSpacing: -0.1 },
   handle: { position: 'absolute', flexDirection: 'row', gap: 2, opacity: 0.85 },
-  handleBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.9)' },
-  grip: { fontSize: 16, color: C.sub, marginTop: -2 },
+  handleBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: PAPER.handle },
+  grip: { fontSize: 16, color: PAPER.sub, marginTop: -2 },
 });
