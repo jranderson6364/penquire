@@ -6,7 +6,6 @@ import { PencilCanvas, exportPDF, nativeApiVersion, nativeCanvasAvailable, nativ
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
-import { AiFab } from '../components/AiFab';
 import { HelpLevelPicker } from '../components/HelpLevelPicker';
 import { QuestionBanner, QuestionPill } from '../components/QuestionBanner';
 import { TopBar } from '../components/TopBar';
@@ -19,6 +18,7 @@ import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, pa
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { guardMerged } from '../check/finalize';
+import { AUTO_IDLE_MS, autoCheckAllowed, recentAuto } from '../check/auto';
 import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, sameViewport, visibleInLayer, type Viewport } from '../page';
@@ -86,6 +86,12 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   const [strokeCount, setStrokeCount] = React.useState<number | null>(null);
   const [checking, setChecking] = React.useState(false);
+  const autoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRun = React.useRef<() => void>(() => undefined);
+  const autoTimes = React.useRef<number[]>([]);
+  React.useEffect(() => () => {
+    if (autoTimer.current) clearTimeout(autoTimer.current);
+  }, []);
   // Normal outcomes ("nothing new", "add a key", a failed check) are a quiet line on the page, not a system alert.
   const [notice, setNotice] = React.useState<{ text: string; tone: 'info' | 'warn' | 'error'; id: number } | null>(null);
   const say = React.useCallback((text: string, tone: 'info' | 'warn' | 'error' = 'info') => setNotice({ text, tone, id: Date.now() }), []);
@@ -293,6 +299,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       setStrokeCount(e.strokeCount);
       // writing means the student is thinking: the tutor stops talking (barge-in by pen)
       stopSpeaking();
+      // check as you write: a quiet check once the Pencil has rested (opt-in, capped; src/check/auto.ts)
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+      if (getSettings().autoCheck) autoTimer.current = setTimeout(() => autoRun.current(), AUTO_IDLE_MS);
       setSaveState((s) => (s === 'blocked' ? s : 'dirty'));
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => void savePage().catch((err) => console.warn('autosave failed', err)), 800);
@@ -466,7 +475,18 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   );
 
   // ---- actions -----------------------------------------------------------
-  const runCheck = async () => {
+  // check as you write: refreshed every render so the timer always runs the current runCheck
+  autoRun.current = () => {
+    const now = Date.now();
+    const busy = checking || sending || voice !== 'idle' || !hasKey;
+    const fresh = strokeCount !== null && strokeCount !== (a.checks[pageId]?.strokeCount ?? -1);
+    if (!autoCheckAllowed({ times: autoTimes.current, now, busy, strokesSinceLastCheck: fresh })) return;
+    autoTimes.current = [...recentAuto(autoTimes.current, now), now];
+    void runCheck(true);
+  };
+
+  /** quiet: a check-as-you-write check. Marks appear on the page; no panel, no notices; the panel button's dot says if something needs a look. */
+  const runCheck = async (quiet = false) => {
     if (!hasKey) {
       say('Add your Anthropic API key in Settings to check your work.', 'warn');
       return;
@@ -476,7 +496,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       await savePage();
       const { lines, image, strokes, strokeList, points } = await capture();
       if (strokes === 0 || !image) {
-        say('Nothing to check yet. Write something on this page first.');
+        if (!quiet) say('Nothing to check yet. Write something on this page first.');
         return;
       }
       const prev = a.checks[pageId];
@@ -488,8 +508,10 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       if (prev && plan.toGrade.length === 0 && plan.dirtyParts.size === 0) {
         setShowMarks(true);
         setTab('feedback');
-        setPanelOpen(true);
-        say('Nothing new since your last check.');
+        if (!quiet) {
+          setPanelOpen(true);
+          say('Nothing new since your last check.');
+        }
         return;
       }
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
@@ -562,12 +584,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ],
         };
       });
-      hapticDone();
       setShowMarks(true);
-      setTab('feedback');
-      setPanelOpen(true);
+      if (!quiet) {
+        hapticDone();
+        setTab('feedback');
+        setPanelOpen(true);
+      }
     } catch (e) {
-      say(`Check didn't finish: ${String(e instanceof Error ? e.message : e)}. Tap Check to try again.`, 'error');
+      if (!quiet) say(`Check didn't finish: ${String(e instanceof Error ? e.message : e)}. Tap Check to try again.`, 'error');
     } finally {
       setChecking(false);
     }
@@ -889,11 +913,15 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         questionOn={showQuestion}
         onToggleQuestion={toggleQuestion}
         checking={checking}
-        onCheck={runCheck}
+        onCheck={() => void runCheck()}
         voice={voice}
         onTalkStart={() => void startTalk()}
         onTalkEnd={() => void endTalk()}
         onStopVoice={stopVoice}
+        panelOpen={panelOpen}
+        onTogglePanel={() => setPanelOpen((o) => !o)}
+        counts={counts}
+        stale={stale}
         insetTop={insets.top}
         insetLeft={insets.left}
         insetRight={insets.right}
@@ -984,7 +1012,6 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             <Text style={styles.staleText}>Page changed · Check again</Text>
           </View>
         )}
-        {!panelOpen && <AiFab onPress={() => setPanelOpen(true)} counts={counts} stale={stale} insetRight={insets.right} insetBottom={insets.bottom} />}
         {panelOpen && narrow && (
           <View style={[styles.drawer, { width: drawerWidth, paddingBottom: insets.bottom, paddingRight: insets.right }]}>
             {panel}

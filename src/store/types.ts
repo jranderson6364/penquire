@@ -93,6 +93,8 @@ export type Settings = {
   toolState?: unknown;
   /** show the current-question banner under the top bar */
   showQuestion?: boolean;
+  /** check as you write: a quiet check after the Pencil rests (capped per hour); absent = off */
+  autoCheck?: boolean;
   /** palm protection: two fingers to scroll the page (native build 5+); absent = on */
   twoFingerScroll?: boolean;
   /** light / dark / follow the system (src/appearance.ts); absent = system */

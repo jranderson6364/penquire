@@ -34,6 +34,7 @@ const SF = {
   speaker: 'speaker.wave.2.fill',
   sparkles: 'sparkles',
   stop: 'stop.fill',
+  sidebar: 'sidebar.right',
 } as const;
 
 const PNG: Partial<Record<keyof typeof SF, number>> = {
@@ -59,7 +60,7 @@ const PNG: Partial<Record<keyof typeof SF, number>> = {
 };
 
 /** text stand-ins for icons that never had a PNG (only on pre-build-4 binaries) */
-const GLYPH: Partial<Record<keyof typeof SF, string>> = { share: '↑', more: '⋯', mic: '●', speaker: '♪', sparkles: '✦', stop: '■' };
+const GLYPH: Partial<Record<keyof typeof SF, string>> = { share: '↑', more: '⋯', mic: '●', speaker: '♪', sparkles: '✦', stop: '■', sidebar: '▤' };
 
 export type IconName = keyof typeof SF;
 

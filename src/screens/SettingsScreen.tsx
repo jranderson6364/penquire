@@ -112,6 +112,10 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         ))}
       </View>
       <View style={styles.row}>
+        <Text style={styles.label}>Check as I write (quietly, at most 20 times an hour)</Text>
+        <Switch value={!!s.autoCheck} onValueChange={(v) => set('autoCheck', v)} />
+      </View>
+      <View style={styles.row}>
         <Text style={styles.label}>Two fingers to scroll (palm protection)</Text>
         <Switch value={s.twoFingerScroll !== false} onValueChange={(v) => set('twoFingerScroll', v)} />
       </View>
