@@ -14,7 +14,16 @@
       }
     },
     "plugins": [
-      "expo-dev-client"
+      "expo-dev-client",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Penquire listens while you hold the tutor button (or squeeze your Apple Pencil) so you can ask your tutor a question out loud.",
+          "speechRecognitionPermission": "Your question is turned into text on this iPad so the tutor can answer it.",
+          "androidSpeechServicePackages": []
+        }
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {

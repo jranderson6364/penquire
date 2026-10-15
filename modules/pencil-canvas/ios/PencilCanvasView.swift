@@ -131,6 +131,8 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   let onDrawingChanged = EventDispatcher()
   let onViewportChanged = EventDispatcher()
   let onPencilDoubleTap = EventDispatcher()
+  /// Apple Pencil Pro squeeze (iPadOS 17.5+): { phase: "began" | "ended" | "cancelled" }. JS uses it as push-to-talk.
+  let onPencilSqueeze = EventDispatcher()
 
   private var toolPicker: PKToolPicker?
   private var wantsToolPicker = false
@@ -275,7 +277,9 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     guard !isAdjusting else { return }
     updateInsets()
     updatePaper()
-    if CACurrentMediaTime() - lastViewportSend >= 0.033 { sendViewport() }
+    // Every frame (up to 120 Hz): JS only moves one overlay layer per event (PageLayer), so it can keep up, and the
+    // overlays no longer trail the ink at 30 Hz.
+    if CACurrentMediaTime() - lastViewportSend >= 0.008 { sendViewport() }
     // Trailing event: always report the final, settled viewport (interacting = false).
     settleTask?.cancel()
     settleTask = Task { @MainActor [weak self] in
@@ -429,6 +433,21 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
 
   func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
     onPencilDoubleTap([:])
+  }
+
+  @available(iOS 17.5, *)
+  func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+    switch squeeze.phase {
+    case .began: onPencilSqueeze(["phase": "began"])
+    case .ended: onPencilSqueeze(["phase": "ended"])
+    case .cancelled: onPencilSqueeze(["phase": "cancelled"])
+    default: break
+    }
+  }
+
+  /// The desk behind the page (follows the app's light/dark theme; the page itself stays white paper).
+  func setSurroundColor(_ hex: String) {
+    backgroundColor = parseColor(hex)
   }
 
   // MARK: Functions

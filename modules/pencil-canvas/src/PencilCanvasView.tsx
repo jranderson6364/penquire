@@ -2,7 +2,7 @@ import { requireNativeView, requireOptionalNativeModule } from 'expo';
 import * as React from 'react';
 import type { NativeSyntheticEvent } from 'react-native';
 
-import type { ExportedPage, NativeToolSpec, PencilCanvasHandle, PencilCanvasProps, StrokePoints, ViewportEvent } from './types';
+import type { ExportedPage, PdfRequest, NativeToolSpec, PencilCanvasHandle, PencilCanvasProps, StrokePoints, ViewportEvent } from './types';
 
 type NativeMethods = {
   getStrokes(): Promise<string>;
@@ -23,14 +23,15 @@ type NativeMethods = {
   exportPage?(optionsJSON: string): Promise<string>;
 };
 
-type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged' | 'onViewportChanged' | 'onPencilDoubleTap'> & {
+type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged' | 'onViewportChanged' | 'onPencilDoubleTap' | 'onPencilSqueeze'> & {
   ref?: React.Ref<NativeMethods>;
   onDrawingChanged?: (e: NativeSyntheticEvent<{ strokeCount: number }>) => void;
   onViewportChanged?: (e: NativeSyntheticEvent<ViewportEvent>) => void;
   onPencilDoubleTap?: (e: NativeSyntheticEvent<object>) => void;
+  onPencilSqueeze?: (e: NativeSyntheticEvent<{ phase: 'began' | 'ended' | 'cancelled' }>) => void;
 };
 
-const nativeModule = requireOptionalNativeModule<{ apiVersion?: number }>('PencilCanvas');
+const nativeModule = requireOptionalNativeModule<{ apiVersion?: number; exportPDF?: (json: string) => Promise<string> }>('PencilCanvas');
 
 /**
  * False when the installed app binary was built without the Swift module (an old dev build, or the module was not
@@ -63,6 +64,15 @@ function viewFunctionNames(): string[] {
   }
 }
 
+/**
+ * apiVersion >= 4: a US Letter PDF of the given pages (ink at 3x + placed question blocks). Resolves to a file:// URL,
+ * or null on an older binary.
+ */
+export async function exportPDF(request: PdfRequest): Promise<string | null> {
+  if (!nativeModule?.exportPDF) return null;
+  return nativeModule.exportPDF(JSON.stringify(request));
+}
+
 export const nativeModuleInfo = {
   available: nativeCanvasAvailable,
   apiVersion: nativeApiVersion,
@@ -89,6 +99,7 @@ export function PencilCanvas({
   onDrawingChanged,
   onViewportChanged,
   onPencilDoubleTap,
+  onPencilSqueeze,
   ...props
 }: PencilCanvasProps & { ref?: React.Ref<PencilCanvasHandle> }) {
   const nativeRef = React.useRef<NativeMethods>(null);
@@ -133,6 +144,7 @@ export function PencilCanvas({
       onDrawingChanged={(e) => onDrawingChanged?.(e.nativeEvent)}
       onViewportChanged={(e) => onViewportChanged?.(e.nativeEvent)}
       onPencilDoubleTap={() => onPencilDoubleTap?.()}
+      onPencilSqueeze={(e) => onPencilSqueeze?.(e.nativeEvent.phase)}
     />
   );
 }

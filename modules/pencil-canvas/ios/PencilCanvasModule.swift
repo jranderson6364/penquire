@@ -10,12 +10,23 @@ public class PencilCanvasModule: Module {
     Name("PencilCanvas")
 
     // 3: getStrokePoints (visible ink points), exportPage (jpeg, crop, no gutter)
+    // 4: exportPDF, onPencilSqueeze, surroundColor, viewport events every frame
     Constant("apiVersion") {
-      return 3
+      return 4
+    }
+
+    // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }
+    // Returns the file:// URL of a US Letter PDF (ink at 3x + placed question blocks). Runs off the main thread.
+    AsyncFunction("exportPDF") { (json: String) throws -> String in
+      return try PdfExport.make(json)
     }
 
     View(PencilCanvasView.self) {
-      Events("onDrawingChanged", "onViewportChanged", "onPencilDoubleTap")
+      Events("onDrawingChanged", "onViewportChanged", "onPencilDoubleTap", "onPencilSqueeze")
+
+      Prop("surroundColor") { (view: PencilCanvasView, value: String) in
+        view.setSurroundColor(value)
+      }
 
       Prop("allowFingerDrawing") { (view: PencilCanvasView, value: Bool) in
         view.setAllowFingerDrawing(value)

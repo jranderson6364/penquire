@@ -73,6 +73,18 @@ export type PencilCanvasProps = {
   onDrawingChanged?: (e: { strokeCount: number }) => void;
   onViewportChanged?: (e: ViewportEvent) => void;
   onPencilDoubleTap?: () => void;
+  /** apiVersion >= 4, Apple Pencil Pro: squeeze began / ended (push-to-talk) */
+  onPencilSqueeze?: (phase: 'began' | 'ended' | 'cancelled') => void;
+  /** apiVersion >= 4: the desk behind the page, "#RRGGBB" */
+  surroundColor?: string;
+};
+
+/** apiVersion >= 4: input for exportPDF (page space; blocks typeset as Unicode text). */
+export type PdfRequest = {
+  title: string;
+  pageWidth: number;
+  pageHeight: number;
+  pages: { drawing: string; blocks?: { x: number; y: number; w: number; heading?: string; lines: string[]; fontSize?: number }[] }[];
 };
 
 export type PencilCanvasHandle = {
