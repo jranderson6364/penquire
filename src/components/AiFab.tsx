@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
   },
-  label: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  label: { color: C.onPrimary, fontSize: 16, fontWeight: '800' },
   badges: { flexDirection: 'row', gap: 4 },
   badge: { fontSize: 12, fontWeight: '800', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, overflow: 'hidden' },
 });

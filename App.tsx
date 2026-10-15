@@ -6,6 +6,15 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { NewAssignmentScreen } from './src/screens/NewAssignmentScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
+import { applyAppearance } from './src/appearance';
+import { getSettings } from './src/store/db';
+
+// light / dark / system, before the first frame (colors are dynamic, so later changes apply instantly)
+try {
+  applyAppearance(getSettings().appearance);
+} catch (e) {
+  console.warn('settings not readable yet; using the system appearance', e);
+}
 
 type Route = { name: 'home' } | { name: 'new' } | { name: 'settings' } | { name: 'workspace'; id: string };
 
@@ -15,7 +24,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
+      <StatusBar style="auto" />
       {route.name === 'home' && (
         <HomeScreen
           onOpen={(id) => setRoute({ name: 'workspace', id })}

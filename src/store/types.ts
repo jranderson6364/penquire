@@ -93,6 +93,8 @@ export type Settings = {
   toolState?: unknown;
   /** show the current-question banner under the top bar */
   showQuestion?: boolean;
+  /** light / dark / follow the system (src/appearance.ts); absent = system */
+  appearance?: 'system' | 'light' | 'dark';
 };
 
 export type DB = {

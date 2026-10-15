@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   View,
+  type ColorValue,
 } from 'react-native';
 
 import { HELP_LEVELS } from '../ai/prompts';
@@ -52,7 +53,7 @@ type Props = {
   onInputBlur?: () => void;
 };
 
-const STATUS_STYLE: Record<PartStatus['status'], { color: string; bg: string; label: string }> = {
+const STATUS_STYLE: Record<PartStatus['status'], { color: ColorValue; bg: ColorValue; label: string }> = {
   complete: { color: C.valid, bg: C.validSoft, label: 'complete' },
   in_progress: { color: C.partial, bg: C.partialSoft, label: 'in progress' },
   missing_items: { color: C.incorrect, bg: C.incorrectSoft, label: 'missing' },
@@ -378,7 +379,7 @@ const styles = StyleSheet.create({
   bubble: { borderRadius: R.md, padding: 10, maxWidth: '92%' },
   userBubble: { backgroundColor: C.primary, alignSelf: 'flex-end' },
   botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line },
-  userText: { color: '#fff', fontSize: T.body, lineHeight: 21 },
+  userText: { color: C.onPrimary, fontSize: T.body, lineHeight: 21 },
   inputRow: { padding: 10, gap: 8, borderTopWidth: 1, borderColor: C.line, backgroundColor: C.card },
   checkCard: { gap: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, marginBottom: 4 },
   checkHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },

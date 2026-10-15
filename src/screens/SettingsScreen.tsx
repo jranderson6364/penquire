@@ -10,6 +10,7 @@ import { feedbackStats } from '../store/evalRecords';
 import { loadEvals, writeExport } from '../store/evals';
 import type { Settings } from '../store/types';
 import { C } from '../theme';
+import { applyAppearance } from '../appearance';
 
 export function SettingsScreen({ onDone }: { onDone: () => void }) {
   const insets = useSafeAreaInsets();
@@ -86,6 +87,22 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
           }
         }}
       />
+
+      <Text style={styles.section}>Appearance</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {(['system', 'light', 'dark'] as const).map((m) => (
+          <Button
+            key={m}
+            title={m === 'system' ? 'Match iPad' : m === 'light' ? 'Light' : 'Dark'}
+            kind={(s.appearance ?? 'system') === m ? 'primary' : 'secondary'}
+            onPress={() => {
+              set('appearance', m);
+              applyAppearance(m); // preview right away; Save keeps it
+            }}
+            small
+          />
+        ))}
+      </View>
 
       <Text style={styles.section}>Canvas</Text>
       <Text style={styles.label}>Paper</Text>

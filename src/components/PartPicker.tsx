@@ -54,7 +54,7 @@ export function PartPicker({ parts, value, onChange, label }: Props) {
 const styles = StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, backgroundColor: C.primarySoft, maxWidth: 380 },
   chipText: { color: C.primary, fontWeight: '700', fontSize: 14 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'center', alignItems: 'center' },
+  backdrop: { flex: 1, backgroundColor: C.scrim, justifyContent: 'center', alignItems: 'center' },
   sheet: { width: 420, backgroundColor: C.card, borderRadius: 16, padding: 16, gap: 6 },
   title: { fontSize: 18, fontWeight: '800', marginBottom: 6, color: C.ink },
   row: { padding: 10, borderRadius: 10 },

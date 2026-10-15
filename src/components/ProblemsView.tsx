@@ -117,7 +117,7 @@ function Group({ g, activePart, onSelectPart }: { g: ProblemGroup; activePart?: 
                 <View style={styles.partHead}>
                   <Text style={styles.partLabel}>({p.label})</Text>
                   <Pressable onPress={() => onSelectPart(active ? undefined : fl)} hitSlop={8} style={[styles.workBtn, active && styles.workBtnOn]}>
-                    <Text style={[styles.workText, active && { color: '#fff' }]}>{active ? 'Working on this' : 'Work on this'}</Text>
+                    <Text style={[styles.workText, active && { color: C.onPrimary }]}>{active ? 'Working on this' : 'Work on this'}</Text>
                   </Pressable>
                 </View>
                 <MathText text={p.text} />

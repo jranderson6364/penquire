@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Image, type ImageStyle, type StyleProp } from 'react-native';
+import { Image, type ColorValue, type ImageStyle, type StyleProp } from 'react-native';
 
 /** Line icons drawn by scripts/make_icons.py (white on transparent); tinted at render time so one file serves every color. */
 const SOURCES = {
@@ -26,6 +26,6 @@ const SOURCES = {
 
 export type IconName = keyof typeof SOURCES;
 
-export function Icon({ name, size = 22, color, style }: { name: IconName; size?: number; color: string; style?: StyleProp<ImageStyle> }) {
+export function Icon({ name, size = 22, color, style }: { name: IconName; size?: number; color: ColorValue; style?: StyleProp<ImageStyle> }) {
   return <Image source={SOURCES[name]} style={[{ width: size, height: size, tintColor: color }, style]} accessible={false} />;
 }

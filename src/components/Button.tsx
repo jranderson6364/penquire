@@ -15,7 +15,7 @@ type Props = {
 
 export function Button({ title, onPress, kind = 'secondary', disabled, loading, style, small }: Props) {
   const bg = kind === 'primary' ? C.primary : kind === 'danger' ? C.incorrect : kind === 'ghost' ? 'transparent' : C.card;
-  const fg = kind === 'primary' || kind === 'danger' ? '#fff' : kind === 'ghost' ? C.primary : C.ink;
+  const fg = kind === 'primary' || kind === 'danger' ? C.onPrimary : kind === 'ghost' ? C.primary : C.ink;
   return (
     <Pressable
       onPress={onPress}

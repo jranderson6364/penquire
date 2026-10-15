@@ -840,7 +840,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
+  root: { flex: 1, backgroundColor: C.surround },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   sideHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, flexWrap: 'wrap', backgroundColor: C.card, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   body: { flex: 1, flexDirection: 'row' },

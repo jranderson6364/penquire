@@ -59,7 +59,7 @@ export function ToolPopover({ tool, anchor, windowWidth, onChange, onClose }: Pr
                 return (
                   <Pressable key={c} onPress={() => onChange(setColor(tool, c))} accessibilityRole="button" accessibilityLabel={`Color ${c}`} accessibilityState={{ selected: on }} style={styles.swatchHit}>
                     <View style={[styles.swatch, { backgroundColor: c }, on && styles.swatchOn]}>
-                      {on && <Icon name="check" size={16} color={tool.tool === 'marker' ? C.ink : '#fff'} />}
+                      {on && <Icon name="check" size={16} color={tool.tool === 'marker' ? '#0D0D0F' : '#fff'} />}
                     </View>
                   </Pressable>
                 );

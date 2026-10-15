@@ -77,6 +77,6 @@ const styles = StyleSheet.create({
   text: { fontSize: 15, lineHeight: 21, color: C.ink },
   bold: { fontWeight: '700' },
   tagged: { fontWeight: '600', borderRadius: 4, overflow: 'hidden' },
-  code: { fontFamily: 'Menlo', fontSize: 13, backgroundColor: '#F1F3F5' },
+  code: { fontFamily: 'Menlo', fontSize: 13, backgroundColor: C.bg },
   bulletRow: { flexDirection: 'row', gap: 6, marginVertical: 1 },
 });
