@@ -126,6 +126,10 @@ export type ReplyInput = TutorContext & {
   intent?: ReplyIntent;
   /** intent 'dispute': what a deterministic check (not the model) found on the disputed line, if anything */
   evidence?: string;
+  /** the line the student's Pencil last wrote on: "this" / "here" in their question means this line */
+  pointingAt?: string;
+  /** the student asked out loud and the answer will be spoken: keep it short and sayable */
+  spoken?: boolean;
   /** the part the student is working on, for intent 'start' */
   part?: string;
   /**

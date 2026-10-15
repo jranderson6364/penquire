@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { Alert, AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, AppState, Pressable, Share, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type StrokeBox, type StrokePoints, type ViewportEvent } from '../../modules/pencil-canvas';
+import { PencilCanvas, exportPDF, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, nativeModuleInfo, type ExportedImage, type PencilCanvasHandle, type StrokeBox, type StrokePoints, type ViewportEvent } from '../../modules/pencil-canvas';
 import { getProvider } from '../ai';
 import type { HelpLevel, LineVerdict, ReplyIntent, TutorContext } from '../ai/types';
 import { Button } from '../components/Button';
@@ -23,6 +23,9 @@ import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, sameViewport, visibleInLayer, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
+import { buildPdfRequest } from '../export/pdf';
+import { listen, speak, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
+import { pointedLine, sentences, speakable } from '../voice/text';
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
@@ -37,7 +40,7 @@ import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../t
 import { HELP_LEVELS } from '../ai/prompts';
 import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
-import { C } from '../theme';
+import { C, PALETTE } from '../theme';
 
 type Props = { assignmentId: string; onBack: () => void };
 
@@ -68,6 +71,7 @@ const providerFromSettings = (spend?: { total: number }) => {
 
 export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const insets = useSafeAreaInsets();
+  const scheme = useColorScheme();
   const { width: winW } = useWindowDimensions();
   const settings = getSettings();
   const canvasRef = React.useRef<PencilCanvasHandle>(null);
@@ -273,6 +277,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const onDrawingChanged = React.useCallback(
     (e: { strokeCount: number }) => {
       setStrokeCount(e.strokeCount);
+      // writing means the student is thinking: the tutor stops talking (barge-in by pen)
+      stopSpeaking();
       setSaveState((s) => (s === 'blocked' ? s : 'dirty'));
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => void savePage().catch((err) => console.warn('autosave failed', err)), 800);
@@ -523,7 +529,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     }
   };
 
-  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent, evidence?: string) => {
+  /** One tutor turn. Returns the guarded reply text (for voice), or undefined if it failed. */
+  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent, evidence?: string, spoken?: boolean): Promise<string | undefined> => {
     setSending(true);
     setDraft('');
     try {
@@ -543,6 +550,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
         intent,
         evidence,
+        // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
+        pointingAt: cap ? pointedLine(cap.lines, cap.strokeList) : undefined,
+        spoken,
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
       });
@@ -561,15 +571,72 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           : x.tutorMarks,
         events: [
           ...x.events,
-          { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : undefined, costUSD: spend.total },
+          { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : spoken ? 'voice' : undefined, costUSD: spend.total },
         ],
       }));
+      return reply.text;
     } catch (e) {
       setDraft(message);
-      Alert.alert('Message failed', String(e instanceof Error ? e.message : e));
+      say(`Message didn't send: ${String(e instanceof Error ? e.message : e)}`, 'error');
+      return undefined;
     } finally {
       setSending(false);
     }
+  };
+
+  // ---- voice: hold Check (or squeeze the Pencil) to talk; the answer is spoken (docs/10 §4) ----------------
+  const [voice, setVoice] = React.useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [heard, setHeard] = React.useState('');
+  const listening = React.useRef<Listening | null>(null);
+  const vocabulary = React.useMemo(() => [...a.problems.map((p) => p.label), 'theta', 'omega', 'vector', 'derivative', 'integral', 'line', 'part'], [a.problems]);
+
+  const startTalk = async () => {
+    if (!voiceAvailable()) {
+      say('Voice needs the newest app build. Install it from the Expo build page.', 'warn');
+      return;
+    }
+    if (listening.current) return;
+    stopSpeaking();
+    setHeard('');
+    setVoice('listening');
+    try {
+      listening.current = await listen(setHeard, vocabulary);
+      if (!listening.current) setVoice('idle');
+    } catch (e) {
+      setVoice('idle');
+      say(String(e instanceof Error ? e.message : e), 'warn');
+    }
+  };
+
+  const endTalk = async () => {
+    const l = listening.current;
+    if (!l) return;
+    listening.current = null;
+    const text = await l.finish();
+    setHeard('');
+    if (!text) {
+      setVoice('idle');
+      say("I didn't catch that. Hold the button and ask again.");
+      return;
+    }
+    setVoice('thinking');
+    setTab('chat');
+    const reply = await send(text, true, undefined, undefined, undefined, true);
+    if (!reply) {
+      setVoice('idle');
+      return;
+    }
+    setVoice('speaking');
+    await speak(sentences(speakable(reply)));
+    setVoice((v) => (v === 'speaking' ? 'idle' : v));
+  };
+
+  const stopVoice = () => {
+    listening.current?.cancel();
+    listening.current = null;
+    stopSpeaking();
+    setHeard('');
+    setVoice('idle');
   };
 
   const reparse = async () => {
@@ -587,6 +654,28 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       Alert.alert('Parsing failed', String(e instanceof Error ? e.message : e));
     } finally {
       setReparsing(false);
+    }
+  };
+
+  /** The final PDF: every page's ink and placed questions (no tutor marks), then the share sheet. */
+  const [exporting, setExporting] = React.useState(false);
+  const exportAssignment = async () => {
+    if (nativeApiVersion < 4) {
+      say('PDF export needs the newest app build. Install it from the Expo build page.', 'warn');
+      return;
+    }
+    setExporting(true);
+    try {
+      if (!(await savePage())) {
+        say("This page couldn't be saved, so it can't be exported yet. Tap the title to retry.", 'error');
+        return;
+      }
+      const url = await exportPDF(buildPdfRequest(getAssignment(assignmentId) ?? a, readPage));
+      if (url) await Share.share({ url, title: a.title });
+    } catch (e) {
+      say(`Export didn't finish: ${String(e instanceof Error ? e.message : e)}`, 'error');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -738,10 +827,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         onRedo={() => canvasRef.current?.redo()}
         onFit={() => canvasRef.current?.fitToWidth()}
         zoomPercent={Math.round(viewport.scale * 100)}
+        zoomedAway={Math.abs(viewport.scale - viewport.viewWidth / PAGE_WIDTH) > 0.03 * (viewport.viewWidth / PAGE_WIDTH)}
+        onExport={() => void exportAssignment()}
+        exporting={exporting}
         questionOn={showQuestion}
         onToggleQuestion={toggleQuestion}
         checking={checking}
         onCheck={runCheck}
+        voice={voice}
+        onTalkStart={() => void startTalk()}
+        onTalkEnd={() => void endTalk()}
+        onStopVoice={stopVoice}
         insetTop={insets.top}
         insetLeft={insets.left}
         insetRight={insets.right}
@@ -769,6 +865,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           showToolPicker={!modern}
           onDrawingChanged={onDrawingChanged}
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
+          {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
         />
         {/* One layer over the page for every overlay: laid out once per settled zoom, moved by a single transform
             while panning and pinching (src/components/PageLayer.tsx). Nothing re-renders or hides mid-gesture. */}
@@ -799,7 +896,13 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         )}
         {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}
         {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
-        {notice && (
+        {voice === 'listening' && (
+          <View pointerEvents="none" style={[styles.notice, styles.listening]} accessibilityLiveRegion="polite">
+            <Text style={styles.listeningDot}>●</Text>
+            <Text style={styles.noticeText} numberOfLines={2}>{heard || 'Listening…'}</Text>
+          </View>
+        )}
+        {notice && voice !== 'listening' && (
           <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
             <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>
           </Pressable>
@@ -882,4 +985,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
   },
   noticeText: { fontSize: 14, color: C.ink, textAlign: 'center' },
+  listening: { flexDirection: 'row', alignItems: 'center', gap: 8, borderColor: C.incorrect },
+  listeningDot: { color: C.incorrect, fontSize: 12 },
 });

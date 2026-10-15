@@ -1,9 +1,8 @@
 import * as React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { isInk, selectTool, type ToolKind, type ToolState } from '../tools';
 import { C, R, T } from '../theme';
-import { Button } from './Button';
 import { Icon, type IconName } from './Icon';
 import { ToolPopover, type Anchor } from './ToolPopover';
 
@@ -23,10 +22,21 @@ type Props = {
   onRedo: () => void;
   onFit: () => void;
   zoomPercent: number;
+  /** the page is zoomed away from fit-to-width (the Fit chip is shown only then) */
+  zoomedAway: boolean;
+  /** Export PDF of the whole assignment (share sheet) */
+  onExport: () => void;
+  exporting: boolean;
   questionOn: boolean;
   onToggleQuestion: () => void;
   checking: boolean;
   onCheck: () => void;
+  /** voice turn state (src/voice): the Check button shows it and a tap stops it */
+  voice: 'idle' | 'listening' | 'thinking' | 'speaking';
+  /** hold Check to talk; release to send */
+  onTalkStart: () => void;
+  onTalkEnd: () => void;
+  onStopVoice: () => void;
   /** 'saved' on disk, 'dirty' waiting for the autosave, 'blocked' could not be saved */
   saveStatus: 'saved' | 'dirty' | 'blocked';
   onSaveTap: () => void;
@@ -140,11 +150,15 @@ export function TopBar(p: Props) {
       <Pressable onPress={p.onRedo} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel="Redo">
         <Icon name="redo" size={22} color={C.ink} />
       </Pressable>
-      {p.modern && (
+      {/* only when it does something: the page is zoomed away from fit-to-width */}
+      {p.modern && p.zoomedAway && (
         <Pressable onPress={p.onFit} style={styles.zoom} accessibilityRole="button" accessibilityLabel={`Zoom ${p.zoomPercent} percent. Fit page to width`}>
-          <Text style={styles.zoomText}>{p.zoomPercent}%</Text>
+          <Text style={styles.zoomText}>Fit</Text>
         </Pressable>
       )}
+      <Pressable onPress={p.onExport} disabled={p.exporting} style={[styles.iconBtn, p.exporting && { opacity: 0.4 }]} accessibilityRole="button" accessibilityLabel="Export the assignment as a PDF">
+        <Icon name="share" size={21} color={C.ink} />
+      </Pressable>
       <Pressable
         onPress={p.onToggleQuestion}
         style={[styles.iconBtn, p.questionOn && styles.toolOn]}
@@ -154,7 +168,7 @@ export function TopBar(p: Props) {
       >
         <Icon name="question" size={22} color={p.questionOn ? C.primary : C.sub} />
       </Pressable>
-      <Button small kind="primary" title={p.checking ? 'Checking…' : 'Check'} loading={p.checking} onPress={p.onCheck} style={styles.check} />
+      <TutorButton {...p} />
     </View>
   );
 
@@ -176,6 +190,43 @@ export function TopBar(p: Props) {
       )}
       {pop && <ToolPopover tool={p.tool} anchor={pop.anchor} windowWidth={width} onChange={p.onToolChange} onClose={() => setPop(null)} />}
     </View>
+  );
+}
+
+/**
+ * The one entry to the tutor (docs/10 §2). Tap = Check. Hold = talk (release to send; the answer is spoken).
+ * While the tutor listens, thinks or speaks, the button says so, and a tap stops it.
+ */
+function TutorButton(p: Props) {
+  const talking = React.useRef(false);
+  const busy = p.voice !== 'idle';
+  const label = p.voice === 'listening' ? 'Listening' : p.voice === 'thinking' ? 'Thinking…' : p.voice === 'speaking' ? 'Speaking' : p.checking ? 'Checking…' : 'Check';
+  return (
+    <Pressable
+      onPress={() => (busy ? p.onStopVoice() : p.onCheck())}
+      onLongPress={() => {
+        if (busy || p.checking) return;
+        talking.current = true;
+        p.onTalkStart();
+      }}
+      onPressOut={() => {
+        if (!talking.current) return;
+        talking.current = false;
+        p.onTalkEnd();
+      }}
+      delayLongPress={320}
+      disabled={p.checking && !busy}
+      style={({ pressed }) => [styles.check, p.voice === 'listening' && styles.checkListening, (pressed || p.checking) && { opacity: 0.85 }]}
+      accessibilityRole="button"
+      accessibilityLabel={busy ? `${label}. Tap to stop.` : 'Check my work. Hold to ask out loud.'}
+    >
+      {p.checking && !busy ? (
+        <ActivityIndicator size="small" color={C.onPrimary} />
+      ) : (
+        <Icon name={p.voice === 'listening' ? 'mic' : p.voice === 'speaking' ? 'speaker' : p.voice === 'thinking' ? 'sparkles' : 'sparkles'} size={16} color={C.onPrimary} />
+      )}
+      <Text style={styles.checkText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -201,5 +252,7 @@ const styles = StyleSheet.create({
   iconBtn: { width: 42, height: 42, borderRadius: R.md - 1, alignItems: 'center', justifyContent: 'center' },
   zoom: { minWidth: 56, height: 32, borderRadius: R.pill, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   zoomText: { fontSize: T.small, fontWeight: '600', color: C.ink, fontVariant: ['tabular-nums'] },
-  check: { marginLeft: 4, minWidth: 84 },
+  check: { marginLeft: 4, minWidth: 104, height: 36, paddingHorizontal: 14, borderRadius: R.pill, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  checkListening: { backgroundColor: C.incorrect },
+  checkText: { color: C.onPrimary, fontSize: T.body, fontWeight: '600', letterSpacing: -0.2 },
 });
