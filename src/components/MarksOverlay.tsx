@@ -1,10 +1,15 @@
 import * as React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { LineVerdict, Verdict } from '../ai/types';
+import type { LineVerdict, PartStatus, Verdict } from '../ai/types';
 import type { MarkFeedback, Rating } from '../store/evalRecords';
 import type { Line } from '../ink/lines';
+import Svg, { Path } from 'react-native-svg';
+
+import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { placeMarks } from '../check/placeMarks';
+import { marksToShow } from '../check/verdictMarks';
+import { outlinePath, verdictStrokes } from '../tutor/handdrawn';
 import { C, PAPER_VERDICT, VERDICT_STYLE } from '../theme';
 import { latexToUnicode } from '../ui/mathText';
 import { Button } from './Button';
@@ -18,6 +23,8 @@ type Props = {
   /** line boxes in layer units */
   lines: Line[];
   verdicts: LineVerdict[];
+  /** part statuses of the check: a ✓ goes only on the answer line of a complete part */
+  parts: PartStatus[];
   stale: boolean;
   onAsk: (v: LineVerdict) => void;
   /** raise the hint rung for this issue and ask again */
@@ -42,6 +49,9 @@ const CORRECT_VERDICTS: { v: Verdict; label: string }[] = [
   { v: 'incorrect', label: '✗ incorrect' },
 ];
 
+/** react-native-svg is in native build 3+: pen-drawn marks; before that, the symbol-in-a-circle marks. */
+const PEN_MARKS = nativeApiVersion >= 3;
+
 const MARK = 26;
 const MARK_OK = 20; // a check that holds up is quieter than one that needs attention
 const POPOVER_W = 300;
@@ -51,7 +61,7 @@ const POPOVER_H = 340;
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, visible: view, lines, verdicts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
+export function MarksOverlay({ width, height, visible: view, lines, verdicts, parts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
   const [open, setOpen] = React.useState<string | null>(null);
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
@@ -65,8 +75,8 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, st
 
   React.useEffect(() => setOpen(null), [verdicts]);
 
-  const visible = verdicts
-    .filter((v) => v.verdict !== 'context')
+  // mark like a teacher: tick the answer, mark what needs attention, leave the rest alone (src/check/verdictMarks.ts)
+  const visible = marksToShow(verdicts, parts)
     .map((v) => ({ v, line: byId.get(v.id) }))
     .filter((p): p is { v: LineVerdict; line: Line } => !!p.line);
   const sizeOf = (v: LineVerdict) => (v.verdict === 'valid' ? MARK_OK : MARK);
@@ -93,13 +103,26 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, st
                 style={[styles.highlight, { left: line.x - 4, top: line.y - 4, width: line.w + 8, height: line.h + 8, borderColor: s.color }]}
               />
             )}
-            <Pressable
-              hitSlop={8}
-              onPress={() => setOpen(open === v.id ? null : v.id)}
-              style={[styles.mark, { left: x, top: y, width: size, height: size, borderRadius: size / 2, backgroundColor: s.bg, borderColor: s.color, opacity: stale ? 0.45 : 1 }]}
-            >
-              <Text style={[styles.markText, { color: s.color }]}>{s.symbol}</Text>
-            </Pressable>
+            {PEN_MARKS ? (
+              // a teacher's pen mark on the paper (tick, cross, squiggle, ?); the touch target stays a comfortable size
+              <Pressable
+                hitSlop={10}
+                onPress={() => setOpen(open === v.id ? null : v.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`${v.id}: ${s.label}. Show details`}
+                style={[styles.penMark, { left: x - 4, top: y - 4, width: size + 8, height: size + 8, opacity: stale ? 0.45 : 1 }]}
+              >
+                <PenMark verdict={v.verdict} id={v.id} size={size + 8} color={s.color} />
+              </Pressable>
+            ) : (
+              <Pressable
+                hitSlop={8}
+                onPress={() => setOpen(open === v.id ? null : v.id)}
+                style={[styles.mark, { left: x, top: y, width: size, height: size, borderRadius: size / 2, backgroundColor: s.bg, borderColor: s.color, opacity: stale ? 0.45 : 1 }]}
+              >
+                <Text style={[styles.markText, { color: s.color }]}>{s.symbol}</Text>
+              </Pressable>
+            )}
           </React.Fragment>
         );
       })}
@@ -215,6 +238,22 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, st
   );
 }
 
+/** A verdict drawn with a pen: pressure-shaped strokes (SVG), or a handwritten "?" for a line it couldn't read. */
+function PenMark({ verdict, id, size, color }: { verdict: LineVerdict['verdict']; id: string; size: number; color: string }) {
+  const strokes = React.useMemo(
+    () => (verdict === 'valid' || verdict === 'incorrect' || verdict === 'partial' ? verdictStrokes(verdict, { x: size * 0.15, y: size * 0.15, w: size * 0.7, h: size * 0.7 }, id) : []),
+    [verdict, id, size]
+  );
+  if (verdict === 'unreadable') return <Text style={[styles.penQuestion, { color, fontSize: size * 0.8, lineHeight: size }]}>?</Text>;
+  return (
+    <Svg width={size} height={size} pointerEvents="none">
+      {strokes.map((st, i) => (
+        <Path key={i} d={outlinePath(st, size * 0.11)} fill={color} />
+      ))}
+    </Svg>
+  );
+}
+
 /** Why the mark is what it is: what the tutor read, and which deterministic check (if any) set it. Quiet, never shouty. */
 function Evidence({ v }: { v: LineVerdict }) {
   if (!v.reading && !v.guard) return null;
@@ -307,6 +346,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   markText: { fontSize: 15, fontWeight: '800' },
+  penMark: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  penQuestion: { fontFamily: 'Bradley Hand', fontWeight: '700', textAlign: 'center' },
   highlight: { position: 'absolute', borderWidth: 2, borderRadius: 6, borderStyle: 'dashed' },
   popover: {
     position: 'absolute',

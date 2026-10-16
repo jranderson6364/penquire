@@ -12,8 +12,9 @@ public class PencilCanvasModule: Module {
     // 3: getStrokePoints (visible ink points), exportPage (jpeg, crop, no gutter)
     // 4: exportPDF, onPencilSqueeze, surroundColor, viewport events every frame
     // 5: twoFingerScroll, pan paused while the Pencil draws, scrollToPageRect, tool changes keep the scroll position
+    // 6: React children = overlay layer moved natively with the ink (overlayScale)
     Constant("apiVersion") {
-      return 5
+      return 6
     }
 
     // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }
@@ -27,6 +28,12 @@ public class PencilCanvasModule: Module {
 
       Prop("surroundColor") { (view: PencilCanvasView, value: String) in
         view.setSurroundColor(value)
+      }
+
+      // apiVersion >= 6: React children are the overlay layer, laid out at page * overlayScale; native moves them with
+      // the ink in the same frame (no JS round trip, no lag)
+      Prop("overlayScale") { (view: PencilCanvasView, value: Double) in
+        view.setOverlayScale(value)
       }
 
       // apiVersion >= 5: palm protection (two fingers to scroll); panning is always paused while the Pencil draws

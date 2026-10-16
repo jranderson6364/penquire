@@ -149,6 +149,45 @@ export function centerPath(s: Stroke): { d: string; length: number } {
   return { d, length };
 }
 
+/** Smooth a few control points into a dense pen path with pressure that rises then tapers (one quick stroke). */
+function penStroke(ctrl: Pt[], r: () => number, n = 18): Stroke {
+  const pts: Pt[] = [];
+  const th: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const seg = Math.min(ctrl.length - 2, Math.floor(t * (ctrl.length - 1)));
+    const u = t * (ctrl.length - 1) - seg;
+    const a = ctrl[seg];
+    const b = ctrl[seg + 1];
+    // a touch of ease within each segment, like a hand speeding up mid-stroke
+    const e = u * u * (3 - 2 * u);
+    pts.push({ x: a.x + (b.x - a.x) * e + (r() - 0.5) * 0.4, y: a.y + (b.y - a.y) * e + (r() - 0.5) * 0.4 });
+    th.push(0.55 + 0.6 * Math.sin(Math.PI * Math.min(1, t * 1.15)));
+  }
+  return { pts, th };
+}
+
+/**
+ * A teacher's verdict, as pen strokes in a box: a quick tick (✓), a cross (✗, two strokes), a squiggle (~).
+ * Seeded by the line id, so a mark keeps its shape between renders.
+ */
+export function verdictStrokes(kind: 'valid' | 'incorrect' | 'partial', box: Box, seed: string): Stroke[] {
+  const r = rng(seed + ':' + kind);
+  const X = (f: number) => box.x + box.w * f;
+  const Y = (f: number) => box.y + box.h * f;
+  const j = () => (r() - 0.5) * 0.08;
+  if (kind === 'valid') return [penStroke([{ x: X(0.08 + j()), y: Y(0.55 + j()) }, { x: X(0.38 + j()), y: Y(0.88 + j()) }, { x: X(0.95 + j()), y: Y(0.08 + j()) }], r)];
+  if (kind === 'incorrect')
+    return [
+      penStroke([{ x: X(0.12 + j()), y: Y(0.12 + j()) }, { x: X(0.88 + j()), y: Y(0.9 + j()) }], r, 12),
+      penStroke([{ x: X(0.86 + j()), y: Y(0.1 + j()) }, { x: X(0.14 + j()), y: Y(0.9 + j()) }], r, 12),
+    ];
+  // a squiggle: two humps
+  const ctrl: Pt[] = [];
+  for (let i = 0; i <= 6; i++) ctrl.push({ x: X(0.05 + (0.9 * i) / 6), y: Y(0.5 + (i % 2 === 0 ? 0.18 : -0.18) * (i === 0 || i === 6 ? 0.4 : 1) + j()) });
+  return [penStroke(ctrl, r, 24)];
+}
+
 /** A polyline with per-point thickness factors -> segments to draw as rounded rectangles (fallback renderer). */
 export function toSegments(s: Stroke, baseThickness: number): Seg[] {
   const out: Seg[] = [];

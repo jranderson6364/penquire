@@ -125,6 +125,22 @@ private func inkType(_ name: String?) -> PKInk.InkType {
 
 // MARK: - Canvas view
 
+/// Hosts the React overlay layer (question blocks, tutor marks, verdict marks) above the ink. It takes no touches
+/// itself: only the overlay's own touchable views (handles, marks) do; everything else falls through to the canvas.
+final class OverlayHostView: UIView {
+  // The layer is page-sized and can extend past this view's own bounds (zoomed, or low on the page), so never let
+  // the bounds decide: ask the children directly, and take nothing ourselves.
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { true }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return nil }
+    for sub in subviews.reversed() {
+      if let hit = sub.hitTest(sub.convert(point, from: self), with: event) { return hit }
+    }
+    return nil
+  }
+}
+
 final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractionDelegate {
   let canvas = PKCanvasView()
   let paper = PaperView(frame: .zero)
@@ -147,6 +163,10 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   private var lastViewportSend: CFTimeInterval = 0
   private var settleTask: Task<Void, Never>?
   private var resumeGestures: Task<Void, Never>?
+  /// React children (the overlay layer) are mounted here, and moved with the page natively in the same frame as the ink.
+  private let overlayHost = OverlayHostView()
+  /// The zoom the overlay was laid out at (JS lays it out in page * overlayScale units; native scales by zoom / overlayScale).
+  private var overlayScale: CGFloat = 1
   private var offsetObservation: NSKeyValueObservation?
   private var zoomObservation: NSKeyValueObservation?
 
@@ -190,9 +210,46 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     addInteraction(pencil)
   }
 
+  // MARK: Overlay layer (apiVersion >= 6)
+
+  /// React children of this view are the overlay layer: keep them in our own host above the canvas, not under it.
+  override func mountChildComponentView(_ childComponentView: UIView, index: Int) {
+    overlayHost.insertSubview(childComponentView, at: min(index, overlayHost.subviews.count))
+  }
+
+  override func unmountChildComponentView(_ childComponentView: UIView, index: Int) {
+    childComponentView.removeFromSuperview()
+  }
+
+  func setOverlayScale(_ k: Double) {
+    overlayScale = CGFloat(max(0.01, k))
+    updateOverlayTransform()
+  }
+
+  /// screen = (-contentOffset) + (zoom / overlayScale) * layer. Same frame as the ink: called from the scroll delegate.
+  private func updateOverlayTransform() {
+    let r = canvas.zoomScale / overlayScale
+    let t = CGAffineTransform(a: r, b: 0, c: 0, d: r, tx: -canvas.contentOffset.x, ty: -canvas.contentOffset.y)
+    if overlayHost.transform != t {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true) // no implicit animation: it must sit exactly on the ink
+      overlayHost.transform = t
+      CATransaction.commit()
+    }
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews()
     canvas.frame = bounds
+    // the host's origin is the page's top-left; its transform does the rest (anchor at the top-left corner)
+    if overlayHost.superview == nil {
+      overlayHost.layer.anchorPoint = .zero
+      addSubview(overlayHost)
+    }
+    bringSubviewToFront(overlayHost)
+    overlayHost.bounds = CGRect(origin: .zero, size: bounds.size)
+    overlayHost.layer.position = .zero
+    updateOverlayTransform()
     if bounds.size != lastBoundsSize, bounds.width > 1, bounds.height > 1 {
       lastBoundsSize = bounds.size
       refit(forceFit: false)
@@ -235,6 +292,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     }
     isAdjusting = false
     updatePaper()
+    updateOverlayTransform()
     sendViewport()
   }
 
@@ -275,9 +333,12 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   }
 
   private func viewportDidChange() {
+    // the overlay follows the ink in this same frame, even mid-adjustment (no trip through JS)
+    updateOverlayTransform()
     guard !isAdjusting else { return }
     updateInsets()
     updatePaper()
+    updateOverlayTransform()
     // Every frame (up to 120 Hz): JS only moves one overlay layer per event (PageLayer), so it can keep up, and the
     // overlays no longer trail the ink at 30 Hz.
     if CACurrentMediaTime() - lastViewportSend >= 0.008 { sendViewport() }

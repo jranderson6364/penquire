@@ -56,6 +56,9 @@ const tutorContext = (a: Assignment): TutorContext => ({
   style: a.style,
 });
 
+/** Build 6+: the page overlays are children of the native canvas, which moves them with the ink in the same frame. */
+const NATIVE_OVERLAY = nativeApiVersion >= 6;
+
 /** `spend.total` accumulates the estimated cost of every API call made through the returned provider (retries included). */
 const providerFromSettings = (spend?: { total: number }) => {
   const s = getSettings();
@@ -894,6 +897,34 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         />
   );
 
+  // every overlay on the page, in layer units (page * settled zoom); hosted natively on build 6+, else by PageLayer
+  const overlay = (
+    <>
+          {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
+          {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={viewport.scale} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
+          {check && marksUsable && showMarks && (
+          <MarksOverlay
+            width={PAGE_WIDTH * viewport.scale}
+            height={PAGE_HEIGHT * viewport.scale}
+            visible={visibleInLayer(viewport)}
+            lines={markLines}
+            verdicts={check.result.lines}
+            parts={check.result.parts}
+            stale={stale}
+            onAsk={askAbout}
+            onMoreHelp={moreHelp}
+            onDispute={dispute}
+            repeats={repeats}
+            rungName={rungName}
+            feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
+            onRate={rateMark}
+            onConfirmReading={confirmLine}
+            onInputBlur={() => canvasRef.current?.focus()}
+          />
+          )}
+    </>
+  );
+
   return (
     <View style={styles.root}>
       <TopBar
@@ -959,32 +990,20 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
           {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
-        />
-        {/* One layer over the page for every overlay: laid out once per settled zoom, moved by a single transform
-            while panning and pinching (src/components/PageLayer.tsx). Nothing re-renders or hides mid-gesture. */}
-        {size.w > 0 && (
+          {...(NATIVE_OVERLAY ? { overlayScale: viewport.scale } : {})}
+        >
+          {/* Build 6+: the overlay layer lives INSIDE the native canvas view, which moves it with the ink in the same
+              frame (no JS round trip). Laid out once per settled zoom at page * k. */}
+          {NATIVE_OVERLAY && size.w > 0 && (
+            <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, width: PAGE_WIDTH * viewport.scale, height: PAGE_HEIGHT * viewport.scale }}>
+              {overlay}
+            </View>
+          )}
+        </PencilCanvas>
+        {/* Older builds: the same layer above the canvas, moved by a JS-driven transform (src/components/PageLayer.tsx). */}
+        {!NATIVE_OVERLAY && size.w > 0 && (
           <PageLayer live={live} settled={viewport}>
-            {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
-            {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={viewport.scale} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
-            {check && marksUsable && showMarks && (
-            <MarksOverlay
-              width={PAGE_WIDTH * viewport.scale}
-              height={PAGE_HEIGHT * viewport.scale}
-              visible={visibleInLayer(viewport)}
-              lines={markLines}
-              verdicts={check.result.lines}
-              stale={stale}
-              onAsk={askAbout}
-              onMoreHelp={moreHelp}
-              onDispute={dispute}
-              repeats={repeats}
-              rungName={rungName}
-              feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
-              onRate={rateMark}
-              onConfirmReading={confirmLine}
-              onInputBlur={() => canvasRef.current?.focus()}
-            />
-            )}
+            {overlay}
           </PageLayer>
         )}
         {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}

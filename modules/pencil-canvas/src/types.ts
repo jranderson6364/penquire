@@ -77,6 +77,9 @@ export type PencilCanvasProps = {
   onPencilSqueeze?: (phase: 'began' | 'ended' | 'cancelled') => void;
   /** apiVersion >= 5: palm protection, one finger or palm never pans (pan is also paused while the Pencil draws) */
   twoFingerScroll?: boolean;
+  /** apiVersion >= 6: children are the overlay layer, laid out at page * overlayScale; native moves them with the ink */
+  overlayScale?: number;
+  children?: import('react').ReactNode;
   /** apiVersion >= 4: the desk behind the page, "#RRGGBB" */
   surroundColor?: string;
 };
