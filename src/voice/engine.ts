@@ -107,7 +107,12 @@ export type Listening = {
  * Start listening (push-to-talk). Partial text streams to onPartial while the student talks. Hints the recognizer
  * with the assignment's own vocabulary (part labels, symbols) so "three point ten c" and "theta" come out right.
  */
-export async function listen(onPartial: (text: string) => void, vocabulary: string[] = []): Promise<Listening | null> {
+export async function listen(
+  onPartial: (text: string) => void,
+  vocabulary: string[] = [],
+  /** the recognizer stopped by itself (error, interruption) while nobody was finishing it */
+  onEnded?: () => void
+): Promise<Listening | null> {
   const lib = recognition();
   if (!lib) return null;
   const M = lib.ExpoSpeechRecognitionModule;
@@ -121,8 +126,8 @@ export async function listen(onPartial: (text: string) => void, vocabulary: stri
       latest = e.results[0]?.transcript ?? latest;
       onPartial(latest);
     }),
-    M.addListener('end', () => settle?.(latest)),
-    M.addListener('error', () => settle?.(latest)),
+    M.addListener('end', () => (settle ? settle(latest) : onEnded?.())),
+    M.addListener('error', () => (settle ? settle(latest) : onEnded?.())),
   ];
   const cleanup = () => subs.forEach((s) => s.remove());
 

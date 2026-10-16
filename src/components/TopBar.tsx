@@ -42,6 +42,9 @@ type Props = {
   onTalkStart: () => void;
   onTalkEnd: () => void;
   onStopVoice: () => void;
+  /** hands-free conversation on/off (the mic stays open; a pause ends your turn) */
+  conversation: boolean;
+  onToggleConversation: () => void;
   /** 'saved' on disk, 'dirty' waiting for the autosave, 'blocked' could not be saved */
   saveStatus: 'saved' | 'dirty' | 'blocked';
   onSaveTap: () => void;
@@ -173,6 +176,9 @@ export function TopBar(p: Props) {
       >
         <Icon name="question" size={22} color={p.questionOn ? C.primary : C.sub} />
       </Pressable>
+      <Pressable onPress={p.onToggleConversation} style={[styles.panelBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
+        <Icon name="mic" size={19} color={p.conversation ? C.onPrimary : C.ink} />
+      </Pressable>
       <TutorButton {...p} />
       <Pressable onPress={p.onTogglePanel} style={[styles.panelBtn, p.panelOpen && styles.toolOn]} accessibilityRole="button" accessibilityLabel={p.panelOpen ? 'Hide the tutor panel' : 'Show the tutor panel'} accessibilityState={{ selected: p.panelOpen }}>
         <Icon name="sidebar" size={20} color={p.panelOpen ? C.primary : C.ink} />
@@ -267,6 +273,7 @@ const styles = StyleSheet.create({
   zoomText: { fontSize: T.small, fontWeight: '600', color: C.ink, fontVariant: ['tabular-nums'] },
   check: { marginLeft: 4, minWidth: 104, height: 36, paddingHorizontal: 14, borderRadius: R.pill, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   checkListening: { backgroundColor: C.incorrect },
+  convoOn: { backgroundColor: C.incorrect },
   panelBtn: { width: 42, height: 42, borderRadius: R.md - 1, alignItems: 'center', justifyContent: 'center' },
   countDot: { position: 'absolute', top: 4, right: 3, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: C.incorrect, alignItems: 'center', justifyContent: 'center' },
   countDotText: { color: C.onPrimary, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },

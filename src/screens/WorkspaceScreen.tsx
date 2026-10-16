@@ -27,6 +27,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
 import { listen, speak, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
 import { pointedLine, sentences, speakable } from '../voice/text';
+import { turnDecision } from '../voice/turns';
 import { done as hapticDone, tick } from '../ui/haptics';
 import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
@@ -709,19 +710,113 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       say("I didn't catch that. Hold the button and ask again.");
       return;
     }
+    await voiceTurn(text);
+    setVoice((v) => (v === 'speaking' || v === 'thinking' ? 'idle' : v));
+  };
+
+  /** One spoken turn: send what was heard (with the page), then say the guarded reply. Shared by push-to-talk and hands-free. */
+  const voiceTurn = async (text: string) => {
     setVoice('thinking');
     setTab('chat');
     const reply = await send(text, true, undefined, undefined, undefined, true);
-    if (!reply) {
-      setVoice('idle');
-      return;
-    }
+    if (!reply) return;
     setVoice('speaking');
     await speak(sentences(speakable(reply)));
-    setVoice((v) => (v === 'speaking' ? 'idle' : v));
   };
 
+  // ---- hands-free conversation: the mic stays open; a pause ends your turn; the tutor answers aloud; repeat ----
+  const [conversation, setConversation] = React.useState(false);
+  const convo = React.useRef(false);
+  const convoTimer = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const listenForTurn = async () => {
+    if (!convo.current) return;
+    const turn = { startedAt: Date.now(), lastChangeAt: Date.now(), text: '' };
+    setHeard('');
+    setVoice('listening');
+    let l: Listening | null = null;
+    try {
+      l = await listen(
+        (t) => {
+          if (t !== turn.text) {
+            turn.text = t;
+            turn.lastChangeAt = Date.now();
+          }
+          setHeard(t);
+        },
+        vocabulary,
+        // the recognizer stopped by itself: start a fresh one rather than going silent
+        () => {
+          if (convoTimer.current) clearInterval(convoTimer.current);
+          listening.current = null;
+          setTimeout(() => void listenForTurn(), 300);
+        }
+      );
+    } catch (e) {
+      endConversation(String(e instanceof Error ? e.message : e));
+      return;
+    }
+    if (!l || !convo.current) {
+      l?.cancel();
+      return;
+    }
+    listening.current = l;
+    if (convoTimer.current) clearInterval(convoTimer.current);
+    convoTimer.current = setInterval(() => {
+      const d = turnDecision(turn, Date.now());
+      if (d === 'wait') return;
+      if (convoTimer.current) clearInterval(convoTimer.current);
+      convoTimer.current = null;
+      const cur = listening.current;
+      listening.current = null;
+      if (d === 'give_up') {
+        cur?.cancel();
+        endConversation('Conversation ended: no one spoke for a while.');
+        return;
+      }
+      void (async () => {
+        const text = (await cur?.finish()) || turn.text;
+        setHeard('');
+        if (!convo.current) return;
+        await voiceTurn(text);
+        if (convo.current) void listenForTurn();
+      })();
+    }, 200);
+  };
+
+  const startConversation = () => {
+    if (!voiceAvailable()) {
+      say('Voice needs the newest app build. Install it from the Expo build page.', 'warn');
+      return;
+    }
+    stopSpeaking();
+    convo.current = true;
+    setConversation(true);
+    say('Conversation on: talk any time; pause when you are done. Tap the mic to end.');
+    void listenForTurn();
+  };
+
+  const endConversation = (message?: string) => {
+    convo.current = false;
+    setConversation(false);
+    if (convoTimer.current) clearInterval(convoTimer.current);
+    convoTimer.current = null;
+    listening.current?.cancel();
+    listening.current = null;
+    stopSpeaking();
+    setHeard('');
+    setVoice('idle');
+    if (message) say(message);
+  };
+  React.useEffect(() => () => endConversation(), []);
+
   const stopVoice = () => {
+    if (convo.current) {
+      // in a conversation a tap while the tutor talks means "my turn": stop the voice, keep listening
+      if (voice === 'speaking') stopSpeaking();
+      else endConversation();
+      return;
+    }
     listening.current?.cancel();
     listening.current = null;
     stopSpeaking();
@@ -957,6 +1052,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         onTalkStart={() => void startTalk()}
         onTalkEnd={() => void endTalk()}
         onStopVoice={stopVoice}
+        conversation={conversation}
+        onToggleConversation={() => (conversation ? endConversation() : startConversation())}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((o) => !o)}
         counts={counts}
