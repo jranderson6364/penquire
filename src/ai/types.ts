@@ -130,6 +130,8 @@ export type ReplyInput = TutorContext & {
   pointingAt?: string;
   /** the student asked out loud and the answer will be spoken: keep it short and sayable */
   spoken?: boolean;
+  /** streamed reply text so far. Through guarded(): only whole sentences that passed the leak guard. */
+  onPartial?: (text: string) => void;
   /** the part the student is working on, for intent 'start' */
   part?: string;
   /**

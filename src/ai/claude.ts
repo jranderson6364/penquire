@@ -1,4 +1,5 @@
 import { TUTOR_RULES, contextBlock, intentBlock, levelBlock } from './prompts';
+import { StreamAssembler, partialStringField } from './stream';
 import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
 import { flatten } from '../problems/flatten';
@@ -250,6 +251,19 @@ export type ClaudeOptions = {
   parseEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** called once per API response that was billed, including truncated ones */
   onUsage?: (e: { kind: UsageKind; model: string; usage: Usage }) => void;
+  /**
+   * A fetch whose response body can be read as a stream (expo/fetch in the app). When given, chat replies stream so
+   * the student sees whole, guarded sentences as they arrive. Absent (node evals): plain non-streamed calls.
+   */
+  streamFetch?: (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<StreamingResponse>;
+};
+
+export type StreamingResponse = {
+  ok: boolean;
+  status: number;
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+  body: { getReader(): { read(): Promise<{ done: boolean; value?: Uint8Array }> } } | null;
 };
 
 /** Vision + thinking can legitimately take a while; beyond this the request is abandoned. */
@@ -306,10 +320,72 @@ export class ClaudeProvider implements TutorProvider {
   }
 
   /**
+   * The same request, streamed (stream: true). onToolJson sees each tool's input JSON as it grows. The finished
+   * response has the non-streamed shape, so callers and usage metering are unchanged. Retries restart the stream.
+   */
+  private async callStream(body: Record<string, unknown>, kind: UsageKind, onToolJson: (name: string, json: string) => void): Promise<ApiResponse> {
+    if (!this.opts.apiKey) throw new Error('No Anthropic API key. Add one in Settings or .env.');
+    const sf = this.opts.streamFetch!;
+    const res = await withRetry(
+      async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        try {
+          const r = await sf(API_URL, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-api-key': this.opts.apiKey, 'anthropic-version': API_VERSION },
+            body: JSON.stringify({ ...body, stream: true }),
+            signal: controller.signal,
+          });
+          if (!r.ok) {
+            let detail = await r.text();
+            try {
+              detail = JSON.parse(detail)?.error?.message ?? detail;
+            } catch {}
+            throw new HttpError(r.status, `Claude API ${r.status}: ${detail}`, parseRetryAfter(r.headers.get('retry-after')));
+          }
+          if (!r.body) throw new Error('The streamed response had no body');
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          const asm = new StreamAssembler();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            for (const g of asm.push(decoder.decode(value, { stream: true })).toolJson) onToolJson(g.name, g.json);
+          }
+          return asm.result() as ApiResponse;
+        } catch (e) {
+          if (controller.signal.aborted) throw new TimeoutError(REQUEST_TIMEOUT_MS);
+          throw e;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      { onRetry: (n, delay, e) => console.warn(`Claude API stream retry ${n} in ${delay} ms:`, e instanceof Error ? e.message : e) }
+    );
+    const usage = ClaudeProvider.usage(res);
+    if (usage) {
+      try {
+        this.opts.onUsage?.({ kind, model: res.model, usage });
+      } catch (e) {
+        console.warn('usage recording failed', e);
+      }
+    }
+    return res;
+  }
+
+  /**
    * Forced tool_choice ('tool'/'any') is a 400 on Sonnet 5.5, Opus 5.5 and Fable 5.1, so ask for the tool by
    * name (tool_choice auto) and retry once if the model answers in prose instead.
    */
-  private async callTool<T>(body: Record<string, unknown>, tool: Tool, instruction: string, kind: UsageKind): Promise<{ res: ApiResponse; out: T }> {
+  private async callTool<T>(
+    body: Record<string, unknown>,
+    tool: Tool,
+    instruction: string,
+    kind: UsageKind,
+    /** stream, and report the tool's input JSON as it grows (only when a streaming fetch was provided) */
+    onToolJson?: (json: string) => void
+  ): Promise<{ res: ApiResponse; out: T }> {
     const messages = (body.messages as Message[]).map((m, i, all) => {
       if (i !== all.length - 1 || typeof m.content === 'string') return m;
       return { ...m, content: [...m.content, { type: 'text', text: instruction } as ContentBlock] };
@@ -317,7 +393,10 @@ export class ClaudeProvider implements TutorProvider {
     const req = { ...body, messages, tools: [tool], tool_choice: { type: 'auto' } };
     let last: ApiResponse | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
-      last = await this.call(req, kind);
+      last =
+        onToolJson && this.opts.streamFetch
+          ? await this.callStream({ ...req, tools: [{ ...tool, eager_input_streaming: true }] }, kind, (name, json) => name === tool.name && onToolJson(json))
+          : await this.call(req, kind);
       // Retrying a truncated or refused request would fail identically; only retry a prose answer.
       if (last.stop_reason === 'max_tokens') throw new Error('The answer was cut off before it finished. Try again, or check fewer lines at once.');
       if (last.stop_reason === 'refusal') throw new Error(`The model declined this request${last.stop_details?.category ? ` (${last.stop_details.category})` : ''}.`);
@@ -491,7 +570,14 @@ Check my work. First verify each line yourself, including steps I did in my head
           { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, REPLY_EFFORT_WITH_PAGE), system: this.system(), messages },
           REPLY_TOOL,
           `Respond only by calling the ${REPLY_TOOL.name} tool.`,
-          'reply'
+          'reply',
+          // stream the message as it is written (the guard in src/ai/index.ts releases whole, checked sentences only)
+          input.onPartial
+            ? (json) => {
+                const m = partialStringField(json, 'message');
+                if (m) input.onPartial!(m.replace(/\bL(\d+)\b/g, 'line $1'));
+              }
+            : undefined
         );
         // the student cannot see gutter labels; reading order makes "line 3" mean something to them
         const message = cleanReply(typeof out.message === 'string' ? out.message : '').text.replace(/\bL(\d+)\b/g, 'line $1');

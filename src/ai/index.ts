@@ -2,6 +2,7 @@ import { ENV } from '../config';
 import { ClaudeProvider, type ClaudeOptions } from './claude';
 import { applyAlgebraGuard, applyLeakGuard, applyReadingGuard, applyReplyLeakGuard } from '../verify/guard';
 import { overLevel } from '../tutor/revealed';
+import { finishedSentences } from './stream';
 import type { CheckResult, HelpLevel, TutorProvider } from './types';
 
 export type ProviderSettings = {
@@ -10,6 +11,8 @@ export type ProviderSettings = {
   checkModel?: string;
   parseModel?: string;
   onUsage?: ClaudeOptions['onUsage'];
+  /** expo/fetch in the app: lets chat replies stream (src/ai/stream.ts) */
+  streamFetch?: ClaudeOptions['streamFetch'];
 };
 
 /** Single place to swap providers. Add Gemini/OpenAI implementations of TutorProvider here. */
@@ -19,6 +22,7 @@ export function getProvider(settings?: Partial<ProviderSettings>): TutorProvider
     checkModel: settings?.checkModel || ENV.checkModel,
     parseModel: settings?.parseModel || ENV.parseModel,
     onUsage: settings?.onUsage,
+    streamFetch: settings?.streamFetch,
   });
   return guarded(inner);
 }
@@ -29,7 +33,21 @@ export function guarded(inner: TutorProvider): TutorProvider {
     id: inner.id,
     parseAssignment: (i) => inner.parseAssignment(i),
     reply: async (i) => {
-      const r = await inner.reply(i);
+      // Streaming: release only finished sentences, and only after the same leak guard as the final reply. A sentence
+      // the guard would change is held back (the final, fully guarded reply replaces the stream when it lands).
+      const onPartial = i.onPartial
+        ? (raw: string) => {
+            const done = finishedSentences(raw);
+            if (!done) return;
+            try {
+              const guardedText = applyReplyLeakGuard(done, i.lines ?? [], i.helpLevel);
+              if (guardedText === done) i.onPartial!(done);
+            } catch {
+              // a guard error never shows unguarded text
+            }
+          }
+        : undefined;
+      const r = await inner.reply({ ...i, onPartial });
       try {
         const text = applyReplyLeakGuard(r.text, i.lines ?? [], i.helpLevel);
         // A caption on the page is a tutor sentence like any other: drop a note the leak guard would change.

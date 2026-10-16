@@ -23,6 +23,7 @@ import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, sameViewport, visibleInLayer, type Viewport } from '../page';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
+import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
 import { listen, speak, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
 import { pointedLine, sentences, speakable } from '../voice/text';
@@ -69,6 +70,8 @@ const providerFromSettings = (spend?: { total: number }) => {
       // dev log only (not shown in the app): lets "what did that session cost?" be answered from the Metro logs
       console.log(`[penquire:cost] ${e.kind} ${e.model} ${c === null ? 'unpriced' : `$${c.toFixed(4)}`} in=${e.usage.inputTokens} cached=${e.usage.cacheReadTokens} out=${e.usage.outputTokens}`);
     },
+    // streamed chat replies (whole, guarded sentences as they arrive)
+    streamFetch: expoFetch as unknown as NonNullable<Parameters<typeof getProvider>[0]>['streamFetch'],
   });
 };
 
@@ -101,6 +104,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     return () => clearTimeout(t);
   }, [notice]);
   const [sending, setSending] = React.useState(false);
+  // the tutor's reply as it streams in: whole sentences that already passed the leak guard (src/ai/index.ts)
+  const [streamText, setStreamText] = React.useState('');
   const [reparsing, setReparsing] = React.useState(false);
   const [panelOpen, setPanelOpen] = React.useState(false);
   const [tab, setTab] = React.useState<Tab>('feedback');
@@ -621,6 +626,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
         pointingAt: cap && (spoken || /\b(this|here|that|these|those)\b/i.test(message)) ? pointedLine(cap.lines, cap.strokeList) : undefined,
         spoken,
+        onPartial: setStreamText,
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
       });
@@ -649,6 +655,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       return undefined;
     } finally {
       setSending(false);
+      setStreamText('');
     }
   };
 
@@ -869,6 +876,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           onSend={send}
           onHelpStart={helpStart}
           sending={sending}
+          streamText={streamText}
           onReparse={reparse}
           reparsing={reparsing}
           activePart={activePart}

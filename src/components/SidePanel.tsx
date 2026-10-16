@@ -37,6 +37,8 @@ type Props = {
   /** "Help me start": a first move for the active part, no attempt required */
   onHelpStart: () => void;
   sending: boolean;
+  /** the reply arriving now (guarded whole sentences), shown as a tutor bubble that grows */
+  streamText?: string;
   onReparse: () => void;
   reparsing: boolean;
   /** chat turn index -> how many marks the tutor drew on the current page for it */
@@ -265,7 +267,12 @@ function TutorStream(p: Props) {
             )}
           </View>
         ))}
-        {sending && <ActivityIndicator style={{ marginTop: 8 }} />}
+        {sending && !!p.streamText && (
+          <View style={[styles.bubble, styles.botBubble]}>
+            <Markdown text={p.streamText} />
+          </View>
+        )}
+        {sending && !p.streamText && <ActivityIndicator style={{ marginTop: 8 }} />}
       </ScrollView>
       <View style={styles.inputRow}>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
