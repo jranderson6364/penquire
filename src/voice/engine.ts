@@ -47,6 +47,10 @@ export const voiceAvailable = () => nativeApiVersion >= 4 && !!speech() && !!rec
 
 let voiceId: string | undefined;
 let voicePicked = false;
+/** bumped by stopAllVoice(); speech requested under an older value never starts or continues */
+let speechGen = 0;
+/** ends the sentence being spoken now, in case expo-speech never reports onStopped */
+let endSentence: ((done: boolean) => void) | null = null;
 
 /** The best English voice installed: Enhanced/Premium beats Default; US English first. */
 async function pickVoice(lib: SpeechLib) {
@@ -66,8 +70,11 @@ async function pickVoice(lib: SpeechLib) {
 export async function speak(sentences: string[], opts: { onStart?: () => void; onSentence?: (i: number) => void } = {}): Promise<void> {
   const lib = speech();
   if (!lib || sentences.length === 0) return;
+  const gen = speechGen;
   await pickVoice(lib);
+  if (gen !== speechGen) return;
   await lib.stop();
+  if (gen !== speechGen) return;
   // Listening leaves the session in playAndRecord/"measurement", which plays speech very quietly. Switch to playback.
   try {
     recognition()?.ExpoSpeechRecognitionModule.setCategoryIOS({ category: 'playback', categoryOptions: ['duckOthers'], mode: 'spokenAudio' });
@@ -76,7 +83,10 @@ export async function speak(sentences: string[], opts: { onStart?: () => void; o
   }
   opts.onStart?.();
   for (let i = 0; i < sentences.length; i++) {
+    if (gen !== speechGen) return;
+    let end: ((done: boolean) => void) | null = null;
     const done = await new Promise<boolean>((resolve) => {
+      endSentence = end = resolve;
       lib.speak(sentences[i], {
         voice: voiceId,
         rate: 0.98,
@@ -86,6 +96,7 @@ export async function speak(sentences: string[], opts: { onStart?: () => void; o
         onError: () => resolve(false),
       });
     });
+    if (endSentence === end) endSentence = null;
     if (!done) return; // stopped (barge-in, the student started writing) or failed
   }
 }
@@ -94,7 +105,29 @@ export function stopSpeaking() {
   void speech()?.stop();
 }
 
+/**
+ * Stop everything (independent boundary, leaving the screen): current speech, the sentences queued after it, speech
+ * still waiting to start, and listening. Safe to call when nothing is running. Callers must also drop replies still
+ * being fetched (see src/learning/gate.ts) and end any conversation loop themselves.
+ */
+export function stopAllVoice() {
+  speechGen++;
+  endSentence?.(false);
+  endSentence = null;
+  void speech()?.stop();
+  activeListen?.();
+  activeListen = null;
+  try {
+    recognition()?.ExpoSpeechRecognitionModule.abort();
+  } catch (e) {
+    console.warn('could not abort listening', e);
+  }
+}
+
 // ---------------------------------------------------------------- listening
+
+/** removes the current listen()'s event listeners, so a stopAllVoice() leaves no callback behind */
+let activeListen: (() => void) | null = null;
 
 export type Listening = {
   /** stop listening; resolves with the final transcript ("" if nothing was heard) */
@@ -116,8 +149,10 @@ export async function listen(
   const lib = recognition();
   if (!lib) return null;
   const M = lib.ExpoSpeechRecognitionModule;
+  const gen = speechGen;
   const perm = await M.requestPermissionsAsync();
   if (!perm.granted) throw new Error('Microphone or speech recognition is not allowed. Turn it on in Settings › Penquire.');
+  if (gen !== speechGen) return null; // stopAllVoice() while asking for permission: do not start
 
   let latest = '';
   let settle: ((t: string) => void) | null = null;
@@ -129,7 +164,11 @@ export async function listen(
     M.addListener('end', () => (settle ? settle(latest) : onEnded?.())),
     M.addListener('error', () => (settle ? settle(latest) : onEnded?.())),
   ];
-  const cleanup = () => subs.forEach((s) => s.remove());
+  const cleanup = () => {
+    subs.forEach((s) => s.remove());
+    if (activeListen === cleanup) activeListen = null;
+  };
+  activeListen = cleanup;
 
   M.start({
     lang: 'en-US',
