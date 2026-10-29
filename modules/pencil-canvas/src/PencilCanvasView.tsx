@@ -88,10 +88,16 @@ export const nativeHasNewFunctions = nativeModuleInfo.viewFunctions.includes('ge
 
 const NativeView: React.ComponentType<NativeProps> | null = nativeCanvasAvailable ? requireNativeView('PencilCanvas') : null;
 
-/** apiVersion >= 7 only: an older binary never receives props it does not know. Unset values keep the native defaults. */
+/**
+ * Contacts at least this wide (points) count as a palm. The native default (32) also caught thumbs, so a same-hand pinch
+ * (thumb + finger) often failed on device (October 29, 2026); a palm is much wider than a thumb.
+ */
+export const DEFAULT_PALM_RADIUS = 48;
+
+/** apiVersion >= 7 only: an older binary never receives props it does not know. Unset penPauseMs keeps the native default. */
 function palmProps(palmRejectRadius?: number, penPauseMs?: number): Pick<PencilCanvasProps, 'palmRejectRadius' | 'penPauseMs'> {
   return {
-    ...(palmRejectRadius != null ? { palmRejectRadius } : {}),
+    palmRejectRadius: palmRejectRadius ?? DEFAULT_PALM_RADIUS,
     ...(penPauseMs != null ? { penPauseMs } : {}),
   };
 }

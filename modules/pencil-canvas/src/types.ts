@@ -77,7 +77,7 @@ export type PencilCanvasProps = {
   onPencilSqueeze?: (phase: 'began' | 'ended' | 'cancelled') => void;
   /** apiVersion >= 5: palm protection, one finger or palm never pans (pan is also paused while the Pencil draws) */
   twoFingerScroll?: boolean;
-  /** apiVersion >= 7: contacts at least this wide (points) count as a palm and never pan; 0 = no size check. Native default 32. */
+  /** apiVersion >= 7: contacts at least this wide (points) count as a palm and never pan; 0 = no size check. Default 48 (DEFAULT_PALM_RADIUS). */
   palmRejectRadius?: number;
   /** apiVersion >= 7: after the Pencil lifts, fingers cannot pan for this long (ms). Native default 350. */
   penPauseMs?: number;
