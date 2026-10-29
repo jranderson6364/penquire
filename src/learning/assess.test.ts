@@ -39,6 +39,28 @@ test('sides written the other way round still count as the key step', () => {
   assert.equal(a.result, 'pass', a.reasons.join(' | '));
 });
 
+test('a substitution check after the answer still passes, wherever the explanation is', () => {
+  assert.equal(run(check([...correct, line('L6', '3(2·5 + 1) = 33')])).result, 'pass');
+  const reordered = [...correct.slice(0, 4), line('L5', EXPLAIN), line('L6', '3(2 * 5 + 1) = 3 * 11 = 33')];
+  assert.equal(run(check(reordered)).result, 'pass');
+  // a wrong check the model marked incorrect still fails
+  assert.equal(run(check([...correct, line('L6', '3 * 11 = 34', { verdict: 'incorrect' })])).result, 'needs_practice');
+});
+
+test('several equations on one line count', () => {
+  for (const lines of [
+    [line('L1', '3(2y + 1) = 33'), line('L2', '6y + 3 = 33'), line('L3', '6y = 30 so y = 5'), line('L4', EXPLAIN)],
+    [line('L1', '6y + 3 = 33 → 6y = 30'), line('L2', 'y = 5.'), line('L3', EXPLAIN)],
+    [line('L1', '3(2y + 1) = 6y + 3 = 33'), line('L2', '6y = 30, y = 5'), line('L3', EXPLAIN)],
+  ]) {
+    const a = run(check(lines));
+    assert.equal(a.result, 'pass', `${lines.map((l) => l.reading).join(' / ')}: ${a.reasons.join(' | ')}`);
+  }
+  // a bogus equation hidden in a combined line is still caught
+  const a = run(check([line('L1', '3(2y + 1) = 33'), line('L2', '6y + 3 = 33 so 6y = 31'), line('L3', 'y = 5'), line('L4', EXPLAIN)]));
+  assert.equal(a.result, 'needs_practice');
+});
+
 test('the distribution error needs practice', () => {
   const a = run(check([
     line('L1', '3(2y + 1) = 33'),
