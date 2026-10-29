@@ -66,7 +66,7 @@ Current JSON DB stores assignments/page files and latest checks. Add optional co
 
 Preserve initial, repair and submitted independent snapshots separately. Latest-check files can be overwritten, so a reference to “latest” is not immutable evidence.
 
-Issue disappearance means the old flag is absent. A withdrawal on unchanged ink is a tutor correction. Neither implies independent skill. Legacy UNAIDED_MAX=1 and disclosure wording need replacement in the pivot UI/log; do not backfill old episodes as independent passes.
+Issue disappearance means the old flag is absent. A withdrawal on unchanged ink is a tutor correction. Neither implies independent skill. Issue outcomes are bucketed by `resolvedAfter(level)` (marks only, pointer, explanation, example, step, unrecorded); none is an independent pass. Do not backfill old episodes as independent passes.
 
 Record actual assistance across channels; selected level alone is not actual exposure. Unknown remains unknown. Do not assert the student authored everything solely because the event log has no hint.
 

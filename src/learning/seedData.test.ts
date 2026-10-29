@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEMO_ASSIGNMENT_ID, buildDemoAssignment, demoContent, ensureDemoIn, type DemoStore } from './seedData.ts';
-import { DEMO_PACK, learnerText } from './demoPack.ts';
+import { DEMO_PACK, DEMO_TASK_IDS, learnerText } from './demoPack.ts';
 import type { Episode } from './types';
 import type { Assignment } from '../store/types';
 
@@ -35,6 +35,10 @@ test('ensureDemo creates one assignment and one episode, and is idempotent', () 
   assert.equal(ep.rehearsal, false);
   assert.equal(ep.attempts[ep.initialAttemptId!].pageId, s.assignments[0].pageIds[0]);
   assert.equal(ep.attempts[ep.initialAttemptId!].kind, 'initial');
+  assert.equal(ep.attempts[ep.initialAttemptId!].taskId, DEMO_TASK_IDS.recovery);
+  assert.equal(ep.packVersion, DEMO_PACK.version);
+  assert.equal(ep.skillId, DEMO_PACK.skillId);
+  assert.deepEqual(ep.policy, DEMO_PACK.policy);
 });
 
 test('ensureDemo resumes an existing demo episode and leaves other assignments alone', () => {

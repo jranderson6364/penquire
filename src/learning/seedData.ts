@@ -1,20 +1,12 @@
 /**
- * Pure part of the demo seed (seed.ts wires it to db.ts). The store and pack are passed in so this loads under node
- * and does not depend on T02/T04 being merged.
+ * Pure part of the demo seed (seed.ts wires it to db.ts). The store and pack are passed in so this loads under node.
  */
 import type { Assignment } from '../store/types';
 import type { PageBlock } from '../blocks';
+import { startEpisode } from './session.ts';
 import type { DemoPack, Episode, EpisodePolicy } from './types';
 
 export const DEMO_ASSIGNMENT_ID = 'demo-algebra-distribution-v1';
-
-// TODO(T04 merge): these fallbacks match docs/12 and tasks/T04 and are used only while DEMO_PACK is still the stub.
-const FALLBACK_RECOVERY = {
-  taskId: 'recovery',
-  prompt: 'Solve 2(3x − 4) = 10. Show enough working to explain the distribution.',
-};
-const FALLBACK_PACK = { version: 'algebra-distribution-v1', skillId: 'algebra-distribution' };
-const DEMO_POLICY: EpisodePolicy = { maxLevel: 3, allowExplain: true, allowExample: true };
 
 export const DEMO_POLICY_TEXT =
   'Original demo practice (not course work). Checking your work, general explanations, and worked examples on a different task are allowed.';
@@ -23,10 +15,10 @@ const PART = '1';
 
 export type DemoContent = { taskId: string; prompt: string; version: string; skillId: string; policy: EpisodePolicy };
 
-/** The recovery task from the pack when it has one; otherwise the hardcoded fallback. Only the learner prompt, never the key. */
+/** The pack's recovery task. Only the learner prompt, never the key. */
 export function demoContent(pack: DemoPack, learnerText: (taskId: string) => string): DemoContent {
   const rec = pack.tasks.find((t) => t.role === 'recovery');
-  if (!rec) return { ...FALLBACK_RECOVERY, ...FALLBACK_PACK, policy: DEMO_POLICY };
+  if (!rec) throw new Error(`demo pack ${pack.version} has no recovery task`);
   return { taskId: rec.id, prompt: learnerText(rec.id), version: pack.version, skillId: pack.skillId, policy: pack.policy };
 }
 
@@ -52,31 +44,12 @@ export function buildDemoAssignment(c: DemoContent, pageId: string, now: number)
   };
 }
 
-/**
- * TODO(T02 merge): replace with startEpisode(...) from session.ts. Built inline to match the Episode type.
- * rehearsal is false: the founder writes real work and the real provider checks it; 'rehearsal' means scripted responses.
- */
-export function buildDemoEpisode(c: DemoContent, a: { id: string; attemptId: string; pageId: string; now: number }): Episode {
-  return {
-    id: a.id,
-    assignmentId: DEMO_ASSIGNMENT_ID,
-    part: PART,
-    skillId: c.skillId,
-    packVersion: c.version,
-    policy: c.policy,
-    phase: 'attempt',
-    attempts: {
-      [a.attemptId]: {
-        id: a.attemptId, episodeId: a.id, kind: 'initial', taskId: c.taskId, pageId: a.pageId,
-        startedAt: a.now, assistanceIds: [], allowedResources: [],
-      },
-    },
-    initialAttemptId: a.attemptId,
-    assistance: [],
-    rehearsal: false,
-    createdAt: a.now,
-    updatedAt: a.now,
-  };
+/** rehearsal is false: the founder writes real work and the real provider checks it; 'rehearsal' means scripted responses. */
+export function buildDemoEpisode(c: DemoContent, a: { id: string; pageId: string; now: number }): Episode {
+  return startEpisode({
+    id: a.id, assignmentId: DEMO_ASSIGNMENT_ID, part: PART, skillId: c.skillId, packVersion: c.version, policy: c.policy,
+    taskId: c.taskId, pageId: a.pageId, rehearsal: false, now: a.now,
+  });
 }
 
 export type DemoStore = {
@@ -101,7 +74,7 @@ export function ensureDemoIn(
   }
   const existing = store.getEpisodes().filter((e) => e.assignmentId === DEMO_ASSIGNMENT_ID).sort((x, y) => y.createdAt - x.createdAt)[0];
   if (existing) return { assignmentId: a.id, episodeId: existing.id };
-  const ep = makeEpisode(c, { id: newId('e_'), attemptId: newId('t_'), pageId: a.pageIds[0], now });
+  const ep = makeEpisode(c, { id: newId('e_'), pageId: a.pageIds[0], now });
   store.saveEpisode(ep);
   return { assignmentId: a.id, episodeId: ep.id };
 }
