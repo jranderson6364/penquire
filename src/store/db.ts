@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import type { Assignment, DB, Settings } from './types';
 import { appendRecord, makeRecord, type UsageRecord } from './usageRecords';
 import type { Usage } from '../ai/types';
+import type { Episode } from '../learning/types';
 
 /**
  * Tiny local JSON store. Everything stays on the device for v0.
@@ -129,4 +130,27 @@ export function recordUsage(e: { kind: UsageRecord['kind']; model: string; usage
   const db = load();
   db.usage = appendRecord(db.usage ?? [], makeRecord(e.kind, e.model, e.usage));
   persist();
+}
+
+// Learning episodes (src/learning/types.ts). Stubs until T03 adds episode storage.
+
+export function getEpisodes(): Episode[] {
+  throw new Error('not implemented: getEpisodes');
+}
+
+export function getEpisode(id: string): Episode | undefined {
+  throw new Error('not implemented: getEpisode');
+}
+
+export function saveEpisode(ep: Episode): void {
+  throw new Error('not implemented: saveEpisode');
+}
+
+export function updateEpisode(id: string, f: (e: Episode) => Episode): Episode | undefined {
+  throw new Error('not implemented: updateEpisode');
+}
+
+/** demo assignment + its episodes/pages/snapshots only */
+export function deleteDemoData(): void {
+  throw new Error('not implemented: deleteDemoData');
 }
