@@ -4,14 +4,18 @@ import type { Assignment, DB, Settings } from './types';
 import { appendRecord, makeRecord, type UsageRecord } from './usageRecords';
 import type { Usage } from '../ai/types';
 import type { Episode } from '../learning/types';
+import { DEMO_ASSIGNMENT_ID } from '../learning/seedData';
+import { demoScope, normalizeDb, upsertEpisode } from './episodes';
 
 /**
  * Tiny local JSON store. Everything stays on the device for v0.
  *  penquire/db.json          assignments + settings
  *  penquire/pages/<id>.pk    PKDrawing data (base64)
+ *  penquire/snapshots/<id>.pk  immutable copies of page files (src/learning/snapshot.ts), never overwritten
  */
 const root = new Directory(Paths.document, 'penquire');
 const pagesDir = new Directory(root, 'pages');
+const snapshotsDir = new Directory(root, 'snapshots');
 const dbFile = new File(root, 'db.json');
 
 const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +32,7 @@ const listeners = new Set<() => void>();
 function ensureDirs() {
   if (!root.exists) root.create({ intermediates: true, idempotent: true });
   if (!pagesDir.exists) pagesDir.create({ intermediates: true, idempotent: true });
+  if (!snapshotsDir.exists) snapshotsDir.create({ intermediates: true, idempotent: true });
 }
 
 export function newId(prefix = ''): string {
@@ -40,13 +45,13 @@ export function load(): DB {
   if (dbFile.exists) {
     try {
       const parsed = JSON.parse(dbFile.textSync()) as DB;
-      cache = { ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
+      cache = { ...normalizeDb(parsed), settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
       return cache;
     } catch (e) {
       console.warn('db.json unreadable, starting fresh', e);
     }
   }
-  cache = { version: 1, assignments: [], settings: DEFAULT_SETTINGS };
+  cache = { version: 1, assignments: [], settings: DEFAULT_SETTINGS, episodes: [] };
   return cache;
 }
 
@@ -132,25 +137,62 @@ export function recordUsage(e: { kind: UsageRecord['kind']; model: string; usage
   persist();
 }
 
-// Learning episodes (src/learning/types.ts). Stubs until T03 adds episode storage.
+// Learning episodes (src/learning/types.ts). Pure helpers in ./episodes.ts.
 
 export function getEpisodes(): Episode[] {
-  throw new Error('not implemented: getEpisodes');
+  return [...(load().episodes ?? [])];
 }
 
 export function getEpisode(id: string): Episode | undefined {
-  throw new Error('not implemented: getEpisode');
+  return (load().episodes ?? []).find((e) => e.id === id);
 }
 
+/** Stored as given: episode transitions are pure and set their own updatedAt. */
 export function saveEpisode(ep: Episode): void {
-  throw new Error('not implemented: saveEpisode');
+  const db = load();
+  db.episodes = upsertEpisode(db.episodes ?? [], ep);
+  persist();
 }
 
 export function updateEpisode(id: string, f: (e: Episode) => Episode): Episode | undefined {
-  throw new Error('not implemented: updateEpisode');
+  const ep = getEpisode(id);
+  if (!ep) return undefined;
+  const next = f(ep);
+  saveEpisode(next);
+  return next;
 }
 
-/** demo assignment + its episodes/pages/snapshots only */
+function deleteFile(dir: Directory, name: string) {
+  const f = new File(dir, name);
+  if (f.exists) f.delete();
+}
+
+/** demo assignment + its episodes/pages/snapshots only; settings, usage and other assignments are untouched */
 export function deleteDemoData(): void {
-  throw new Error('not implemented: deleteDemoData');
+  const { next, pageIds, snapshotIds } = demoScope(load(), DEMO_ASSIGNMENT_ID);
+  pageIds.forEach((pid) => deleteFile(pagesDir, `${pid}.pk`));
+  snapshotIds.forEach((id) => deleteFile(snapshotsDir, `${id}.pk`));
+  cache = next;
+  persist();
+}
+
+// Snapshot files (src/learning/snapshot.ts). Written once, never overwritten.
+
+export function snapshotFileExists(id: string): boolean {
+  ensureDirs();
+  return new File(snapshotsDir, `${id}.pk`).exists;
+}
+
+export function writeSnapshotFile(id: string, base64: string) {
+  ensureDirs();
+  const f = new File(snapshotsDir, `${id}.pk`);
+  if (f.exists) throw new Error(`snapshot ${id} already exists`);
+  f.create({ intermediates: true });
+  f.write(base64);
+}
+
+export function readSnapshotFile(id: string): string {
+  ensureDirs();
+  const f = new File(snapshotsDir, `${id}.pk`);
+  return f.exists ? f.textSync() : '';
 }
