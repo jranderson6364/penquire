@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import PencilKit
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 // MARK: - Paper background (grid / lined / blank), drawn in page space and clipped to what is visible.
 //
@@ -123,6 +124,98 @@ private func inkType(_ name: String?) -> PKInk.InkType {
   return .pen
 }
 
+// MARK: - Palm watcher (apiVersion >= 7)
+
+/// Watches every touch on the canvas and never recognizes, so it blocks nothing (drawing, scrolling and zooming keep
+/// their own recognizers). The canvas uses what it sees to decide whether fingers may pan: a two-touch minimum is not
+/// enough, because a resting palm usually lands as several touches.
+final class PalmWatcher: UIGestureRecognizer, UIGestureRecognizerDelegate {
+  /// a touch began, moved or ended; the canvas re-evaluates whether pan and pinch are allowed
+  var onChange: (@MainActor () -> Void)?
+  /// decides, when a finger touch lands, whether it must never pan (e.g. it arrived while the Pencil was writing)
+  var isSuspectOnLanding: (@MainActor () -> Bool)?
+  /// a contact at least this wide (points, majorRadius) is a palm, not a fingertip. 0 = never by size.
+  var palmRadius: CGFloat = 32
+
+  /// direct (finger/palm) touches currently down that must not pan the page
+  private(set) var suspect = Set<ObjectIdentifier>()
+  private var down = Set<ObjectIdentifier>()
+  private var pencils = Set<ObjectIdentifier>()
+  /// the Pencil is touching the glass (known at touch-down, before PencilKit reports that a stroke began)
+  var pencilTouching: Bool { !pencils.isEmpty }
+  private(set) var pencilLiftedAt: CFTimeInterval = 0
+
+  override init(target: Any?, action: Selector?) {
+    super.init(target: target, action: action)
+    cancelsTouchesInView = false
+    delaysTouchesBegan = false
+    delaysTouchesEnded = false
+    delegate = self
+  }
+
+  var hasSuspect: Bool { !suspect.isEmpty }
+
+  private func isPalm(_ t: UITouch) -> Bool {
+    palmRadius > 0 && t.majorRadius - t.majorRadiusTolerance >= palmRadius
+  }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+    for t in touches where t.type == .pencil {
+      pencils.insert(ObjectIdentifier(t))
+      down.insert(ObjectIdentifier(t))
+    }
+    let landingSuspect = isSuspectOnLanding?() ?? false
+    for t in touches where t.type == .direct {
+      let id = ObjectIdentifier(t)
+      down.insert(id)
+      if landingSuspect || isPalm(t) { suspect.insert(id) }
+    }
+    onChange?()
+  }
+
+  override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+    // A palm often lands as a small contact and spreads: check the size on every move, not just on landing.
+    var changed = false
+    for t in touches where t.type == .direct && isPalm(t) {
+      if suspect.insert(ObjectIdentifier(t)).inserted { changed = true }
+    }
+    if changed { onChange?() }
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+    lift(touches)
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+    lift(touches)
+  }
+
+  private func lift(_ touches: Set<UITouch>) {
+    for t in touches {
+      let id = ObjectIdentifier(t)
+      down.remove(id)
+      suspect.remove(id)
+      if pencils.remove(id) != nil { pencilLiftedAt = CACurrentMediaTime() }
+    }
+    // Only fail once nothing is down: a failed recognizer gets no more touches for the rest of the sequence.
+    if down.isEmpty && state == .possible { state = .failed }
+    onChange?()
+  }
+
+  override func reset() {
+    super.reset()
+    if !pencils.isEmpty { pencilLiftedAt = CACurrentMediaTime() }
+    down.removeAll()
+    suspect.removeAll()
+    pencils.removeAll()
+    onChange?()
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    true
+  }
+}
+
 // MARK: - Canvas view
 
 /// Hosts the React overlay layer (question blocks, tutor marks, verdict marks) above the ink. It takes no touches
@@ -163,6 +256,12 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   private var lastViewportSend: CFTimeInterval = 0
   private var settleTask: Task<Void, Never>?
   private var resumeGestures: Task<Void, Never>?
+  /// Palm protection (apiVersion >= 7): see updateGestureGate.
+  private let palmWatcher = PalmWatcher(target: nil, action: nil)
+  private var pencilDown = false
+  private var pencilLiftedAt: CFTimeInterval = 0
+  /// after the Pencil lifts, how long fingers stay unable to pan (the hand is usually still resting). Seconds.
+  private var penPause: CFTimeInterval = 0.35
   /// React children (the overlay layer) are mounted here, and moved with the page natively in the same frame as the ink.
   private let overlayHost = OverlayHostView()
   /// The zoom the overlay was laid out at (JS lays it out in page * overlayScale units; native scales by zoom / overlayScale).
@@ -208,6 +307,10 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     let pencil = UIPencilInteraction()
     pencil.delegate = self
     addInteraction(pencil)
+
+    palmWatcher.onChange = { [weak self] in self?.updateGestureGate() }
+    palmWatcher.isSuspectOnLanding = { [weak self] in self?.withinPenWindow() ?? false }
+    canvas.addGestureRecognizer(palmWatcher)
   }
 
   // MARK: Overlay layer (apiVersion >= 6)
@@ -475,20 +578,52 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       _ = canvas.becomeFirstResponder()
     }
     // Palm protection: while the Pencil is on the glass, a resting hand must not pan or zoom the page.
-    resumeGestures?.cancel()
-    canvas.panGestureRecognizer.isEnabled = false
-    canvas.pinchGestureRecognizer?.isEnabled = false
+    pencilDown = true
+    updateGestureGate()
   }
 
   func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
     // Give the hand a moment to lift before fingers scroll again.
+    pencilDown = false
+    pencilLiftedAt = CACurrentMediaTime()
+    updateGestureGate()
+  }
+
+  private func withinPenWindow() -> Bool {
+    let lifted = max(pencilLiftedAt, palmWatcher.pencilLiftedAt)
+    return pencilDown || palmWatcher.pencilTouching || CACurrentMediaTime() - lifted < penPause
+  }
+
+  /// One rule for whether fingers may pan and pinch: not while the Pencil writes or just after it lifts, and not while
+  /// any palm-sized touch, or any touch that landed during writing, is still down. Disabling a recognizer cancels a
+  /// pan already in progress, so a palm that spreads mid-gesture stops the page.
+  private func updateGestureGate() {
+    let blocked = withinPenWindow() || palmWatcher.hasSuspect
+    if canvas.panGestureRecognizer.isEnabled == blocked { canvas.panGestureRecognizer.isEnabled = !blocked }
+    if let pinch = canvas.pinchGestureRecognizer, pinch.isEnabled == blocked { pinch.isEnabled = !blocked }
     resumeGestures?.cancel()
-    resumeGestures = Task { @MainActor [weak self] in
-      try? await Task.sleep(nanoseconds: 350_000_000)
-      guard let self = self, !Task.isCancelled else { return }
-      self.canvas.panGestureRecognizer.isEnabled = true
-      self.canvas.pinchGestureRecognizer?.isEnabled = true
+    resumeGestures = nil
+    if blocked && !pencilDown && !palmWatcher.pencilTouching && !palmWatcher.hasSuspect {
+      // only the post-lift window is holding the gate: look again when it runs out
+      let lifted = max(pencilLiftedAt, palmWatcher.pencilLiftedAt)
+      let wait = max(0, penPause - (CACurrentMediaTime() - lifted))
+      resumeGestures = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000) + 5_000_000)
+        guard let self = self, !Task.isCancelled else { return }
+        self.updateGestureGate()
+      }
     }
+  }
+
+  /// apiVersion >= 7: contacts at least this wide (points) count as a palm and stop panning. 0 turns size checks off.
+  func setPalmRejectRadius(_ r: Double) {
+    palmWatcher.palmRadius = CGFloat(max(0, r))
+  }
+
+  /// apiVersion >= 7: how long after the Pencil lifts fingers still cannot pan (ms, clamped to 0...2000).
+  func setPenPauseMs(_ ms: Double) {
+    penPause = min(2, max(0, ms / 1000))
+    updateGestureGate()
   }
 
   /// Palm protection: with two-finger scrolling, one resting palm or finger never pans the page (pinch is two fingers
