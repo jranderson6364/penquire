@@ -30,8 +30,16 @@ export type OpenIssue = { key: string; part?: string; reading: string; obstacle?
 
 export type Resolved = { key: string; record: IssueRecord };
 
-/** Help at or below this level counts as "on your own": marks and a pointer to where to look. */
-export const UNAIDED_MAX: HelpLevel = 1;
+/**
+ * The most help that was in force when an issue stopped being flagged, as a neutral label. This is a description of
+ * the help, not a learning claim: a repair after a pointer (or after marks alone) is still not evidence of independent
+ * skill. Older events without a level stay 'unrecorded' rather than being guessed.
+ */
+export type ResolvedAfter = 'marks only' | 'pointer' | 'explanation' | 'example' | 'step' | 'unrecorded';
+
+const AFTER: Record<HelpLevel, ResolvedAfter> = { 0: 'marks only', 1: 'pointer', 2: 'explanation', 3: 'example', 4: 'step' };
+
+export const resolvedAfter = (level: HelpLevel | undefined): ResolvedAfter => (level === undefined ? 'unrecorded' : AFTER[level] ?? 'unrecorded');
 
 const scoped = (page: string, key: string) => `${page}#${key}`;
 
@@ -96,5 +104,3 @@ export function getIssue(issues: Issues | undefined, page: string, key: string):
 export function isRepeat(rec: IssueRecord | undefined): boolean {
   return !!rec && rec.checks >= 2;
 }
-
-export const resolvedUnaided = (level: HelpLevel | undefined) => (level ?? 0) <= UNAIDED_MAX;

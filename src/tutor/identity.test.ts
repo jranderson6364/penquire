@@ -59,9 +59,10 @@ test('disclosure counts withdrawn flags apart from issues the student resolved',
       { t: 2, type: 'withdrawn', level: 1 },
     ], issues: {},
   } as never;
-  assert.equal(issueOutcomes(a).unaided, 1);
+  assert.equal(issueOutcomes(a).after.pointer, 1);
+  assert.equal(issueOutcomes(a).resolved, 1);
   assert.equal(issueOutcomes(a).withdrawn, 1);
   const s = disclosureSummary(a);
-  assert.match(s, /Of 1 issue the tutor flagged, 1 was resolved on my own/);
-  assert.match(s, /withdrew 1 flag on work I had not changed/);
+  assert.match(s, /The tutor flagged 1 issue\. After marks only: 0\. After a pointer: 1\./);
+  assert.match(s, /Withdrawn by the tutor \(not counted as student fixes\): 1\./);
 });
