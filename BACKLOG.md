@@ -1,119 +1,106 @@
-# Backlog
+# Pivot backlog: demo before November 3
 
-Ordered by priority. Each item lists acceptance criteria. "🔨 native" = needs an EAS rebuild.
+Updated October 29, 2026. Ready on **November 2, Pacific time**. All items below are planned; this documentation rewrite changes no application code.
 
-## Now: make v0 trustworthy in daily use
+Read [demo spec](../docs/12-demo-spec.md) before implementing. The user requested documentation here; wait for an implementation request before changing app source.
 
-- [x] **Accuracy feedback loop.** Add 👍/👎 and "this mark is wrong" on each mark popover. Store the page image, the line verdicts and the correction under `Documents/penquire/evals/`. Add a Settings button to export them (share sheet, zip or JSON).
-  - *Done when:* corrections persist across restarts and export to Files.
-- [x] **Cost/usage meter.** (done: per-call records in db.json, prices in src/ai/pricing.ts, month total in Settings; prices need re-verifying) Record token usage per check and reply (already returned in `CheckResult.usage`). Show this month's estimated cost in Settings, with per-model price constants in one file.
-- [x] **Check only the active part.** (done: toolbar PartPicker -> focusPart; plus a no-API-key banner and alert) Add a toolbar picker for the current part (from `assignment.problems`) and pass `focusPart`. Feedback emphasizes that part while still flagging missing ones.
-- [ ] **Faster checks.** Shrink the image (JPEG option in `exportImage` 🔨 native, or crop to the written area). Target median under 6 s. Show elapsed time in the feedback footer.
-- [x] **Robustness** (done: retry with backoff on 429/5xx/network, Retry-After honored, 180 s timeout, refusal/max_tokens/empty handled, sanitized output). Still open: a clear "no API key" state in the workspace.
-- [ ] (old text) **Robustness.** Retry once on 429/5xx with backoff. Handle a missing `report_check` gracefully. Show a clear "no API key" state in the workspace.
+## Critical path
 
-## Experience, tutor, voice (../docs/10-experience-tutor-voice.md, Oct 14 2026)
+### D0 — Confirm the device baseline
+- [ ] Run current typecheck/tests and record unrelated failures.
+- [ ] Open installed dev client on iPad; write/save/reopen and make one real configured provider call.
+- [ ] Record installed native API/capabilities; source is API 6.
+- [ ] Confirm whether the planned workflow can stay JS-only; prefer compatibility fallback.
+- Acceptance: existing app works enough to build on; any true blocker is named.
+- Date: Oct 29. Dependencies: none.
 
-- [x] One page layer for all overlays (no per-frame re-layout, nothing hides mid-gesture); SVG pressure-shaped tutor strokes with a pen-path reveal.
-- [x] Light/dark mode (dynamic tokens, Codex-like neutral palette, Appearance setting); paper stays white with fixed PAPER colors.
-- [x] Question menu: anchored popover, problems as rows, parts as chips.
-- [x] Native build 4: exportPDF, SF Symbols, speech in/out, Pencil Pro squeeze, per-frame viewport events, surround color.
-- [x] Export PDF (share button), SF Symbols icons, voice v1 (hold Check / squeeze to talk; spoken reply; writing stops it; "this" = last-written line).
-- [ ] Verify on device: layer smoothness at 120 Hz (if it trails, move the transform to the UI thread with Reanimated), write-on reveal, PDF is Letter with blocks, speech volume after listening, Match iPad appearance.
-- [x] Floating Tutor button removed: panel toggle beside Check with a count of lines that need a look. (Full orb with status ring still open.)
-- [ ] Streaming replies and "read as" first.
-- [x] Check as you write (Settings, opt-in, quiet, 20/hour cap). Cost display deliberately not added; dev log [penquire:cost] per call.
-- [x] Build 5: palm protection (two-finger scroll, pan paused while the Pencil draws), tool changes keep scroll, scrollToPageRect; stamp placed questions; PAGE_TYPE sizes; themed inputs; chat phrase -> scroll + redraw + haptic.
-- [ ] Verify the tool-change jump is gone; if not, read [penquire:jump] in the Metro logs.
-- [ ] Hands-free conversation: continuous listening, silence endpointing, barge-in by voice.
-- [ ] Evals for the new prompts: spoken-reply style and the "pointing at" hint.
-- [ ] Top bar: pages move into the title menu; auto-dim chrome while the Pencil is down.
+### D1 — Seed one original reviewed skill pack
+- [ ] Implement deterministic demo entry/reset with the tasks/policy in docs/12.
+- [ ] Keep independent/future answer keys out of learner content before submission.
+- [ ] Use static authored context; no live PDF parse or variant generation dependency.
+- [ ] Reset only demo records; preserve ordinary assignments.
+- Acceptance: same pack opens from a clean start and resume; caps are explicit.
+- Date: Oct 29–30. Dependencies: D0. Suggested: new src/learning/demoPack.ts.
 
-## Reliability + experience (../docs/09-reliability-and-experience.md, Oct 6 2026)
+### D2 — Persist recovery episode and immutable attempt evidence
+- [ ] Add compatible optional episode/attempt/assistance/outcome fields and pure transitions.
+- [ ] Preserve initial attempt, supported repair and independent submission separately.
+- [ ] Resume across relaunch; default old DBs safely.
+- [ ] Keep issue tracking distinct from learning evidence.
+- Acceptance: state survives navigation/restart; old work remains; no disappearance-to-mastery inference.
+- Date: Oct 30. Dependencies: D1. Suggested: src/learning/types.ts, session.ts; store/types.ts and db.ts.
 
-Phase 0 (JS-only), branch `reliability-phase0`:
-- [x] Guards re-run on the merged page after carry-over (`src/check/finalize.ts`): new line after a settled line is step-checked; leak guard sees settled readings.
-- [x] Issue/ladder identity from the ink signature, not the reading (`issueKey(part, reading, sig)`), with migration of stored keys. No more false "resolved on your own".
-- [x] Check prompt shows each setup once (`problemsText` → `formatGroups`), with an explicit part-label list; falls back to the flat list on mismatch.
-- [x] `read_confidence` + `uncertain` per line; `applyReadingGuard` turns low-confidence graded lines into `?` with a confirm prompt.
-- [x] Units v1 (`src/verify/units.ts`): SI comparison, dropped units not judged, dimension mismatch caught; readings now carry units in `\mathrm{}`. Sig-fig rounding for trailing-zero integers.
-- [x] Eval hygiene: `run_synth` splits model vs guard flags and prints Wilson 95% CIs.
-- [x] Mark popover → 3 actions + "Something's off" sheet; "Read as" evidence with uncertain characters; one Check button; inline notices instead of Alerts for check outcomes.
-- [x] Panel 4 tabs → 2 (Tutor stream: latest check card + conversation; Assignment: problems + AI-use log). Help-level chip stays in the panel header.
-- [x] Part title as the question menu ("3b · Problem 3 ▾"); Place part/setup behind ⋯; tap the question to expand; ruler toggle in the pen/highlighter options (shown in the tray only while on).
-- [ ] Check button shows its stage (reading → checking → n marks) once streaming exists.
-- [ ] Calibrate `read_confidence` on real handwriting (synthetic pages all read "high"; no signal there).
-- [x] Continuation lines that start with "=" are checked as a chain (`checkContinuation`); the link to the previous line only when both sides write units.
-- [ ] Bare units (`60 km/h` without `\mathrm`) are left unjudged; consider recognising a trailing unit token.
-- [x] Dispute: guard evidence goes to the tutor as an independent check; "disagreement alone is not evidence".
-- [ ] Wrongful-concession eval (model in the loop): disputes on truly wrong lines must not concede; disputes on misreads/valid alternatives must.
-- [x] A flag dropped on unchanged ink is logged as `withdrawn` (tutor reversal), not "resolved on your own"; disclosure and Log tab count it apart.
-- [x] "?" lines are answerable: "Yes, that's what I wrote" / corrected reading stored by ink signature (`src/check/confirmed.ts`) and passed to the next check.
+### D3 — Quiet work and direct useful help
+- [ ] Suppress automatic checking in pivot flow even with legacy autoCheck=true.
+- [ ] Offer pointer/explanation/example directly, mapped to permitted existing levels.
+- [ ] Show a focused finding, accept reading confirmation/dispute, preserve help-me-start.
+- [ ] Verify authored explanation/example through the real guards; scope any study example to its different task.
+- [ ] Record actual delivered text/mark/speech assistance or a bounded reference; unknown exposure stays unknown.
+- Acceptance: explicit help works, no forced weaker-rung traversal, restrictions remain.
+- Date: Oct 31. Dependencies: D2. Touchpoints: WorkspaceScreen; ai prompts/context; tutor ladder/revealed as needed.
 
-Phase 1: Build 3 started Oct 6 (apiVersion 3; CI Swift compile passed). Done in it: stroke points with masked ranges dropped, bottom-cropped export (checks use it), strokes saved with each check and carried into the eval export, Reanimated/svg/haptics installed. Not in it: stable stroke ids, timing beyond per-point ms. Original scope: stroke points with `maskedPathRanges` applied + timing + stable IDs, gutter-free export, Reanimated, react-native-svg, expo-haptics (+ the Build 2 items). Test Pencil latency with an svg overlay on device before considering Skia.
+### D4 — Verify actual supported repair and fix labels
+- [ ] Require changed/re-read work for verified repair; erasing a flag alone is insufficient.
+- [ ] Label marks/pointer/explanation/example repairs supported.
+- [ ] Remove “on your own”/authorship guarantees unsupported by the observed record.
+- [ ] Preserve tutor reversals separately.
+- Acceptance: revised work establishes repair; no independent-pass label yet.
+- Date: Oct 31. Dependencies: D3. Touchpoints: tutor/issues.ts; log.ts; progress/home/tutor presentation.
 
-Phase 2: replayable case format (strokes + clean image + per-stage outputs) and a Node `replay` runner; ~200 real gold lines in `../evals-private/`; fused vs split (blind transcription) A/B; Mathpix strokes second reader; animated AI ink (path reveal, pressure outline, single-stroke math, Manim-like timing); TutorTurn `{text, marks, speechCues}`. Tutor draws freely (founder decision): max 3 live marks per turn, older turns fade, one Clear.
+### D5 — Isolated fresh independent task
+- [ ] Allocate fresh task/page/attempt; hide previous assistance.
+- [ ] Suppress auto-checks, queued speech, old transcript/marks and stale streamed/provider responses.
+- [ ] No provider assessment until Submit; isolate task context from original problems/history/settled/lastCheck.
+- [ ] Freeze submitted work; check against reviewed task/rubric; handle wrong/ambiguous/alternative reasoning.
+- [ ] Help requires explicit exit; classify supported practice. Edits invalidate prior assessment.
+- [ ] Prevent duplicate submit and late-result crossover.
+- Acceptance: no instructional cues or wrong-task assessment; outcome follows actual submitted evidence.
+- Date: Nov 1. Dependencies: D2–D4. Suggested: learning/context.ts and small LearningFlow/independent surface.
 
-## Learning science (../docs/07-learning-science.md, Oct 2026)
+### D6 — Outcome and real future review record
+- [ ] Separate supported repair from fresh independent pass/needs practice/unassessable.
+- [ ] Persist due timestamp seven days after scheduling and display local date.
+- [ ] Delayed outcome remains empty; no mastery/retained badge.
+- [ ] Add minimum resume/history display; no dashboard project.
+- Acceptance: result and due date survive relaunch and are semantically honest.
+- Date: Nov 1. Dependencies: D5.
 
-- [x] Prompt rewrite (LIMITS vs HOW TO HELP), renamed help levels with caps unchanged, `obstacle` per line, `revealed` per check + `overLevel`, issue history with on-your-own vs with-help outcomes, repeat-issue nudge, Help me start, dispute a mark, disclosure derived from levels used.
-- [ ] **Dogfood the new prompt** on 3–5 real pages; rate marks; compare with the previous prompt on the same pages (`git show HEAD~1:src/ai/prompts.ts`). Watch for: vaguer slips, level-1 answers that name principles, empty `revealed`.
-- [ ] **Tutor-behavior eval cases** (model in the loop, under `../evals-private/`; committed fixtures use invented problems): over-withholding (allowed help asked for, or same error twice, and the tutor only asks a question), repeated-hint loops, correct answer + invalid reasoning (must not ✓), valid alternative method (must not ✗), wrong verdict challenged (must re-check and concede), repeated "I don't know", confident misconception, "ok fixed" with no page change, wrong figure description. Grade `revealed` against the reply text with a judge model. Targets: over-withholding < 5%, leak < 1%.
-- [ ] Use `obstacle` to pick the entry move in code (e.g. `prerequisite` at level < 2 → show "Remind me of the idea" on the mark).
-- [ ] P2: course-pack enrichment (`target_skill`, `prereqs`, typed errors, verifier-checked variants, pre-generated hints), Error notebook + spaced review (F16), Check yourself (F17), faded similar example.
+### D7 — Demo verification and rehearsal
+- [ ] Run typecheck/tests and targeted transition/guard cases.
+- [ ] Complete every docs/12 acceptance item on the actual iPad.
+- [ ] Rehearse live path three times; inspect snapshot persistence and reset.
+- [ ] Exercise wrong independent answer, misleading correct final answer, uncertainty, restricted policy and delayed prior response.
+- [ ] Check network/guard failure preserves work and never invents success.
+- [ ] Record a short actual working run; clearly label recording/fixture fallback.
+- [ ] Freeze features; record known limits and delivery mode in presenter notes.
+- Acceptance: working founder-operated demo ready Nov 2; no unsupported learning claim.
+- Date: Nov 2. Dependencies: D0–D6.
 
-## Research-driven (from ../research/*.md, Oct 2026; re-verify numbers before acting)
+## Tests worth writing during implementation
 
-Blockers before any tester build:
-- [ ] **Move the API key off the device** (backend proxy, below) and add an **AI consent screen naming Anthropic** (App Store guideline 5.1.2(i)), **in-app account deletion**, a privacy policy and a reviewer demo account.
-- [ ] **Fix `setDrawing` so a decode failure throws** instead of loading a blank drawing that the next autosave would persist 🔨 native.
-- [ ] **Verify the iPadOS 27 `UIRequiresFullScreen` claim** (re-read Apple TN3192). If true: fixed logical page size, with line boxes, marks and exports in page points rather than `canvas.bounds`; allow all four iPad orientations (else ITMS-90474).
+Pure state transitions/legacy loading; direct-choice permission clamp; independent context isolation and stale callback handling; assistance reclassification; post-submit invalidation; snapshot/due-date persistence; reset scope; reviewed-pack correct/wrong/uncertain assessments.
 
-Accuracy (the product's core risk is a false ✓):
-- [ ] **Per-line `transcription` + legibility in `report_check`**; show it to the student; a "Misread" rating forces `?`. Most grading errors are transcription errors (arXiv 2605.19043, not tested on Claude).
-- [ ] **Golden eval set** (20-50 cases from feedback exports, grow to ~200). Code graders: false-valid rate (hard gate at 0) and answer leakage; run on Windows, nightly via Batch. Log cache hit counts.
-- [x] **Algebra guard v1** (JS, on-device): parser + sampling equivalence + step relations, downgrade-only, wired into every check. Next: hint-ladder leak guard reusing `checkStep` (block any hint that is a valid next step from the student's last line), fixtures file of real derivations, node script replaying exported feedback through the guard, units/vector support, `\text` stripping.
-- [ ] **Verifier pass**: blind second read with a cheaper model, a SymPy check that can only downgrade a verdict, a refute-every-✓ pass. Needs the backend.
-- [x] **Answer-leak guard v1** (math-equivalence based, wired into check results) and **ladder state logic** (`src/tutor/ladder.ts`). Ladder UI ("More help" on a mark), persisted `ladder`, event logging and the chat-reply guard are done. Remaining: cross-family LLM judge + adversarial-student suite (backend phase).
-- [ ] **Answer-leak guards (remaining layers)**: CAS check on hint contents, cross-family judge, templated fallback hint, adversarial-student suite. Consider a one-tap hint ladder (Khanmigo evidence); product decision.
-- [ ] Add `strict: true` to `report_check` / `report_problems` (needs `additionalProperties: false` throughout).
-- [ ] Honor `maskedPathRanges` for erased strokes; add `pageId` and `revision` to canvas events.
+Use existing guard/parser tests. Add model/device checks only where actual behavior depends on them. Do not create tests merely duplicating static copy.
 
-Cost and speed:
-- [ ] Crop blank page, make `maxDimension` model-aware (cap 2576 px on 4.7+, 1568 px older), return a file URI instead of base64. About 3.9k image tokens per check today (estimate).
+## Cuts if late
 
-Tooling (no Mac):
-- [ ] **CLAUDE.md as single source**, imported from AGENTS.md (AGENTS.md currently says Expo Router, but the app uses a state router).
-- [ ] **Hooks (Node scripts)**: block edits to `ios/` and `android/`; print REBUILD NEEDED on native changes; Stop hook running typecheck and tests.
-- [ ] **Fix the macOS Swift compile job** (`.github/workflows/ios-compile.yml`, currently experimental): fails resolving package dependencies in ExpoModulesJSI's script phase; try `xcodebuild -resolvePackageDependencies` first or build only the PencilCanvas pod target. (Repo is public: github.com/jranderson6364/penquire; CI checks job passes.)
-- [x] **GitHub remote + CI**: typecheck, tests, `expo-doctor`; optional macOS job (`expo prebuild`, `pod install`, unsigned `xcodebuild`) to compile-check Swift. Free on public repos, so decide on prompt visibility first.
-- [ ] **Install `expo-updates` with a fingerprint `runtimeVersion` policy** 🔨 native (bundle with the next rebuild), then EAS Workflows so JS-only changes ship OTA. Do not publish updates to a shared channel until the proxy exists.
-- [ ] `eas-build-pre-install` hook running typecheck so a TS error never burns one of the ~15 monthly builds.
-- [ ] Specs: lightweight `specs/<feature>.md` with a "native? Y/N" field and named acceptance tests.
+Drop second subject, full onboarding, dashboard, notifications, new voice/ink polish and broader ingestion. Use a minimal separate typed-working screen for independent practice if canvas coordination dominates; preserve reasoning and label the modality.
 
-Later: Sentry + PostHog (no ink content in events), RevenueCat, 13+ age screen, `PrivacyInfo.xcprivacy` via `expo.ios.privacyManifests`, App Attest + Durable Object budgets in the Worker, Mathpix as an optional second reader, accessible marks (labels, 44 pt targets), `PKStrokeRecognizer` as a readability preflight.
+Never cut honest outcomes, cue isolation, work preservation, cap compatibility or a genuine fresh submission. Full prioritized cuts are in [roadmap](../docs/05-roadmap.md).
 
-## Next: v0.2 features (see ../docs/03-features.md)
+## Deferred until after demo
 
-- [ ] **F10 AI ink (overlay only, JS).** Extend `report_check` with an `annotations` array: `circle{line, span?}`, `underline{line}`, `arrow{from, to}`, `note{near, text}`. Render on an overlay above the canvas (react-native-svg, or Skia if animation is needed), in a distinct color, dismissible, using the same line boxes as the marks. Schema-validate and drop invalid commands.
-  - *Done when:* 95% of annotations land on the intended line in 20 test pages.
-- [ ] **Backend proxy** (`../backend/worker`, Cloudflare Worker + Hono). Add `/check`, `/reply`, `/parse` holding the API key. App setting: "Use Penquire server," with URL and a simple device token.
-  - *Done when:* a TestFlight build works with no key on the device.
-- [ ] **Pset PDF as page background.** Render a PDF page under the ink (PaperView option or a PDFKit view 🔨 native). Include it in the exported image so the AI sees the printed problem next to the work.
-- [ ] **Edit parsed problems.** Edit or delete parts and fix `asks_for` in the Problems tab.
-- [ ] ~~Exam review summary~~ → superseded by the Error notebook + spaced review (F16, P2).
+- Real delayed retrieval delivery and a richer review queue.
+- Second reviewed skill and stronger method-selection transfer.
+- Concierge paper/photo intake and native-value comparison.
+- Secure proxy and external-distribution privacy/consent/deletion work.
+- Real learner comparison and outcome scoring.
+- Broader verifier/replay work based on observed failures.
 
-## Later
+Paused: subscriptions, instructor dashboards, cloud sync, generalized curriculum/adaptation, premium/hands-free voice expansion, new native libraries, Expo Router migration, public launch.
 
-- [ ] SymPy verifier service (algebra equivalence between consecutive lines, units, plug-back) feeding "evidence" into the check prompt.
-- [ ] Diff-based checks (send only changed lines plus previous verdicts).
-- [ ] Zoom and scroll on the canvas, with the overlay sharing the transform 🔨 native.
-- [ ] Voice push-to-talk (Apple speech recognition + speech synthesis with per-word callbacks for drawing cues) 🔨 native.
-- [ ] Lecture mode (F12), instructor view (F14), photo capture for students without an iPad (F15).
-- [ ] TestFlight distribution to classmates (needs the backend proxy first).
+## Existing assets to preserve
 
-## Known issues
+Canvas/page-space and native feature detection; structured parsing; capture/save guards; uncertainty/disputes; algebra/units/leak checks; signature identity/carry-over; original-work export; existing accessible voice. Documentation does not authorize deleting these.
 
-- Fixed: forced `tool_choice` returned a 400 on Sonnet 5.5 / Opus 5.5 / Fable 5.1; `claude.ts` now uses `auto` + instruction + one retry. Not yet tested against the live API.
-- Line grouping (`src/ink/lines.ts`) is property-tested on synthetic pages (level to 36 pt spacing, tilt to ~3 degrees, subscripts, shuffled input) and splits side-by-side work at wide gaps. Synthetic data is not real handwriting: add a failing test for each real example you hit (export strokes boxes from a bad page).
-- Portrait only by design for now.
+Old completed items and implementation chronology remain in [the archived backlog](../archive/2026-10-29-before-pivot/app/BACKLOG.md.txt). Re-verify source/device before relying on a historical checkbox.

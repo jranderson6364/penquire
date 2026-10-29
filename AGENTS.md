@@ -1,41 +1,32 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# Penquire app instructions
 
-## Expo has changed — do not trust your training data
+Read the workspace [instructions](../AGENTS.md) and [README](../README.md), then [demo spec](../docs/12-demo-spec.md), [roadmap](../docs/05-roadmap.md), [BACKLOG](BACKLOG.md) and [CLAUDE guide](CLAUDE.md).
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+## Product priorities
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+The November 2 demo must show attempt → fitting help → actual repair → isolated fresh independent attempt → honest outcome and future review date. Existing source does not yet implement that full loop.
 
-## Commands
+No ambient correctness feedback in the pivot flow. Do not label pointer-assisted repairs independent. Keep questions, explanations and examples available within unchanged course permissions. No global answer prohibition on permitted study material, but do not disable existing assignment protections.
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
+## Implementation discipline
 
-```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
-```
+- Default to JS/TypeScript using the existing state router and local persistence. Do not migrate to Expo Router.
+- Check the installed Expo major in package.json and local type definitions before API work. Fetch matching official docs if local evidence is insufficient. Use `npx expo install` for compatible native/Expo packages only when necessary.
+- Never hand-create generated ios/ or android/ directories.
+- Preserve original ink, page coordinates, feature detection and older assignments.
+- Preserve numeric policy meanings; widening them requires an explicit migration, not a label change.
+- Independent-mode boundaries must suppress auto-checks, prior help, streamed/late replies and speech, not merely hide the panel.
+- Never commit secrets, raw private coursework, student images or evaluation exports.
+- Use the current backlog and user task; do not resurrect archived roadmap items.
 
-Run lint and typecheck before declaring any task done.
+## Verification
 
-## Navigation & Routing
+For code changes run `npm run typecheck` and `npm test`, plus relevant behavior/model evaluations and device checks. No lint script is configured; do not invent one.
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+For documentation-only changes validate links, source/status claims and consistency; code tests can be reported as a baseline, not proof the demo exists.
 
-## Building with EAS
+Native changes require a new cloud build. Before starting one, obtain the user's build approval unless already explicitly authorized. Re-read affected Swift against installed APIs and preserve compatibility fallbacks.
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+Update acceptance checkboxes only after verification. Mark current implementation, planned work and simulated/rehearsal content distinctly.
 
-## Rules
-
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+User instructions take precedence. Archived documents are historical, not active instructions.
