@@ -1087,12 +1087,26 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
           {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
-          {...(NATIVE_OVERLAY ? { overlayScale: viewport.scale } : {})}
+          {...(NATIVE_OVERLAY ? { overlayScale: 1 } : {})}
         >
           {/* Build 6+: the overlay layer lives INSIDE the native canvas view, which moves it with the ink in the same
-              frame (no JS round trip). Laid out once per settled zoom at page * k. */}
+              frame (no JS round trip). Laid out once per settled zoom at page * k, then scaled by 1/k here, so native
+              sees a fixed overlayScale of 1. Changing overlayScale with the zoom raced the re-layout: for one frame
+              after a pinch the marks showed at the old zoom (October 29, 2026). Layout and this transform land in the
+              same commit. */}
           {NATIVE_OVERLAY && size.w > 0 && (
-            <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, width: PAGE_WIDTH * viewport.scale, height: PAGE_HEIGHT * viewport.scale }}>
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: PAGE_WIDTH * viewport.scale,
+                height: PAGE_HEIGHT * viewport.scale,
+                transformOrigin: 'left top',
+                transform: [{ scale: 1 / viewport.scale }],
+              }}
+            >
               {overlay}
             </View>
           )}
