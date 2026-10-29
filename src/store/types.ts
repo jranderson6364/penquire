@@ -6,6 +6,7 @@ import type { Ladder } from '../tutor/ladder';
 import type { Issues } from '../tutor/issues';
 import type { ParseIssue, ProblemGroup } from '../problems/types';
 import type { UsageRecord } from './usageRecords';
+import type { Episode } from '../learning/types';
 
 export type StoredCheck = {
   /** stable id for accuracy feedback (missing on checks saved before it existed) */
@@ -107,4 +108,6 @@ export type DB = {
   settings: Settings;
   /** one entry per billed API call (see Settings > Usage) */
   usage?: UsageRecord[];
+  /** learning episodes (src/learning/types.ts); absent in older db.json files, loaded as [] */
+  episodes?: Episode[];
 };
