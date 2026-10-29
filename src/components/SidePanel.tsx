@@ -320,10 +320,16 @@ function LogTab({ assignment }: Props) {
   const o = issueOutcomes(assignment);
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
-      {o.unaided + o.helped + o.open > 0 && (
+      {o.resolved + o.open > 0 && (
         <View style={styles.countRow}>
-          <Text style={[styles.count, { color: C.valid, backgroundColor: C.validSoft }]}>{o.unaided} on your own</Text>
-          <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.helped} with help</Text>
+          {/* neutral help buckets: no chip claims independent work (docs/08 copy rules) */}
+          <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.after['marks only']} repaired after marks only</Text>
+          <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.after.pointer} repaired after a pointer</Text>
+          {o.after.explanation + o.after.example > 0 && (
+            <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.after.explanation + o.after.example} repaired after an explanation or example</Text>
+          )}
+          {o.after.step > 0 && <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.after.step} repaired after a step</Text>}
+          {o.after.unrecorded > 0 && <Text style={[styles.count, { color: C.partial, backgroundColor: C.partialSoft }]}>{o.after.unrecorded} repaired, help not recorded</Text>}
           <Text style={[styles.count, { color: C.unknown, backgroundColor: C.unknownSoft }]}>{o.open} open</Text>
           {o.withdrawn > 0 && <Text style={[styles.count, { color: C.faint, backgroundColor: C.bg }]}>{o.withdrawn} withdrawn by the tutor</Text>}
         </View>

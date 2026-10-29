@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isRepeat, noteHelp, recordCheck, getIssue, type OpenIssue } from './issues.ts';
+import { isRepeat, noteHelp, recordCheck, getIssue, resolvedAfter, type OpenIssue } from './issues.ts';
 import { ALLOWED_REVEALS, overLevel } from './revealed.ts';
 import { sanitizeCheck, sanitizeLines, sanitizeRevealed } from '../ai/sanitize.ts';
 import { HELP_LEVELS, intentBlock } from '../ai/prompts.ts';
@@ -89,7 +89,7 @@ const assignment = (events: Assignment['events'], issues: Assignment['issues'] =
   updatedAt: 0,
 });
 
-test('disclosure separates issues resolved on your own from ones resolved with help', () => {
+test('disclosure buckets resolved issues by the help in force, without claiming independent work', () => {
   const a = assignment(
     [
       { t: 1, type: 'check', level: 1 },
@@ -100,11 +100,37 @@ test('disclosure separates issues resolved on your own from ones resolved with h
     { 'p#x': { page: 'p', reading: 'x', firstSeen: 1, lastSeen: 3, checks: 1, maxLevel: 1 } }
   );
   const o = issueOutcomes(a);
-  assert.deepEqual([o.unaided, o.helped, o.open], [1, 1, 1]);
+  assert.deepEqual([o.after['marks only'], o.after.pointer, o.after.example, o.resolved, o.open], [0, 1, 1, 2, 1]);
   const s = disclosureSummary(a);
-  assert.match(s, /Of 3 issues the tutor flagged, 1 was resolved on my own/);
-  assert.match(s, /1 after more help \(1 with Show a similar example\)/);
-  assert.match(s, /similar problems; it gave no steps of my problem/, 'describes the highest level actually used');
+  assert.match(s, /The tutor flagged 3 issues\. After marks only: 0\. After a pointer: 1\. After an explanation or example: 1\. Still open: 1\./);
+  assert.match(s, /Highest level used: Show a similar example\./);
+  assert.match(s, /similar problems, without steps of my problem/, 'describes the setting of the highest level actually used');
+  assert.doesNotMatch(s, /on my own|on your own|unaided|independent|wrote all of the work/i);
+});
+
+test('level-1 (pointer) resolutions are labeled as after a pointer, never as independent', () => {
+  assert.equal(resolvedAfter(1), 'pointer');
+  assert.equal(resolvedAfter(0), 'marks only');
+  assert.equal(resolvedAfter(undefined), 'unrecorded', 'old events without a level are not guessed');
+  const s = disclosureSummary(assignment([{ t: 1, type: 'check', level: 1 }, { t: 2, type: 'resolved', level: 1 }, { t: 2, type: 'resolved', level: 1 }]));
+  assert.match(s, /After a pointer: 2\./);
+  assert.doesNotMatch(s, /on my own|on your own|unaided|independent/i);
+});
+
+test('withdrawn flags are reported apart and never counted as fixes', () => {
+  const o = issueOutcomes(assignment([{ t: 1, type: 'check', level: 0 }, { t: 2, type: 'withdrawn', level: 0 }, { t: 2, type: 'withdrawn', level: 1 }]));
+  assert.equal(o.resolved, 0);
+  assert.equal(Object.values(o.after).reduce((x, y) => x + y, 0), 0);
+  assert.equal(o.withdrawn, 2);
+  const s = disclosureSummary(assignment([{ t: 1, type: 'check', level: 0 }, { t: 2, type: 'resolved', level: 0 }, { t: 2, type: 'withdrawn', level: 0 }]));
+  assert.match(s, /The tutor flagged 1 issue\. After marks only: 1\./);
+  assert.match(s, /Withdrawn by the tutor \(not counted as student fixes\): 1\./);
+});
+
+test('no "no hints used" claim when no help level was recorded', () => {
+  const s = disclosureSummary(assignment([{ t: 1, type: 'check' }]));
+  assert.doesNotMatch(s, /no hints/i);
+  assert.match(s, /No help levels were recorded\./);
 });
 
 test('disclosure is honest about reveals above the level', () => {

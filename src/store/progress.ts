@@ -3,6 +3,9 @@ import type { Assignment } from './types';
 /**
  * Parts of an assignment the latest checks call complete. A part counts once, from the most recent check that
  * mentions it; a "complete" status on an older page does not survive a newer page that reopened it.
+ *
+ * Logistics only: "parts complete" says which parts have finished work on the page, not what the student learned or
+ * could do without help. Show it as parts submitted/complete, never as mastery.
  */
 export function completedParts(a: Pick<Assignment, 'checks' | 'problems'>): { done: number; total: number } {
   const total = a.problems.length;
