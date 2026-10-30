@@ -3,17 +3,29 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
-import { deleteAssignment, getAssignments, getSettings, subscribe } from '../store/db';
+import { EpisodeCard } from '../components/EpisodeCard';
+import { latestEpisode, resumeTarget } from '../components/episodeCardFormat';
+import { DEMO_ASSIGNMENT_ID, ensureDemo, resetDemo } from '../learning/seed';
+import { deleteAssignment, getAssignments, getEpisodes, getSettings, subscribe } from '../store/db';
 import { ENV } from '../config';
 import { completedParts } from '../store/progress';
 import { C, F, LABEL, R, T } from '../theme';
 
-type Props = { onOpen: (id: string) => void; onNew: () => void; onSettings: () => void };
+type Props = {
+  onOpen: (id: string) => void;
+  onNew: () => void;
+  onSettings: () => void;
+  /** T08's independent-screen route. Until App.tsx passes it, fresh-problem phases cannot be resumed from here. */
+  onOpenIndependent?: (episodeId: string) => void;
+};
 
-export function HomeScreen({ onOpen, onNew, onSettings }: Props) {
+// The demo assignment lives in the Demo practice section, not the library list.
+const library = () => getAssignments().filter((a) => a.id !== DEMO_ASSIGNMENT_ID);
+
+export function HomeScreen({ onOpen, onNew, onSettings, onOpenIndependent }: Props) {
   const insets = useSafeAreaInsets();
-  const [items, setItems] = React.useState(getAssignments());
-  React.useEffect(() => subscribe(() => setItems(getAssignments())), []);
+  const [items, setItems] = React.useState(library);
+  React.useEffect(() => subscribe(() => setItems(library())), []);
   const hasKey = !!(getSettings().apiKey || ENV.anthropicApiKey);
 
   return (
@@ -37,6 +49,7 @@ export function HomeScreen({ onOpen, onNew, onSettings }: Props) {
         data={items}
         keyExtractor={(a) => a.id}
         contentContainerStyle={{ padding: 20, gap: 12 }}
+        ListHeaderComponent={<DemoPractice onOpen={onOpen} onOpenIndependent={onOpenIndependent} />}
         ListEmptyComponent={
           <Text style={styles.empty}>No assignments yet. Create one, import the pset PDF, and start writing.</Text>
         }
@@ -65,6 +78,52 @@ export function HomeScreen({ onOpen, onNew, onSettings }: Props) {
   );
 }
 
+/**
+ * Start, resume or reset the demo. Home is only mounted while no workspace/independent screen is open (App.tsx routes
+ * one screen at a time), so reset never deletes a page that an open screen could autosave over.
+ */
+function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onOpenIndependent'>) {
+  const [episode, setEpisode] = React.useState(() => latestEpisode(getEpisodes(), DEMO_ASSIGNMENT_ID));
+  React.useEffect(() => subscribe(() => setEpisode(latestEpisode(getEpisodes(), DEMO_ASSIGNMENT_ID))), []);
+
+  const start = () => {
+    const { assignmentId } = ensureDemo(Date.now());
+    onOpen(assignmentId);
+  };
+  // Never fall back to the workspace for a fresh problem: its marks, chat and examples would leak into the attempt.
+  // TODO(T08/T10): App.tsx passes onOpenIndependent once the independent route is merged.
+  const independent = !!episode && resumeTarget(episode) === 'independent';
+  const blocked = independent && !onOpenIndependent;
+  const resume = () => {
+    if (!episode || blocked) return;
+    if (independent) onOpenIndependent!(episode.id);
+    else onOpen(episode.assignmentId);
+  };
+  const reset = () =>
+    Alert.alert('Reset demo?', 'Deletes demo practice only. Your other assignments are untouched.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reset demo', style: 'destructive', onPress: () => resetDemo(Date.now()) },
+    ]);
+
+  return (
+    <View style={styles.demo}>
+      <Text style={styles.sectionLabel}>Demo practice</Text>
+      {episode ? (
+        <EpisodeCard episode={episode}>
+          <View style={styles.demoActions}>
+            <Button title={episode.phase === 'outcome' ? 'Open' : 'Resume'} kind="primary" small disabled={blocked} onPress={resume} />
+            <Button title="Reset demo" kind="ghost" small onPress={reset} />
+          </View>
+          {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
+        </EpisodeCard>
+      ) : (
+        <Button title="Start demo: Distribute and solve" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
+      )}
+      <Text style={styles.sectionLabel}>Assignments</Text>
+    </View>
+  );
+}
+
 function Progress({ assignment }: { assignment: Parameters<typeof completedParts>[0] }) {
   const { done, total } = completedParts(assignment);
   if (total === 0) return null;
@@ -74,7 +133,7 @@ function Progress({ assignment }: { assignment: Parameters<typeof completedParts
         <View style={[styles.fill, { width: `${(done / total) * 100}%` }]} />
       </View>
       <Text style={styles.progressText}>
-        {done}/{total} parts
+        {done}/{total} parts complete
       </Text>
     </View>
   );
@@ -94,6 +153,11 @@ const styles = StyleSheet.create({
   cardMeta: { fontSize: T.caption, color: C.faint, fontFamily: F.mono },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 2 },
   track: { flex: 1, height: 4, borderRadius: 2, backgroundColor: C.line, overflow: 'hidden' },
-  fill: { height: 4, borderRadius: 2, backgroundColor: C.valid },
+  // neutral, not the green verdict color: completeness is logistics, not learning evidence (docs/08)
+  fill: { height: 4, borderRadius: 2, backgroundColor: C.sub },
+  demo: { gap: 12 },
+  sectionLabel: { ...LABEL },
+  note: { fontSize: T.caption, color: C.faint },
+  demoActions: { flexDirection: 'row', gap: 8, marginTop: 6 },
   progressText: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
 });
