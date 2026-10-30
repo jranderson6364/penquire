@@ -23,7 +23,8 @@
           "androidSpeechServicePackages": []
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-asset"
     ],
     "extra": {
       "eas": {

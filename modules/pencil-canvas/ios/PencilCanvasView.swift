@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import PencilKit
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 // MARK: - Paper background (grid / lined / blank), drawn in page space and clipped to what is visible.
 //
@@ -123,6 +124,110 @@ private func inkType(_ name: String?) -> PKInk.InkType {
   return .pen
 }
 
+// MARK: - Palm watcher (apiVersion >= 7)
+
+/// Watches every touch on the canvas and never recognizes, so it blocks nothing (drawing, scrolling and zooming keep
+/// their own recognizers). The canvas uses what it sees to decide whether fingers may pan: a two-touch minimum is not
+/// enough, because a resting palm usually lands as several touches.
+final class PalmWatcher: UIGestureRecognizer, UIGestureRecognizerDelegate {
+  /// a touch began, moved or ended; the canvas re-evaluates whether pan and pinch are allowed
+  var onChange: (@MainActor () -> Void)?
+  /// decides, when a finger touch lands, whether it must never pan (e.g. it arrived while the Pencil was writing)
+  var isSuspectOnLanding: (@MainActor () -> Bool)?
+  /// a contact at least this wide (points, majorRadius) is a palm, not a fingertip. 0 = never by size.
+  var palmRadius: CGFloat = 32
+  /// where the Pencil tip is, in window coordinates; nil when it lifts (apiVersion >= 8: the eraser ring)
+  var onPencilPoint: (@MainActor (CGPoint?) -> Void)?
+
+  /// direct (finger/palm) touches currently down that must not pan the page
+  private(set) var suspect = Set<ObjectIdentifier>()
+  private var down = Set<ObjectIdentifier>()
+  private var pencils = Set<ObjectIdentifier>()
+  /// the Pencil is touching the glass (known at touch-down, before PencilKit reports that a stroke began)
+  var pencilTouching: Bool { !pencils.isEmpty }
+  private(set) var pencilLiftedAt: CFTimeInterval = 0
+
+  override init(target: Any?, action: Selector?) {
+    super.init(target: target, action: action)
+    cancelsTouchesInView = false
+    delaysTouchesBegan = false
+    delaysTouchesEnded = false
+    delegate = self
+  }
+
+  var hasSuspect: Bool { !suspect.isEmpty }
+
+  private func isPalm(_ t: UITouch) -> Bool {
+    palmRadius > 0 && t.majorRadius - t.majorRadiusTolerance >= palmRadius
+  }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+    for t in touches where t.type == .pencil {
+      pencils.insert(ObjectIdentifier(t))
+      down.insert(ObjectIdentifier(t))
+      onPencilPoint?(t.preciseLocation(in: nil))
+    }
+    let landingSuspect = isSuspectOnLanding?() ?? false
+    for t in touches where t.type == .direct {
+      let id = ObjectIdentifier(t)
+      down.insert(id)
+      if landingSuspect || isPalm(t) { suspect.insert(id) }
+    }
+    onChange?()
+  }
+
+  override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+    // A palm often lands as a small contact and spreads: check the size on every move, not just on landing.
+    var changed = false
+    for t in touches where t.type == .direct && isPalm(t) {
+      if suspect.insert(ObjectIdentifier(t)).inserted { changed = true }
+    }
+    for t in touches where t.type == .pencil {
+      onPencilPoint?(t.preciseLocation(in: nil))
+    }
+    if changed { onChange?() }
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+    lift(touches)
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+    lift(touches)
+  }
+
+  private func lift(_ touches: Set<UITouch>) {
+    for t in touches {
+      let id = ObjectIdentifier(t)
+      down.remove(id)
+      suspect.remove(id)
+      if pencils.remove(id) != nil {
+        pencilLiftedAt = CACurrentMediaTime()
+        onPencilPoint?(nil)
+      }
+    }
+    // Only fail once nothing is down: a failed recognizer gets no more touches for the rest of the sequence.
+    if down.isEmpty && state == .possible { state = .failed }
+    onChange?()
+  }
+
+  override func reset() {
+    super.reset()
+    if !pencils.isEmpty {
+      pencilLiftedAt = CACurrentMediaTime()
+      onPencilPoint?(nil)
+    }
+    down.removeAll()
+    suspect.removeAll()
+    pencils.removeAll()
+    onChange?()
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    true
+  }
+}
+
 // MARK: - Canvas view
 
 /// Hosts the React overlay layer (question blocks, tutor marks, verdict marks) above the ink. It takes no touches
@@ -163,6 +268,15 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   private var lastViewportSend: CFTimeInterval = 0
   private var settleTask: Task<Void, Never>?
   private var resumeGestures: Task<Void, Never>?
+  /// Palm protection (apiVersion >= 7): see updateGestureGate.
+  private let palmWatcher = PalmWatcher(target: nil, action: nil)
+  private var pencilDown = false
+  private var pencilLiftedAt: CFTimeInterval = 0
+  /// after the Pencil lifts, how long fingers stay unable to pan (the hand is usually still resting). Seconds.
+  private var penPause: CFTimeInterval = 0.35
+  /// apiVersion >= 8: a dashed ring around the Pencil tip while the eraser is the tool (diameter in screen points; 0 = off)
+  private let eraserRing = CAShapeLayer()
+  private var eraserDiameter: CGFloat = 0
   /// React children (the overlay layer) are mounted here, and moved with the page natively in the same frame as the ink.
   private let overlayHost = OverlayHostView()
   /// The zoom the overlay was laid out at (JS lays it out in page * overlayScale units; native scales by zoom / overlayScale).
@@ -198,16 +312,39 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     addSubview(canvas)
 
     // Redundant on purpose: the delegate may not forward every scroll callback of PKCanvasView.
+    // Synchronous on the main thread (apiVersion >= 8): a zoom bounce sets the zoom inside UIKit's animation block, and
+    // the overlay must change inside that same block to animate with the ink instead of snapping.
     offsetObservation = canvas.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
-      Task { @MainActor [weak self] in self?.viewportDidChange() }
+      if Thread.isMainThread {
+        _ = MainActor.assumeIsolated { self?.viewportDidChange() }
+      } else {
+        Task { @MainActor [weak self] in self?.viewportDidChange() }
+      }
     }
     zoomObservation = canvas.observe(\.zoomScale, options: [.new]) { [weak self] _, _ in
-      Task { @MainActor [weak self] in self?.viewportDidChange() }
+      if Thread.isMainThread {
+        _ = MainActor.assumeIsolated { self?.viewportDidChange() }
+      } else {
+        Task { @MainActor [weak self] in self?.viewportDidChange() }
+      }
     }
 
     let pencil = UIPencilInteraction()
     pencil.delegate = self
     addInteraction(pencil)
+
+    palmWatcher.onChange = { [weak self] in self?.updateGestureGate() }
+    palmWatcher.isSuspectOnLanding = { [weak self] in self?.withinPenWindow() ?? false }
+    palmWatcher.onPencilPoint = { [weak self] p in self?.moveEraserRing(to: p) }
+    canvas.addGestureRecognizer(palmWatcher)
+
+    eraserRing.fillColor = nil
+    eraserRing.strokeColor = UIColor(white: 0.35, alpha: 0.9).cgColor
+    eraserRing.lineWidth = 1
+    eraserRing.lineDashPattern = [3, 3]
+    eraserRing.isHidden = true
+    eraserRing.zPosition = 1000 // above the ink and the overlay layer
+    layer.addSublayer(eraserRing)
   }
 
   // MARK: Overlay layer (apiVersion >= 6)
@@ -215,6 +352,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   /// React children of this view are the overlay layer: keep them in our own host above the canvas, not under it.
   override func mountChildComponentView(_ childComponentView: UIView, index: Int) {
     overlayHost.insertSubview(childComponentView, at: min(index, overlayHost.subviews.count))
+    scheduleSharpen()
   }
 
   override func unmountChildComponentView(_ childComponentView: UIView, index: Int) {
@@ -224,18 +362,81 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   func setOverlayScale(_ k: Double) {
     overlayScale = CGFloat(max(0.01, k))
     updateOverlayTransform()
+    scheduleSharpen()
   }
 
   /// screen = (-contentOffset) + (zoom / overlayScale) * layer. Same frame as the ink: called from the scroll delegate.
   private func updateOverlayTransform() {
     let r = canvas.zoomScale / overlayScale
     let t = CGAffineTransform(a: r, b: 0, c: 0, d: r, tx: -canvas.contentOffset.x, ty: -canvas.contentOffset.y)
+    // No CATransaction.setDisableActions here (apiVersion >= 8): a UIView never animates outside an animation block, so
+    // pinches and scrolls stay exact, and inside UIKit's zoom-bounce block the overlay now animates with the ink.
     if overlayHost.transform != t {
-      CATransaction.begin()
-      CATransaction.setDisableActions(true) // no implicit animation: it must sit exactly on the ink
       overlayHost.transform = t
-      CATransaction.commit()
     }
+  }
+
+  // MARK: Sharp overlay at any zoom (apiVersion >= 8)
+
+  private var sharpenTask: Task<Void, Never>?
+  /// keep any one layer's backing store under this many pixels (about 24 MB; a full-page SVG at 8x zoom would be hundreds)
+  private let maxLayerPixels: CGFloat = 6_000_000
+
+  private func scheduleSharpen() {
+    sharpenTask?.cancel()
+    sharpenTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 50_000_000) // after Fabric has laid the new views out
+      guard let self = self, !Task.isCancelled else { return }
+      self.sharpenOverlay()
+    }
+  }
+
+  /// Text and SVG in the overlay are drawn at their own layout size and then scaled with the page, so past
+  /// overlayScale they blur. Once a zoom settles, redraw them at the scale they are shown at. No React work and no
+  /// re-layout: only the backing stores change, so nothing moves.
+  private func sharpenOverlay() {
+    let screen = window?.screen.scale ?? 2
+    let want = screen * max(1, canvas.zoomScale / overlayScale)
+    sharpen(overlayHost, want: want, screen: screen)
+  }
+
+  private func sharpen(_ view: UIView, want: CGFloat, screen: CGFloat) {
+    let name = String(describing: type(of: view))
+    if name.contains("Paragraph") || name.contains("SvgView") {
+      let area = max(1, view.bounds.width * view.bounds.height)
+      let scale = max(screen, min(want, (maxLayerPixels / area).squareRoot()))
+      if abs(view.contentScaleFactor - scale) > 0.01 {
+        view.contentScaleFactor = scale // UIKit's setter: redraws the backing store at this scale
+        view.setNeedsDisplay()
+      }
+    }
+    for sub in view.subviews { sharpen(sub, want: want, screen: screen) }
+  }
+
+  // MARK: Eraser ring (apiVersion >= 8)
+
+  /// diameter in screen points; 0 hides it. JS keeps it the same size on screen as the eraser it describes.
+  func setEraserCursor(_ diameter: Double) {
+    eraserDiameter = CGFloat(max(0, diameter))
+    let d = eraserDiameter
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    eraserRing.path = d > 0 ? UIBezierPath(ovalIn: CGRect(x: -d / 2, y: -d / 2, width: d, height: d)).cgPath : nil
+    if d <= 0 { eraserRing.isHidden = true }
+    CATransaction.commit()
+  }
+
+  private func moveEraserRing(to windowPoint: CGPoint?) {
+    let show = windowPoint != nil && eraserDiameter > 0 && canvas.tool is PKEraserTool
+    CATransaction.begin()
+    CATransaction.setDisableActions(true) // a standalone layer animates implicitly; the ring must sit on the tip
+    if show, let p = windowPoint {
+      eraserRing.position = convert(p, from: nil)
+      eraserRing.isHidden = false
+    } else {
+      eraserRing.isHidden = true
+    }
+    CATransaction.commit()
   }
 
   override func layoutSubviews() {
@@ -348,6 +549,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       try? await Task.sleep(nanoseconds: 160_000_000)
       guard let self = self, !Task.isCancelled else { return }
       self.sendViewport()
+      self.sharpenOverlay()
     }
   }
 
@@ -475,20 +677,52 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       _ = canvas.becomeFirstResponder()
     }
     // Palm protection: while the Pencil is on the glass, a resting hand must not pan or zoom the page.
-    resumeGestures?.cancel()
-    canvas.panGestureRecognizer.isEnabled = false
-    canvas.pinchGestureRecognizer?.isEnabled = false
+    pencilDown = true
+    updateGestureGate()
   }
 
   func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
     // Give the hand a moment to lift before fingers scroll again.
+    pencilDown = false
+    pencilLiftedAt = CACurrentMediaTime()
+    updateGestureGate()
+  }
+
+  private func withinPenWindow() -> Bool {
+    let lifted = max(pencilLiftedAt, palmWatcher.pencilLiftedAt)
+    return pencilDown || palmWatcher.pencilTouching || CACurrentMediaTime() - lifted < penPause
+  }
+
+  /// One rule for whether fingers may pan and pinch: not while the Pencil writes or just after it lifts, and not while
+  /// any palm-sized touch, or any touch that landed during writing, is still down. Disabling a recognizer cancels a
+  /// pan already in progress, so a palm that spreads mid-gesture stops the page.
+  private func updateGestureGate() {
+    let blocked = withinPenWindow() || palmWatcher.hasSuspect
+    if canvas.panGestureRecognizer.isEnabled == blocked { canvas.panGestureRecognizer.isEnabled = !blocked }
+    if let pinch = canvas.pinchGestureRecognizer, pinch.isEnabled == blocked { pinch.isEnabled = !blocked }
     resumeGestures?.cancel()
-    resumeGestures = Task { @MainActor [weak self] in
-      try? await Task.sleep(nanoseconds: 350_000_000)
-      guard let self = self, !Task.isCancelled else { return }
-      self.canvas.panGestureRecognizer.isEnabled = true
-      self.canvas.pinchGestureRecognizer?.isEnabled = true
+    resumeGestures = nil
+    if blocked && !pencilDown && !palmWatcher.pencilTouching && !palmWatcher.hasSuspect {
+      // only the post-lift window is holding the gate: look again when it runs out
+      let lifted = max(pencilLiftedAt, palmWatcher.pencilLiftedAt)
+      let wait = max(0, penPause - (CACurrentMediaTime() - lifted))
+      resumeGestures = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000) + 5_000_000)
+        guard let self = self, !Task.isCancelled else { return }
+        self.updateGestureGate()
+      }
     }
+  }
+
+  /// apiVersion >= 7: contacts at least this wide (points) count as a palm and stop panning. 0 turns size checks off.
+  func setPalmRejectRadius(_ r: Double) {
+    palmWatcher.palmRadius = CGFloat(max(0, r))
+  }
+
+  /// apiVersion >= 7: how long after the Pencil lifts fingers still cannot pan (ms, clamped to 0...2000).
+  func setPenPauseMs(_ ms: Double) {
+    penPause = min(2, max(0, ms / 1000))
+    updateGestureGate()
   }
 
   /// Palm protection: with two-finger scrolling, one resting palm or finger never pans the page (pinch is two fingers

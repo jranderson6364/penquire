@@ -77,6 +77,12 @@ export type PencilCanvasProps = {
   onPencilSqueeze?: (phase: 'began' | 'ended' | 'cancelled') => void;
   /** apiVersion >= 5: palm protection, one finger or palm never pans (pan is also paused while the Pencil draws) */
   twoFingerScroll?: boolean;
+  /** apiVersion >= 7: contacts at least this wide (points) count as a palm and never pan; 0 = no size check. Default 48 (DEFAULT_PALM_RADIUS). */
+  palmRejectRadius?: number;
+  /** apiVersion >= 7: after the Pencil lifts, fingers cannot pan for this long (ms). Native default 350. */
+  penPauseMs?: number;
+  /** apiVersion >= 8: diameter in screen points of a dashed ring around the Pencil tip while the eraser is the tool; 0 = off */
+  eraserCursor?: number;
   /** apiVersion >= 6: children are the overlay layer, laid out at page * overlayScale; native moves them with the ink */
   overlayScale?: number;
   children?: import('react').ReactNode;

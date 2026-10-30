@@ -43,7 +43,8 @@ export const nativeCanvasAvailable = nativeModule != null;
 
 /**
  * Native capability level of the installed binary. 1 = original canvas (no zoom, no tool spec); 2 = fixed page,
- * zoom/pan, viewport events, setTool. JS must keep working on both: this is how a JS-only update stays safe.
+ * zoom/pan, viewport events, setTool; 7 = palm rejection (see PencilCanvasModule.swift for the rest). JS must keep
+ * working on every level: this is how a JS-only update stays safe.
  */
 export const nativeApiVersion: number = typeof nativeModule?.apiVersion === 'number' ? nativeModule.apiVersion : nativeCanvasAvailable ? 1 : 0;
 
@@ -87,6 +88,20 @@ export const nativeHasNewFunctions = nativeModuleInfo.viewFunctions.includes('ge
 
 const NativeView: React.ComponentType<NativeProps> | null = nativeCanvasAvailable ? requireNativeView('PencilCanvas') : null;
 
+/**
+ * Contacts at least this wide (points) count as a palm. The native default (32) also caught thumbs, so a same-hand pinch
+ * (thumb + finger) often failed on device (October 29, 2026); a palm is much wider than a thumb.
+ */
+export const DEFAULT_PALM_RADIUS = 48;
+
+/** apiVersion >= 7 only: an older binary never receives props it does not know. Unset penPauseMs keeps the native default. */
+function palmProps(palmRejectRadius?: number, penPauseMs?: number): Pick<PencilCanvasProps, 'palmRejectRadius' | 'penPauseMs'> {
+  return {
+    palmRejectRadius: palmRejectRadius ?? DEFAULT_PALM_RADIUS,
+    ...(penPauseMs != null ? { penPauseMs } : {}),
+  };
+}
+
 function parse<T>(json: string, fallback: T): T {
   try {
     const v = JSON.parse(json);
@@ -102,6 +117,9 @@ export function PencilCanvas({
   onViewportChanged,
   onPencilDoubleTap,
   onPencilSqueeze,
+  palmRejectRadius,
+  penPauseMs,
+  eraserCursor,
   ...props
 }: PencilCanvasProps & { ref?: React.Ref<PencilCanvasHandle> }) {
   const nativeRef = React.useRef<NativeMethods>(null);
@@ -146,6 +164,8 @@ export function PencilCanvas({
     <NativeView
       ref={nativeRef}
       {...props}
+      {...(nativeApiVersion >= 7 ? palmProps(palmRejectRadius, penPauseMs) : {})}
+      {...(nativeApiVersion >= 8 && eraserCursor != null ? { eraserCursor } : {})}
       onDrawingChanged={(e) => onDrawingChanged?.(e.nativeEvent)}
       onViewportChanged={(e) => onViewportChanged?.(e.nativeEvent)}
       onPencilDoubleTap={() => onPencilDoubleTap?.()}
