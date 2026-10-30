@@ -18,6 +18,18 @@ import { disclosureSummary, issueOutcomes } from '../log';
 import type { Assignment, StoredCheck } from '../store/types';
 import { assignmentSpend, formatCost } from '../store/usageRecords';
 import { tagColor } from '../tutor/marks';
+import type { TextStyle } from 'react-native';
+
+/**
+ * A phrase in a tutor reply that names a mark on the page: readable text in the normal ink, underlined in the mark's
+ * color over a light tint of it. (Colored text on a strong yellow wash was hard to read, October 29, 2026.)
+ */
+const tagStyle = (t: number): TextStyle => ({
+  textDecorationLine: 'underline',
+  textDecorationStyle: 'solid',
+  textDecorationColor: tagColor(t).solid,
+  backgroundColor: tagColor(t).tint,
+});
 import { C, F, LABEL, R, T, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
 import { Markdown } from './Markdown';
@@ -258,7 +270,7 @@ function TutorStream(p: Props) {
             {m.role === 'user' ? (
               <Text style={styles.userText}>{m.text}</Text>
             ) : (
-              <Markdown text={m.text} tags={p.marksByTurn?.[i]?.length ? { style: (t) => (p.marksByTurn![i].includes(t) ? { color: tagColor(t).pen, backgroundColor: tagColor(t).wash } : undefined), onPress: (t) => p.marksByTurn![i].includes(t) && p.onShowMarks?.(i, t) } : undefined} />
+              <Markdown text={m.text} tags={p.marksByTurn?.[i]?.length ? { style: (t) => (p.marksByTurn![i].includes(t) ? tagStyle(t) : undefined), onPress: (t) => p.marksByTurn![i].includes(t) && p.onShowMarks?.(i, t) } : undefined} />
             )}
             {m.role === 'assistant' && !!p.marksByTurn?.[i] && (
               <Pressable onPress={() => p.onShowMarks?.(i)} style={styles.showMarks} accessibilityRole="button" accessibilityLabel="Show where the tutor pointed on the page">

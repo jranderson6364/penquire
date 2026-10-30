@@ -40,6 +40,18 @@ type Props = {
   /** the student says what this (unchanged) line reads: the next check grades it as written */
   onConfirmReading?: (v: LineVerdict, reading: string) => void;
   onInputBlur?: () => void;
+  /**
+   * Controlled open mark (optional). With popoverOutside the overlay draws only the marks and the dashed outline; the
+   * caller shows MarkPopover in screen space, so it keeps its size at any zoom and can be dragged.
+   */
+  open?: string | null;
+  onOpenChange?: (id: string | null) => void;
+  popoverOutside?: boolean;
+};
+
+export type MarkPopoverProps = Pick<Props, 'onAsk' | 'onMoreHelp' | 'onDispute' | 'repeats' | 'feedbackFor' | 'onRate' | 'onConfirmReading' | 'onInputBlur'> & {
+  v: LineVerdict;
+  onClose: () => void;
 };
 
 type Correction = 'wrong' | 'misread';
@@ -54,26 +66,26 @@ const PEN_MARKS = nativeApiVersion >= 3;
 
 const MARK = 26;
 const MARK_OK = 20; // a check that holds up is quieter than one that needs attention
-const POPOVER_W = 300;
-const POPOVER_H = 340;
+export const POPOVER_W = 300;
+export const POPOVER_H = 340;
 
 /**
  * Margin marks (✓ ~ ✗ ?) drawn over the canvas. Only the marks themselves take touches
  * (pointerEvents="box-none"), so the Pencil keeps writing everywhere else.
  */
-export function MarksOverlay({ width, height, visible: view, lines, verdicts, parts, stale, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: Props) {
-  const [open, setOpen] = React.useState<string | null>(null);
-  const [correcting, setCorrecting] = React.useState<Correction | null>(null);
-  const [reading, setReading] = React.useState('');
-  const [offOpen, setOffOpen] = React.useState(false);
-  React.useEffect(() => {
-    setCorrecting(null);
-    setReading('');
-    setOffOpen(false);
-  }, [open]);
+export function MarksOverlay(props: Props) {
+  const { width, height, visible: view, lines, verdicts, parts, stale, open: openProp, onOpenChange, popoverOutside } = props;
+  const [openState, setOpenState] = React.useState<string | null>(null);
+  const open = openProp !== undefined ? openProp : openState;
+  const changeRef = React.useRef(onOpenChange);
+  changeRef.current = onOpenChange;
+  const setOpen = React.useCallback((id: string | null) => {
+    setOpenState(id);
+    changeRef.current?.(id);
+  }, []);
   const byId = React.useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
 
-  React.useEffect(() => setOpen(null), [verdicts]);
+  React.useEffect(() => setOpen(null), [verdicts, setOpen]);
 
   // mark like a teacher: tick the answer, mark what needs attention, leave the rest alone (src/check/verdictMarks.ts)
   const visible = marksToShow(verdicts, parts)
@@ -127,7 +139,7 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, pa
         );
       })}
 
-      {active && (
+      {active && !popoverOutside && (
         <View
           style={[
             styles.popover,
@@ -137,105 +149,122 @@ export function MarksOverlay({ width, height, visible: view, lines, verdicts, pa
             },
           ]}
         >
-          <View style={styles.popHead}>
-            <Text style={styles.popTitle}>
-              {active.v.part ? `${active.v.part} · ` : ''}
-              <Text style={{ color: VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].color }}>
-                {VERDICT_STYLE[active.v.verdict as keyof typeof VERDICT_STYLE].label}
-              </Text>
-            </Text>
-            <Pressable hitSlop={12} onPress={() => setOpen(null)} accessibilityLabel="Close" style={styles.close}>
-              <Text style={styles.closeText}>✕</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.note}>{latexToUnicode(active.v.note)}</Text>
-          {active.v.verdict !== 'valid' && repeats(active.v) && (
-            <Text style={styles.repeat}>Still flagged after another check. Help me see it gives a different kind of hint.</Text>
-          )}
-          <Evidence v={active.v} />
-
-          {offOpen ? (
-            <SomethingOff
-              verdict={active.v}
-              saved={feedbackFor(active.v.id)}
-              correcting={correcting}
-              setCorrecting={setCorrecting}
-              reading={reading}
-              setReading={setReading}
-              onRate={(fb) => {
-                onRate({ lineId: active.v.id, ...fb });
-                if (fb.rating === 'misread' && fb.correctReading) onConfirmReading?.(active.v, fb.correctReading);
-                setCorrecting(null);
-                setOffOpen(false);
-              }}
-              onInputBlur={onInputBlur}
-            />
-          ) : (
-            <View style={styles.popActions}>
-              {(active.v.verdict === 'incorrect' || active.v.verdict === 'partial') && (
-                <>
-                  <Button
-                    small
-                    kind="primary"
-                    title="Help me see it"
-                    onPress={() => {
-                      onMoreHelp(active.v);
-                      setOpen(null);
-                    }}
-                  />
-                  <Button
-                    small
-                    title="I think this is right"
-                    onPress={() => {
-                      onDispute(active.v);
-                      setOpen(null);
-                    }}
-                  />
-                </>
-              )}
-              {active.v.verdict === 'unreadable' && active.v.guard === 'reading' && !!active.v.reading && !!onConfirmReading && (
-                <Button
-                  small
-                  kind="primary"
-                  title="Yes, that's what I wrote"
-                  onPress={() => {
-                    onConfirmReading(active.v, active.v.reading);
-                    setOpen(null);
-                  }}
-                />
-              )}
-              {active.v.verdict === 'unreadable' && (
-                <Button
-                  small
-                  kind={active.v.guard === 'reading' ? 'secondary' : 'primary'}
-                  title="That's not what I wrote"
-                  onPress={() => {
-                    setCorrecting('misread');
-                    setOffOpen(true);
-                  }}
-                />
-              )}
-              {(active.v.verdict === 'valid' || active.v.verdict === 'unreadable') && (
-                <Button
-                  small
-                  title="Ask about this"
-                  onPress={() => {
-                    onAsk(active.v);
-                    setOpen(null);
-                  }}
-                />
-              )}
-            </View>
-          )}
-          {!offOpen && (
-            <Pressable onPress={() => setOffOpen(true)} hitSlop={8} style={styles.offLink} accessibilityLabel="Something is off with this mark: it is wrong or I was misread">
-              <Text style={styles.offLinkText}>{feedbackFor(active.v.id) ? 'Feedback saved · change' : "Something's off?"}</Text>
-            </Pressable>
-          )}
+          <MarkPopover key={active.v.id} {...props} v={active.v} onClose={() => setOpen(null)} />
         </View>
       )}
     </View>
   );
+}
+
+/** What a mark means and what can be done about it. Used inside the overlay, or in screen space (FloatingCard). */
+export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: MarkPopoverProps) {
+  const [correcting, setCorrecting] = React.useState<Correction | null>(null);
+  const [reading, setReading] = React.useState('');
+  const [offOpen, setOffOpen] = React.useState(false);
+  return (
+    <>
+      <View style={styles.popHead}>
+        <Text style={styles.popTitle}>
+          {v.part ? `${v.part} · ` : ''}
+          <Text style={{ color: VERDICT_STYLE[v.verdict as keyof typeof VERDICT_STYLE].color }}>
+            {VERDICT_STYLE[v.verdict as keyof typeof VERDICT_STYLE].label}
+          </Text>
+        </Text>
+        <Pressable hitSlop={12} onPress={() => onClose()} accessibilityLabel="Close" style={styles.close}>
+          <Text style={styles.closeText}>✕</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.note}>{latexToUnicode(v.note)}</Text>
+      {v.verdict !== 'valid' && repeats(v) && (
+        <Text style={styles.repeat}>Still flagged after another check. Help me see it gives a different kind of hint.</Text>
+      )}
+      <Evidence v={v} />
+
+      {offOpen ? (
+        <SomethingOff
+          verdict={v}
+          saved={feedbackFor(v.id)}
+          correcting={correcting}
+          setCorrecting={setCorrecting}
+          reading={reading}
+          setReading={setReading}
+          onRate={(fb) => {
+            onRate({ lineId: v.id, ...fb });
+            if (fb.rating === 'misread' && fb.correctReading) onConfirmReading?.(v, fb.correctReading);
+            setCorrecting(null);
+            setOffOpen(false);
+          }}
+          onInputBlur={onInputBlur}
+        />
+      ) : (
+        <View style={styles.popActions}>
+          {(v.verdict === 'incorrect' || v.verdict === 'partial') && (
+            <>
+              <Button
+                small
+                kind="primary"
+                title="Help me see it"
+                onPress={() => {
+                  onMoreHelp(v);
+                  onClose();
+                }}
+              />
+              <Button
+                small
+                title="I think this is right"
+                onPress={() => {
+                  onDispute(v);
+                  onClose();
+                }}
+              />
+            </>
+          )}
+          {v.verdict === 'unreadable' && v.guard === 'reading' && !!v.reading && !!onConfirmReading && (
+            <Button
+              small
+              kind="primary"
+              title="Yes, that's what I wrote"
+              onPress={() => {
+                onConfirmReading(v, v.reading);
+                onClose();
+              }}
+            />
+          )}
+          {v.verdict === 'unreadable' && (
+            <Button
+              small
+              kind={v.guard === 'reading' ? 'secondary' : 'primary'}
+              title="That's not what I wrote"
+              onPress={() => {
+                setCorrecting('misread');
+                setOffOpen(true);
+              }}
+            />
+          )}
+          {(v.verdict === 'valid' || v.verdict === 'unreadable') && (
+            <Button
+              small
+              title="Ask about this"
+              onPress={() => {
+                onAsk(v);
+                onClose();
+              }}
+            />
+          )}
+        </View>
+      )}
+      {!offOpen && (
+        <Pressable onPress={() => setOffOpen(true)} hitSlop={8} style={styles.offLink} accessibilityLabel="Something is off with this mark: it is wrong or I was misread">
+          <Text style={styles.offLinkText}>{feedbackFor(v.id) ? 'Feedback saved · change' : "Something's off?"}</Text>
+        </Pressable>
+      )}
+    </>
+  );
+}
+
+/** The card a MarkPopover sits on when it is shown outside the overlay. */
+export function MarkPopoverCard({ children }: { children: React.ReactNode }) {
+  return <View style={[styles.popover, styles.popoverFloating]}>{children}</View>;
 }
 
 /** A verdict drawn with a pen: pressure-shaped strokes (SVG), or a handwritten "?" for a line it couldn't read. */
@@ -363,6 +392,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.line,
   },
+  popoverFloating: { position: 'relative' },
   popHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   popTitle: { fontSize: 13, fontWeight: '700', color: C.sub },
   close: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },

@@ -7,6 +7,13 @@ import { latexToUnicode } from '../ui/mathText';
 /** Minimal markdown: paragraphs, "- " bullets, **bold**, `code`. Enough for tutor feedback. */
 type Tagging = { style: (tag: number) => TextStyle | undefined; onPress?: (tag: number) => void };
 
+/** latexToUnicode trims its input; inline pieces must keep their edge spaces ("look at " + tag + " and"). */
+function math(piece: string) {
+  const lead = /^\s*/.exec(piece)![0];
+  const trail = /\s*$/.exec(piece)![0];
+  return piece.trim() ? lead + latexToUnicode(piece) + trail : piece;
+}
+
 function inline(text: string, base: TextStyle, tagging?: Tagging) {
   // tutor replies name their marks as [[tag|words]]; without `tagging` the markup is dropped and only the words stay
   const plain = tagging ? text : text.replace(/\[\[\s*\d\s*\|([^\]]*)\]\]/g, '$1');
@@ -17,7 +24,8 @@ function inline(text: string, base: TextStyle, tagging?: Tagging) {
       const tag = Number(t[1]);
       return (
         <Text key={i} style={[base, styles.tagged, tagging.style(tag)]} onPress={tagging.onPress ? () => tagging.onPress!(tag) : undefined} suppressHighlighting>
-          {latexToUnicode(t[2])}
+          {/* hair spaces: a little room inside the tint, so it doesn't touch the words around it */}
+          {` ${math(t[2]).trim()} `}
         </Text>
       );
     }
@@ -37,7 +45,7 @@ function inline(text: string, base: TextStyle, tagging?: Tagging) {
     }
     return (
       <Text key={i} style={base}>
-        {latexToUnicode(p)}
+        {math(p)}
       </Text>
     );
   });

@@ -158,11 +158,11 @@ export function parseTagged(message: string, validTags: ReadonlySet<number>): Se
 /** The message with its markup removed (for logs, the leak guard and plain-text uses). */
 export const stripTags = (message: string): string => parseTagged(message, new Set()).map((s) => s.text).join('');
 
-/** Pen colors for tags 1..4 (index = tag - 1): the ink of the mark, the translucent wash behind its phrase. */
-export const TAG_COLORS: ReadonlyArray<{ pen: string; wash: string; solid: string }> = [
-  { pen: '#D9480F', wash: 'rgba(255,196,0,0.42)', solid: '#FFC400' },
-  { pen: '#C2255C', wash: 'rgba(255,107,170,0.32)', solid: '#FF6BAA' },
-  { pen: '#1971C2', wash: 'rgba(77,171,247,0.32)', solid: '#4DABF7' },
-  { pen: '#2B8A3E', wash: 'rgba(105,219,124,0.38)', solid: '#69DB7C' },
+/** Pen colors for tags 1..4 (index = tag - 1): the ink of the mark, its translucent wash on the page, and a lighter tint behind its phrase in chat. */
+export const TAG_COLORS: ReadonlyArray<{ pen: string; wash: string; solid: string; tint: string }> = [
+  { pen: '#D9480F', wash: 'rgba(255,196,0,0.42)', solid: '#FFC400', tint: 'rgba(255,196,0,0.16)' },
+  { pen: '#C2255C', wash: 'rgba(255,107,170,0.32)', solid: '#FF6BAA', tint: 'rgba(255,107,170,0.14)' },
+  { pen: '#1971C2', wash: 'rgba(77,171,247,0.32)', solid: '#4DABF7', tint: 'rgba(77,171,247,0.14)' },
+  { pen: '#2B8A3E', wash: 'rgba(105,219,124,0.38)', solid: '#69DB7C', tint: 'rgba(105,219,124,0.16)' },
 ];
 export const tagColor = (tag: number) => TAG_COLORS[Math.max(0, Math.min(TAG_COLORS.length - 1, tag - 1))];

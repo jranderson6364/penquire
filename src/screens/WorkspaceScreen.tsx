@@ -10,7 +10,8 @@ import { HelpLevelPicker } from '../components/HelpLevelPicker';
 import { QuestionBanner, QuestionPill } from '../components/QuestionBanner';
 import { TopBar } from '../components/TopBar';
 import { ENV } from '../config';
-import { MarksOverlay } from '../components/MarksOverlay';
+import { FloatingCard } from '../components/FloatingCard';
+import { MarkPopover, MarkPopoverCard, MarksOverlay, POPOVER_H, POPOVER_W } from '../components/MarksOverlay';
 import { BlocksLayer } from '../components/BlocksLayer';
 import { ClearMarksButton, TutorMarksLayer } from '../components/TutorMarksLayer';
 import { PageLayer, followViewport, useLiveViewport } from '../components/PageLayer';
@@ -205,6 +206,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const [tab, setTab] = React.useState<Tab>('feedback');
   const [draft, setDraft] = React.useState('');
   const [showMarks, setShowMarks] = React.useState(true);
+  /** the mark whose details are open; its card is in screen space (same size at any zoom, draggable) */
+  const [openMark, setOpenMark] = React.useState<{ id: string; at: { x: number; y: number } } | null>(null);
   const activePart = a?.activePart;
   const setActivePart = React.useCallback(
     (label: string | undefined) => {
@@ -1350,8 +1353,29 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
             onRate={rateMark}
             onConfirmReading={confirmLine}
             onInputBlur={() => canvasRef.current?.focus()}
+            {...(modern
+              ? {
+                  popoverOutside: true,
+                  open: openMark?.id ?? null,
+                  onOpenChange: (id: string | null) => setOpenMark(id ? { id, at: popoverSpot(id) } : null),
+                }
+              : {})}
           />
   );
+  /** where a mark's card first opens, in screen points: beside its line if it fits, else below it */
+  function popoverSpot(id: string) {
+    const line = check?.lines.find((l) => l.id === id);
+    if (!line) return { x: size.w - POPOVER_W - 16, y: 80 };
+    const s = viewport.scale;
+    const left = line.x * s + viewport.tx;
+    const right = (line.x + line.w) * s + viewport.tx;
+    const top = line.y * s + viewport.ty;
+    const bottom = (line.y + line.h) * s + viewport.ty;
+    if (right + 16 + POPOVER_W <= size.w) return { x: right + 16, y: top - 8 };
+    if (left - 16 - POPOVER_W >= 0) return { x: left - 16 - POPOVER_W, y: top - 8 };
+    return { x: left, y: bottom + 12 > size.h - POPOVER_H ? top - POPOVER_H - 12 : bottom + 12 };
+  }
+  const openVerdict = openMark && check && marksUsable && showMarks ? check.result.lines.find((v) => v.id === openMark.id) : undefined;
   const overlay = (
     <>
           {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={layerK} zoom={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
@@ -1466,6 +1490,24 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           </PageLayer>
         )}
         {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}
+        {openMark && openVerdict && size.w > 0 && (
+          <FloatingCard key={openMark.id} initial={openMark.at} bounds={size} width={POPOVER_W} height={POPOVER_H}>
+            <MarkPopoverCard>
+              <MarkPopover
+                v={openVerdict}
+                onClose={() => setOpenMark(null)}
+                onAsk={askAbout}
+                onMoreHelp={moreHelp}
+                onDispute={dispute}
+                repeats={repeats}
+                feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
+                onRate={rateMark}
+                onConfirmReading={confirmLine}
+                onInputBlur={() => canvasRef.current?.focus()}
+              />
+            </MarkPopoverCard>
+          </FloatingCard>
+        )}
         {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
         {(voice !== 'idle' || conversation) && (
           <View style={[styles.notice, styles.listening, voice !== 'listening' && { borderColor: C.line }]} accessibilityLiveRegion="polite">
