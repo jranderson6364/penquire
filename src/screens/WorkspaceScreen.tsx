@@ -25,11 +25,11 @@ import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, 
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
-import { listen, speak, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
+import { listen, speak, stopAllVoice, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
 import { pointedLine, sentences, speakable } from '../voice/text';
 import { turnDecision } from '../voice/turns';
 import { done as hapticDone, tick } from '../ui/haptics';
-import { getAssignment, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, writePage } from '../store/db';
+import { getAssignment, getEpisodes, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, updateEpisode, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { applyParse } from '../store/parseApply';
@@ -41,11 +41,67 @@ import { pruneMarks, resolveMarks } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
+import { LearningBar, fallbackMove, levelMove, repairedAfter } from '../components/LearningBar';
+import { clampMove, lineInkSig, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
+import { createGate, guardPartial } from '../learning/gate';
+import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
+import { takeSnapshot } from '../learning/snapshot';
+import { DEMO_PACK, DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
+import type { Channel, Episode, EpisodePolicy, HelpMove, Snapshot } from '../learning/types';
+import { applyReplyLeakGuard } from '../verify/guard';
 import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
 import { C, PALETTE } from '../theme';
 
-type Props = { assignmentId: string; onBack: () => void };
+type Props = {
+  assignmentId: string;
+  onBack: () => void;
+  /** pivot flow: open the independent attempt for this episode (route owned by App.tsx / T08) */
+  onStartIndependent?: (episodeId: string) => void;
+};
+
+// ---- pivot flow (demo episode) helpers: small and pure --------------------------------------
+
+/** The newest episode on this assignment, if any. */
+const episodeFor = (assignmentId: string): Episode | undefined =>
+  getEpisodes()
+    .filter((e) => e.assignmentId === assignmentId)
+    .sort((x, y) => y.updatedAt - x.updatedAt)[0];
+
+/** Help during the workspace goes on the repair attempt once it exists, else the initial attempt. */
+const workAttemptId = (ep: Episode) => ep.repairAttemptId ?? ep.initialAttemptId ?? '';
+
+/** Never wider than the assignment's own ceiling. */
+const pivotPolicy = (ep: Episode, a: Assignment): EpisodePolicy => ({ ...ep.policy, maxLevel: Math.min(ep.policy.maxLevel, a.policyMaxLevel) as HelpLevel });
+
+/** The first help on an untouched episode needs a copy of the attempt first. */
+const needsInitialSnap = (ep: Episode) => ep.phase === 'attempt' && !!ep.initialAttemptId && !ep.attempts[ep.initialAttemptId]?.snapshot;
+
+/** Stores a snapshot on an attempt once; a later call never replaces it. */
+const withSnapshot = (ep: Episode, attemptId: string, snap: Snapshot | undefined): Episode => {
+  const at = ep.attempts[attemptId];
+  if (!snap || !at || at.snapshot) return ep;
+  return { ...ep, attempts: { ...ep.attempts, [attemptId]: { ...at, snapshot: snap } } };
+};
+
+/** The first flagged line of a check, as the ink signature repairEvidence matches on, with the lines it was seen in. */
+type Flag = { sig: string; before: Line[] };
+const flagFrom = (lines: Line[], verdicts: LineVerdict[]): Flag | null => {
+  const flagged = verdicts.find((v) => v.verdict === 'incorrect' || v.verdict === 'partial');
+  const line = flagged && lines.find((l) => l.id === flagged.id);
+  return line ? { sig: lineInkSig(line), before: lines } : null;
+};
+
+/** New ink in the flagged line's place (same test as repairEvidence) is all valid. */
+const replacementValid = (flag: Flag, after: Line[], verdicts: LineVerdict[]): boolean => {
+  const flagged = flag.before.find((l) => lineInkSig(l) === flag.sig);
+  if (!flagged) return false;
+  const old = new Set(flag.before.map(lineInkSig));
+  const overlap = (l: Line) => Math.max(0, Math.min(l.y + l.h, flagged.y + flagged.h) - Math.max(l.y, flagged.y)) / Math.max(1, Math.min(l.h, flagged.h));
+  const fresh = after.filter((l) => !old.has(lineInkSig(l)) && overlap(l) >= 0.5);
+  const verdict = new Map(verdicts.map((v) => [v.id, v.verdict]));
+  return fresh.length > 0 && fresh.every((l) => verdict.get(l.id) === 'valid');
+};
 
 const tutorContext = (a: Assignment): TutorContext => ({
   course: a.course,
@@ -79,7 +135,7 @@ const providerFromSettings = (spend?: { total: number }) => {
   });
 };
 
-export function WorkspaceScreen({ assignmentId, onBack }: Props) {
+export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Props) {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const { width: winW } = useWindowDimensions();
@@ -87,7 +143,34 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const canvasRef = React.useRef<PencilCanvasHandle>(null);
 
   const [a, setA] = React.useState<Assignment | undefined>(() => getAssignment(assignmentId));
-  React.useEffect(() => subscribe(() => setA(getAssignment(assignmentId))), [assignmentId]);
+  // pivot flow: the demo assignment (or any assignment with an episode) runs attempt → direct help → repair
+  const [ep, setEp] = React.useState<Episode | undefined>(() => episodeFor(assignmentId));
+  React.useEffect(
+    () =>
+      subscribe(() => {
+        setA(getAssignment(assignmentId));
+        setEp(episodeFor(assignmentId));
+      }),
+    [assignmentId]
+  );
+  const pivot = assignmentId === DEMO_ASSIGNMENT_ID || !!ep;
+  const pivotRef = React.useRef(pivot);
+  pivotRef.current = pivot;
+  const epRef = React.useRef(ep);
+  epRef.current = ep;
+  React.useEffect(() => {
+    if (assignmentId === DEMO_ASSIGNMENT_ID && !ep) ensureDemo(Date.now());
+  }, [assignmentId, ep]);
+  // drops replies, streamed text and speech from before a boundary (episode load, "Try a fresh problem", leaving)
+  const gate = React.useRef(createGate()).current;
+  const epId = ep?.id;
+  React.useEffect(() => {
+    const e = epRef.current;
+    if (e) gate.enter({ episodeId: e.id, attemptId: workAttemptId(e), phase: e.phase });
+  }, [epId, gate]);
+  const [denied, setDenied] = React.useState<{ reason: string; alt?: HelpMove } | undefined>(undefined);
+  /** the line the last requested check flagged; kept until a check verifies its repair */
+  const flagRef = React.useRef<Flag | null>(null);
 
   const [pageIndex, setPageIndex] = React.useState(0);
   const [size, setSize] = React.useState({ w: 0, h: 0 });
@@ -222,6 +305,11 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     if (toolIsPixelEraser && pageId) pixelErased.current.add(pageId);
   }, [toolIsPixelEraser, pageId]);
   pageIdRef.current = pageId;
+  // pivot flow: after a relaunch (or a new demo page) the flag comes back from the page's latest check
+  React.useEffect(() => {
+    const c = pivotRef.current ? getAssignment(assignmentId)?.checks[pageId] : undefined;
+    flagRef.current = c ? flagFrom(c.lines, c.result.lines) : null;
+  }, [assignmentId, pageId, epId]);
   /** page whose saved drawing is currently loaded; never autosave a page that failed to load */
   const loadedPageRef = React.useRef('');
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -239,6 +327,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     const id = pageIdRef.current;
     const c = canvasRef.current;
     if (!id || !c) return true; // nothing on screen to save
+    // the page was removed under us (resetDemo deletes the demo page): never write it back
+    if (!getAssignment(assignmentId)?.pageIds.includes(id)) return true;
     if (!mayAutosave({ loadedPageId: loadedPageRef.current, pageId: id, savedDrawing: readPage(id) })) {
       setSaveState('blocked');
       return false;
@@ -252,7 +342,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       if (isTransientViewError(e)) return true;
       throw e;
     }
-  }, []);
+  }, [assignmentId]);
 
   // A pending autosave must not fire against a view that no longer exists.
   React.useEffect(
@@ -310,7 +400,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       stopSpeaking();
       // check as you write: a quiet check once the Pencil has rested (opt-in, capped; src/check/auto.ts)
       if (autoTimer.current) clearTimeout(autoTimer.current);
-      if (getSettings().autoCheck) autoTimer.current = setTimeout(() => autoRun.current(), AUTO_IDLE_MS);
+      // pivot flow: no ambient checks, whatever the setting says (feedback only when asked)
+      if (getSettings().autoCheck && !pivotRef.current) autoTimer.current = setTimeout(() => autoRun.current(), AUTO_IDLE_MS);
       setSaveState((s) => (s === 'blocked' ? s : 'dirty'));
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => void savePage().catch((err) => console.warn('autosave failed', err)), 800);
@@ -486,6 +577,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   // ---- actions -----------------------------------------------------------
   // check as you write: refreshed every render so the timer always runs the current runCheck
   autoRun.current = () => {
+    if (pivotRef.current) return;
     const now = Date.now();
     const busy = checking || sending || voice !== 'idle' || !hasKey;
     const fresh = strokeCount !== null && strokeCount !== (a.checks[pageId]?.strokeCount ?? -1);
@@ -495,7 +587,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   };
 
   /** quiet: a check-as-you-write check. Marks appear on the page; no panel, no notices; the panel button's dot says if something needs a look. */
-  const runCheck = async (quiet = false) => {
+  const runCheck = async (quiet = false, pivotMove?: { move: HelpMove; level: HelpLevel }) => {
     if (!hasKey) {
       say('Add your Anthropic API key in Settings to check your work.', 'warn');
       return;
@@ -508,6 +600,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         if (!quiet) say('Nothing to check yet. Write something on this page first.');
         return;
       }
+      const e0 = pivotMove ? epRef.current : undefined;
+      const level = pivotMove?.level ?? tutorContext(a).helpLevel;
       const prev = a.checks[pageId];
       // Only grade what is new or changed: lines verified earlier and untouched since stay as they were (src/check/carry.ts).
       // The pixel eraser can shrink a stroke without changing its box, so after using it nothing is carried.
@@ -515,6 +609,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       const current = lines.map((l) => ({ id: l.id, sig: sigs.get(l.id) ?? '' }));
       const plan = planCarry(current, prev && prev.space === 'page-v2' ? prev.result.lines : undefined, pixelErased.current.has(pageId) || (toolState.tool === 'eraser' && toolState.eraserMode === 'pixel'));
       if (prev && plan.toGrade.length === 0 && plan.dirtyParts.size === 0) {
+        if (pivotMove?.move === 'pointer') {
+          // the page is graded already: the pointer comes as a reply about the flagged line
+          setTab('chat');
+          setPanelOpen(true);
+          const f = prev.result.lines.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+          await send(`Point me to the issue${f ? ` on ${f.id}` : ''} without giving the answer.`, true, pivotMove.level, undefined, undefined, undefined, 'pointer');
+          return;
+        }
         setShowMarks(true);
         setTab('feedback');
         if (!quiet) {
@@ -526,9 +628,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
       // Readings the student confirmed for ink that hasn't changed (src/check/confirmed.ts).
       const conf = confirmedFor(a.confirmedReadings?.[pageId], current);
+      // pivot flow: the first help keeps a copy of the attempt as it was before any help is shown (page saved above)
+      const initialSnap = e0 && needsInitialSnap(e0) ? takeSnapshot(pageId, lines, strokes, Date.now()) : undefined;
       const spend = { total: 0 };
-      const fresh = await providerFromSettings(spend).check({
+      const stamp = gate.stamp();
+      const checked = await gate.guard(
+        providerFromSettings(spend).check({
         ...tutorContext(a),
+        helpLevel: level,
         image: { base64: image.base64, mediaType: 'image/png' },
         lines: lines.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
         pageNumber: pageIndex + 1,
@@ -536,10 +643,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         previous: prev ? { feedback: prev.result.feedback, stillOpen: prev.result.stillOpen } : undefined,
         settled: settled.length ? settled : undefined,
         confirmed: conf.input.length ? conf.input : undefined,
-      });
+        }),
+        stamp
+      );
+      if (!checked.ok) return; // a boundary passed while checking: show nothing
+      const fresh = checked.value;
       const mergedLines = mergeVerdicts(current, plan, fresh.lines);
       // Re-run the guards on the whole merged page: the provider's guards only saw the freshly graded lines (src/check/finalize.ts).
-      const result = guardMerged({ ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) }, tutorContext(a).helpLevel);
+      const result = guardMerged({ ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) }, level);
       if (!toolIsPixelEraser) pixelErased.current.delete(pageId);
       try {
         saveCheckImage(pageId, image.base64);
@@ -593,6 +704,26 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           ],
         };
       });
+      if (e0 && pivotMove) {
+        // record the check as delivered help; a requested check is also where a repair is verified (never by erasing)
+        const now = Date.now();
+        const flag = flagRef.current;
+        const ev = flag && (e0.phase === 'attempt' || e0.phase === 'repair') ? repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: lines, nowValid: replacementValid(flag, lines, result.lines) }) : undefined;
+        const repairSnap = ev?.verified ? takeSnapshot(pageId, lines, strokes, now) : undefined;
+        const revealed = result.revealed ? [...new Set(result.revealed.map((r) => r.kind))] : ('unknown' as const);
+        const next = updateEpisode(e0.id, (e) => {
+          let n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
+          n = recordAssistance(n, { attemptId: workAttemptId(n), move: pivotMove.move, level, channels: ['marks', 'text'], revealed, text: result.feedback, at: now }, newId('h_'));
+          if (ev?.verified) n = withSnapshot(markRepairVerified(n, now), n.repairAttemptId ?? '', repairSnap);
+          return n;
+        });
+        if (ev?.verified && next?.phase === 'repair_verified') {
+          flagRef.current = null;
+          say(`${repairedAfter(next.assistance)}.`);
+        } else {
+          flagRef.current = flagFrom(lines, result.lines) ?? flag;
+        }
+      }
       setShowMarks(true);
       if (!quiet) {
         hapticDone();
@@ -607,17 +738,38 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   };
 
   /** One tutor turn. Returns the guarded reply text (for voice), or undefined if it failed. */
-  const send = async (message: string, attachPage: boolean, levelOverride?: HelpLevel, intent?: ReplyIntent, evidence?: string, spoken?: boolean): Promise<string | undefined> => {
+  const send = async (
+    message: string,
+    attachPage: boolean,
+    levelOverride?: HelpLevel,
+    intent?: ReplyIntent,
+    evidence?: string,
+    spoken?: boolean,
+    /** pivot flow: the help move this reply delivers (recorded as assistance) */
+    move?: HelpMove,
+    /** pivot flow: an initial-attempt snapshot the caller already took */
+    presnap?: Snapshot
+  ): Promise<string | undefined> => {
+    const e0 = pivotRef.current ? epRef.current : undefined;
+    const stamp = gate.stamp();
     setSending(true);
     setDraft('');
     try {
       const cap = attachPage ? await capture() : null;
       const image = cap?.image ?? null;
       const level = levelOverride ?? tutorContext(a).helpLevel;
+      let initialSnap = presnap;
+      if (e0 && !initialSnap && needsInitialSnap(e0)) {
+        // flush the canvas first: the snapshot copies the saved page file
+        await savePage();
+        const c = cap ?? (await capture());
+        initialSnap = takeSnapshot(pageId, c.lines, c.strokes, Date.now());
+      }
       const strokeBox = new Map((cap?.strokeList ?? []).map((st) => [st.i, st]));
       const chunksByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, chunkLine(l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b))]));
       const spend = { total: 0 };
-      const reply = await providerFromSettings(spend).reply({
+      const replied = await gate.guard(
+        providerFromSettings(spend).reply({
         ...tutorContext(a),
         helpLevel: level,
         lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
@@ -630,10 +782,14 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
         pointingAt: cap && (spoken || /\b(this|here|that|these|those)\b/i.test(message)) ? pointedLine(cap.lines, cap.strokeList) : undefined,
         spoken,
-        onPartial: setStreamText,
+        onPartial: guardPartial(stamp, setStreamText),
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
-      });
+        }),
+        stamp
+      );
+      if (!replied.ok) return undefined; // a boundary passed while waiting: show and speak nothing
+      const reply = replied.value;
       const type = intent === 'start' ? 'start' : intent === 'dispute' ? 'dispute' : 'reply';
       updateAssignment(a.id, (x) => ({
         ...x,
@@ -652,6 +808,13 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : spoken ? 'voice' : undefined, costUSD: spend.total },
         ],
       }));
+      if (e0) {
+        const channels: Channel[] = ['text', ...(reply.marks.length ? (['marks'] as const) : []), ...(spoken ? (['speech'] as const) : [])];
+        updateEpisode(e0.id, (e) => {
+          const n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
+          return recordAssistance(n, { attemptId: workAttemptId(n), move: move ?? levelMove(level), level, channels, revealed: 'unknown', text: reply.text, at: Date.now() }, newId('h_'));
+        });
+      }
       return reply.text;
     } catch (e) {
       setDraft(message);
@@ -669,6 +832,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   const listening = React.useRef<Listening | null>(null);
   const starting = React.useRef(false);
   const releasedEarly = React.useRef(false);
+  /** bumped by Stop and by ending a conversation: a reply still on its way is then not spoken */
+  const voiceGen = React.useRef(0);
   const vocabulary = React.useMemo(() => [...a.problems.map((p) => p.label), 'theta', 'omega', 'vector', 'derivative', 'integral', 'line', 'part'], [a.problems]);
 
   const startTalk = async () => {
@@ -716,10 +881,12 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
 
   /** One spoken turn: send what was heard (with the page), then say the guarded reply. Shared by push-to-talk and hands-free. */
   const voiceTurn = async (text: string) => {
+    const stamp = gate.stamp();
+    const gen = voiceGen.current;
     setVoice('thinking');
     setTab('chat');
     const reply = await send(text, true, undefined, undefined, undefined, true);
-    if (!reply) return;
+    if (!reply || !gate.isCurrent(stamp) || gen !== voiceGen.current) return;
     setVoice('speaking');
     await speak(sentences(speakable(reply)));
   };
@@ -797,6 +964,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   };
 
   const endConversation = (message?: string) => {
+    voiceGen.current++;
     convo.current = false;
     setConversation(false);
     if (convoTimer.current) clearInterval(convoTimer.current);
@@ -808,18 +976,27 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setVoice('idle');
     if (message) say(message);
   };
-  React.useEffect(() => () => endConversation(), []);
+  // Leaving the screen: end the loop and every sound; in the pivot flow also drop replies still on their way.
+  React.useEffect(
+    () => () => {
+      endConversation();
+      stopAllVoice();
+      if (pivotRef.current) gate.enter({ episodeId: '', attemptId: '', phase: 'attempt' });
+    },
+    []
+  );
 
+  /** Stop means stop: it ends a hands-free conversation too (T01: the loop used to keep going after a stop). */
   const stopVoice = () => {
+    voiceGen.current++;
     if (convo.current) {
-      // in a conversation a tap while the tutor talks means "my turn": stop the voice, keep listening
-      if (voice === 'speaking') stopSpeaking();
-      else endConversation();
+      endConversation();
+      stopAllVoice();
       return;
     }
     listening.current?.cancel();
     listening.current = null;
-    stopSpeaking();
+    stopAllVoice();
     setHeard('');
     setVoice('idle');
   };
@@ -883,6 +1060,8 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   };
 
   const moreHelp = async (v: LineVerdict) => {
+    // pivot flow: no ladder climbing; "More help" asks for the explanation directly
+    if (pivot) return runMove('explain');
     const base = tutorContext(a).helpLevel;
     const key = issueKey(v.part, v.reading, v.sig);
     const esc = escalate(a.ladder ?? {}, key, base, a.policyMaxLevel);
@@ -903,14 +1082,95 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
     setPanelOpen(true);
     // what the deterministic guard found, so the tutor doesn't simply back down (src/ai/prompts.ts intentBlock)
     const evidence = v.guard === 'algebra' ? /(Algebra|Units) check:.*$/.exec(v.note)?.[0] : undefined;
-    await send(`I think the mark on ${v.id} ("${v.reading}") is wrong. Can you re-check it?`, true, undefined, 'dispute', evidence);
+    await send(`I think the mark on ${v.id} ("${v.reading}") is wrong. Can you re-check it?`, true, undefined, 'dispute', evidence, undefined, 'dispute');
   };
 
   /** "Help me start": no attempt needed; a policy-capped first move for the active part. */
   const helpStart = async () => {
+    if (pivot) return runMove('start');
     setTab('chat');
     setPanelOpen(true);
     await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, undefined, 'start');
+  };
+
+  // ---- pivot flow: direct help moves, the reviewed example, and the hand-off --------------------
+  /** Every move goes through the episode policy (never wider than the assignment's); a denied move offers the next one down. */
+  const runMove = async (m: HelpMove) => {
+    if (!ep) return;
+    setDenied(undefined);
+    const policy = pivotPolicy(ep, a);
+    const c = clampMove(m, policy);
+    if ('denied' in c) {
+      setDenied({ reason: c.denied, alt: fallbackMove(m, policy) });
+      return;
+    }
+    const flagged = check?.result.lines.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+    const on = flagged ? ` on ${flagged.id}` : '';
+    if (m === 'check' || m === 'pointer') return runCheck(false, { move: m, level: c.level });
+    if (m === 'example') return showExample(c.level);
+    setTab('chat');
+    setPanelOpen(true);
+    if (m === 'start') await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, c.level, 'start', undefined, undefined, 'start');
+    else if (m === 'explain') await send(`Explain the idea I need${on}. Teach the idea; don't solve my problem for me.`, true, c.level, undefined, undefined, undefined, 'explain');
+    else if (m === 'step') await send(`Show me one step${on}.`, true, c.level, undefined, undefined, undefined, 'step');
+  };
+
+  /** The pack's worked example (a different task), rendered directly but still through the reply leak guard. */
+  const showExample = async (level: HelpLevel) => {
+    const e0 = epRef.current;
+    if (!e0) return;
+    // the reviewed pack example: a different task from the recovery one
+    const task = e0.packVersion === DEMO_PACK.version ? demoTask(DEMO_TASK_IDS.example) : undefined;
+    if (!task?.workedSolution) {
+      setDenied({ reason: 'There is no reviewed example for this assignment.', alt: fallbackMove('example', pivotPolicy(e0, a)) });
+      return;
+    }
+    const stamp = gate.stamp();
+    setSending(true);
+    try {
+      let initialSnap: Snapshot | undefined;
+      if (needsInitialSnap(e0)) {
+        await savePage();
+        const cap = await capture();
+        initialSnap = takeSnapshot(pageId, cap.lines, cap.strokes, Date.now());
+      }
+      if (!gate.isCurrent(stamp)) return;
+      const guardLines = check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })) ?? [];
+      const text = `${learnerText(task.id)}\n\n${applyReplyLeakGuard(task.workedSolution, guardLines, level)}`;
+      const now = Date.now();
+      updateAssignment(a.id, (x) => ({
+        ...x,
+        chat: [...x.chat, { role: 'user', text: 'Show me another example.' }, { role: 'assistant', text }],
+        events: [...x.events, { t: now, type: 'reply', page: pageIndex + 1, level, detail: 'worked example' }],
+      }));
+      updateEpisode(e0.id, (e) => {
+        const n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
+        return recordAssistance(n, { attemptId: workAttemptId(n), move: 'example', level, channels: ['text'], revealed: ['example'], text, at: now }, newId('h_'));
+      });
+      setTab('chat');
+      setPanelOpen(true);
+    } catch (e) {
+      say(`The example didn't open: ${String(e instanceof Error ? e.message : e)}`, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** "Try a fresh problem": save, silence everything, close the tutor, drop late replies, then leave for the independent attempt. */
+  const startFresh = async () => {
+    const e0 = epRef.current;
+    if (!e0) return;
+    if (!(await saveOrWarn())) return;
+    endConversation();
+    stopAllVoice();
+    if (autoTimer.current) clearTimeout(autoTimer.current);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setPanelOpen(false);
+    setDenied(undefined);
+    gate.enter({ episodeId: e0.id, attemptId: workAttemptId(e0), phase: 'independent' });
+    // TODO(T08): App.tsx passes onStartIndependent → { name: 'independent', episodeId }; until then, back to Home
+    if (onStartIndependent) onStartIndependent(e0.id);
+    else onBack();
   };
 
   /** "Yes, that's what I wrote" / a corrected reading: the next check grades this ink as the student says it reads. */
@@ -1047,7 +1307,7 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         questionOn={showQuestion}
         onToggleQuestion={toggleQuestion}
         checking={checking}
-        onCheck={() => void runCheck()}
+        onCheck={() => void (pivot ? runMove('check') : runCheck())}
         voice={voice}
         onTalkStart={() => void startTalk()}
         onTalkEnd={() => void endTalk()}
@@ -1062,6 +1322,19 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         insetLeft={insets.left}
         insetRight={insets.right}
       />
+      {pivot && ep && (
+        <LearningBar
+          phase={ep.phase}
+          repairedText={repairedAfter(ep.assistance)}
+          busy={checking || sending}
+          denied={denied}
+          onMove={(m) => void runMove(m)}
+          onDismissDenied={() => setDenied(undefined)}
+          onFresh={() => void startFresh()}
+          insetLeft={insets.left}
+          insetRight={insets.right}
+        />
+      )}
       {showQuestion && (
         <QuestionBanner
           assignment={a}
