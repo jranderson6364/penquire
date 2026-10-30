@@ -249,3 +249,20 @@ test('speech exposure is added to the recorded help only once, and only to that 
   assert.equal(withSpeechExposure(a, 'h2', 30), a);
   assert.equal(withSpeechExposure(ep, 'missing', 30), ep);
 });
+
+test('pen down before the reply is audible keeps it; once audible it stops it', async () => {
+  const f = fakeVoice();
+  const backend = sentenceBackend(f.voice);
+  const sp = createSpeaker(() => backend);
+  const u = sp.begin();
+  sp.interruptIfStarted(); // student writes while the reply is still loading
+  assert.equal(u.live(), true);
+  u.push('One.');
+  u.push('Two.');
+  await tick();
+  assert.equal(f.current(), 'One.');
+  sp.interruptIfStarted(); // now it is talking: stop, and drop the queue
+  u.end();
+  await u.finished;
+  assert.deepEqual(f.spoken, ['One.']);
+});

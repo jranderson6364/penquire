@@ -79,8 +79,10 @@ function queue(): Queue {
 export type Speaker = {
   /** Start an utterance. Interrupts whatever was being said. */
   begin(o?: { onStart?: () => void; onSentence?: (i: number) => void }): Utterance;
-  /** End the current utterance (pen down, "your turn"). A conversation can go on. */
+  /** End the current utterance ("your turn", a new turn). A conversation can go on. */
   interrupt(): void;
+  /** End the current utterance only if it is already audible (pen down): a reply still loading keeps its speech. */
+  interruptIfStarted(): void;
   /** Stop everything requested so far, including listening that is still starting (see epoch()). */
   stopAll(): void;
   /** bumped by stopAll() only */
@@ -91,6 +93,7 @@ export function createSpeaker(backend: () => SpeechBackend): Speaker {
   let epoch = 0;
   let current = 0;
   let cancelActive: (() => void) | null = null;
+  let activeStarted: () => boolean = () => false;
 
   const interrupt = () => {
     current++;
@@ -116,6 +119,7 @@ export function createSpeaker(backend: () => SpeechBackend): Speaker {
       q.end();
       if (!playing) finish();
     };
+    activeStarted = () => started;
     return {
       live,
       started: () => started,
@@ -148,6 +152,9 @@ export function createSpeaker(backend: () => SpeechBackend): Speaker {
   return {
     begin,
     interrupt,
+    interruptIfStarted: () => {
+      if (activeStarted()) interrupt();
+    },
     stopAll: () => {
       epoch++;
       interrupt();

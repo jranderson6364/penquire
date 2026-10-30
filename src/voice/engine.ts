@@ -50,7 +50,7 @@ export const voiceAvailable = () => nativeApiVersion >= 4 && !!speech() && !!rec
 // ---------------------------------------------------------------- speaking
 
 let voice: VoiceInfo | undefined;
-let voicePicked = false;
+let picking: Promise<void> | null = null;
 let preferredVoiceId: string | undefined;
 let loggedVoice: string | undefined;
 
@@ -71,12 +71,19 @@ export async function englishVoices(): Promise<VoiceInfo[]> {
  */
 export function refreshVoice(preferredId?: string) {
   preferredVoiceId = preferredId;
-  voicePicked = false;
+  picking = null;
+  // choose now, while the student is still talking, so the first sentence doesn't wait for the voice list
+  const lib = speech();
+  if (lib) void pickVoice(lib);
 }
 
-async function pickVoice(lib: SpeechLib) {
-  if (voicePicked) return;
-  voicePicked = true;
+/** one choice per voice session, shared by the prefetch in refreshVoice() and the first sentence */
+function pickVoice(lib: SpeechLib): Promise<void> {
+  if (!picking) picking = choose(lib);
+  return picking;
+}
+
+async function choose(lib: SpeechLib) {
   try {
     const all = await lib.getAvailableVoicesAsync();
     voice = chooseVoice(all, preferredVoiceId);
@@ -171,6 +178,11 @@ export async function previewVoice(identifier?: string) {
  */
 export function stopSpeaking() {
   speaker.interrupt();
+}
+
+/** The student started writing: stop the tutor if it is talking, but keep a reply that is still on its way. */
+export function stopSpeakingIfTalking() {
+  speaker.interruptIfStarted();
 }
 
 /**

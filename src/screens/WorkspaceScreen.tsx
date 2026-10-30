@@ -25,7 +25,7 @@ import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, 
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
-import { beginSpeech, listen, refreshVoice, stopAllVoice, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
+import { beginSpeech, listen, refreshVoice, stopAllVoice, stopSpeaking, stopSpeakingIfTalking, voiceAvailable, type Listening } from '../voice/engine';
 import { pointedLine, speakable, unspoken } from '../voice/text';
 import { createVoiceActivity, listenState, turnDecision, type TurnState } from '../voice/turns';
 import { withSpeechExposure, type SpokenReply } from '../voice/session';
@@ -397,8 +397,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const onDrawingChanged = React.useCallback(
     (e: { strokeCount: number }) => {
       setStrokeCount(e.strokeCount);
-      // writing means the student is thinking: the tutor stops talking (barge-in by pen)
-      stopSpeaking();
+      // writing means the student is thinking: the tutor stops talking (barge-in by pen); a reply still loading is kept
+      stopSpeakingIfTalking();
       // check as you write: a quiet check once the Pencil has rested (opt-in, capped; src/check/auto.ts)
       if (autoTimer.current) clearTimeout(autoTimer.current);
       // pivot flow: no ambient checks, whatever the setting says (feedback only when asked)
@@ -903,8 +903,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     const gen = voiceGen.current;
     const said: string[] = [];
     let exposure: { episodeId: string; id: string } | null = null;
+    const sentAt = Date.now();
     const u = beginSpeech({
       onStart: () => {
+        console.warn(`[penquire:voice] first audio ${Date.now() - sentAt} ms after the turn was sent`);
         setVoice('speaking');
         const x = exposure;
         exposure = null;
