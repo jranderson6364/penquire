@@ -19,8 +19,9 @@ export type ToolState = {
 export const COLORS = ['#111111', '#1D4ED8', '#DC2626', '#16A34A', '#9333EA', '#F59E0B', '#0891B2', '#6B7280'];
 export const HIGHLIGHT_COLORS = ['#FDE047', '#86EFAC', '#93C5FD', '#F9A8D4', '#FDBA74'];
 /**
- * Part-of-a-stroke eraser diameters in SCREEN points: the eraser keeps its size on screen at any zoom (the width sent to
- * PencilKit is divided by the zoom), and the ring around the Pencil tip (build 8+) shows exactly this size.
+ * Eraser diameters in SCREEN points, for both modes: the eraser keeps its size on screen at any zoom (the width sent to
+ * PencilKit is divided by the zoom), and the ring around the Pencil tip (build 8+) shows exactly this size. The
+ * whole-stroke eraser uses the size from build 10 (older builds erase any stroke the tip touches).
  */
 export const ERASER_SIZES = [8, 16, 28, 44];
 
@@ -55,20 +56,18 @@ export type NativeToolSpec =
 export function toNativeSpec(s: ToolState, zoom = 1): NativeToolSpec {
   if (s.tool === 'eraser') {
     const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-    return s.eraserMode === 'stroke'
-      ? { kind: 'eraser', eraser: 'vector' }
-      : { kind: 'eraser', eraser: 'fixed', eraserWidth: Math.round((eraserDiameter(s) / z) * 10) / 10 };
+    return { kind: 'eraser', eraser: s.eraserMode === 'stroke' ? 'vector' : 'fixed', eraserWidth: Math.round((eraserDiameter(s) / z) * 10) / 10 };
   }
   if (s.tool === 'lasso') return { kind: 'lasso' };
   const t = s.tool;
   return { kind: 'ink', ink: t, color: s.colors[t], width: WIDTHS[t][clampIdx(s.widthIdx[t], WIDTHS[t].length)] };
 }
 
-/** The part-of-a-stroke eraser's diameter on screen (points). */
+/** The eraser's diameter on screen (points). */
 export const eraserDiameter = (s: ToolState) => ERASER_SIZES[clampIdx(s.eraserSizeIdx, ERASER_SIZES.length)];
 
-/** Diameter of the ring drawn around the Pencil tip: only for the part-of-a-stroke eraser; 0 = no ring. */
-export const eraserRing = (s: ToolState) => (s.tool === 'eraser' && s.eraserMode === 'pixel' ? eraserDiameter(s) : 0);
+/** Diameter of the ring drawn around the Pencil tip while erasing (either mode); 0 = no ring. */
+export const eraserRing = (s: ToolState) => (s.tool === 'eraser' ? eraserDiameter(s) : 0);
 
 const clampIdx = (i: number, len: number) => Math.max(0, Math.min(len - 1, Math.round(Number.isFinite(i) ? i : 0)));
 

@@ -238,24 +238,41 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
 
   // Tools: the toolbar is JS; the native canvas only receives a small generic spec.
-  // The part-of-a-stroke eraser keeps its size on screen: its page width follows the settled zoom.
-  const eraserZoom = toolState.tool === 'eraser' && toolState.eraserMode === 'pixel' ? viewport.scale : 1;
+  // The eraser keeps its size on screen: its page width follows the settled zoom.
+  const eraserZoom = toolState.tool === 'eraser' ? viewport.scale : 1;
   React.useEffect(() => {
     if (!modern) return;
     const c = canvasRef.current;
     if (!c) return;
-    c.setTool(toNativeSpec(toolState, eraserZoom)).catch((e) => console.warn('setTool failed', e));
-    // only when it changed: toggling the ruler can make PencilKit adjust the view
-    if (rulerSent.current !== toolState.ruler) {
-      rulerSent.current = toolState.ruler;
-      c.setRulerActive(toolState.ruler).catch((e) => console.warn('setRulerActive failed', e));
-    }
+    // Right after the page opens the native view may not be registered yet (ViewNotFound): the saved tool was then
+    // never applied, so the toolbar showed the eraser while the Pencil drew with the pen. Retry until it lands.
+    let cancelled = false;
+    const spec = toNativeSpec(toolState, eraserZoom);
+    const ruler = toolState.ruler;
+    const send = async (tries: number) => {
+      try {
+        await c.setTool(spec);
+        // only when it changed: toggling the ruler can make PencilKit adjust the view
+        if (rulerSent.current !== ruler) {
+          await c.setRulerActive(ruler);
+          rulerSent.current = ruler;
+        }
+      } catch (e) {
+        if (cancelled) return;
+        if (tries <= 0) return console.warn('setTool failed', e);
+        setTimeout(() => !cancelled && void send(tries - 1), 150);
+      }
+    };
+    void send(20);
     toolChangedAt.current = Date.now();
     saveSettings({ toolState });
+    return () => {
+      cancelled = true;
+    };
   }, [modern, toolState]);
   // only on a zoom change (tool changes are sent above, without saving settings or the jump diagnostic)
   React.useEffect(() => {
-    if (!modern || toolState.tool !== 'eraser' || toolState.eraserMode !== 'pixel') return;
+    if (!modern || toolState.tool !== 'eraser') return;
     canvasRef.current?.setTool(toNativeSpec(toolState, eraserZoom)).catch((e) => console.warn('setTool failed', e));
   }, [eraserZoom]);
   const rulerSent = React.useRef<boolean | null>(null);

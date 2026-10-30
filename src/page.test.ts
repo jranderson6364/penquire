@@ -41,13 +41,13 @@ test('tool spec: pen, marker, eraser modes, lasso', () => {
   const s = DEFAULT_TOOL_STATE;
   assert.deepEqual(toNativeSpec(s), { kind: 'ink', ink: 'pen', color: '#111111', width: WIDTHS.pen[1] });
   assert.deepEqual(toNativeSpec(selectTool(s, 'marker')), { kind: 'ink', ink: 'marker', color: '#FDE047', width: WIDTHS.marker[1] });
-  assert.deepEqual(toNativeSpec(selectTool(s, 'eraser')), { kind: 'eraser', eraser: 'vector' });
+  assert.deepEqual(toNativeSpec(selectTool(s, 'eraser')), { kind: 'eraser', eraser: 'vector', eraserWidth: 16 });
   assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }), { kind: 'eraser', eraser: 'fixed', eraserWidth: 28 });
   // the same size on screen at any zoom: the page width shrinks as the page is zoomed in
   assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }, 2), { kind: 'eraser', eraser: 'fixed', eraserWidth: 14 });
   assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }, 0), { kind: 'eraser', eraser: 'fixed', eraserWidth: 28 });
   assert.equal(eraserRing({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 3 }), 44);
-  assert.equal(eraserRing({ ...selectTool(s, 'eraser'), eraserMode: 'stroke' }), 0);
+  assert.equal(eraserRing({ ...selectTool(s, 'eraser'), eraserMode: 'stroke' }), 16);
   assert.equal(eraserRing(s), 0);
   assert.deepEqual(toNativeSpec(selectTool(s, 'lasso')), { kind: 'lasso' });
 });
