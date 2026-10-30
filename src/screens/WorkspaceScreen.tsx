@@ -43,13 +43,14 @@ import { pruneMarks, resolveMarks } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
-import { LearningBar, fallbackMove, levelMove, repairedAfter } from '../components/LearningBar';
-import { clampMove, lineInkSig, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
+import { LearningBar } from '../components/LearningBar';
+import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
+import { fallbackMove, flagFrom, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, withSnapshot, workAttemptId, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { takeSnapshot } from '../learning/snapshot';
 import { DEMO_PACK, DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
-import type { Channel, Episode, EpisodePolicy, HelpMove, Snapshot } from '../learning/types';
+import type { Channel, Episode, HelpMove, Snapshot } from '../learning/types';
 import { applyReplyLeakGuard } from '../verify/guard';
 import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
@@ -69,41 +70,6 @@ const episodeFor = (assignmentId: string): Episode | undefined =>
   getEpisodes()
     .filter((e) => e.assignmentId === assignmentId)
     .sort((x, y) => y.updatedAt - x.updatedAt)[0];
-
-/** Help during the workspace goes on the repair attempt once it exists, else the initial attempt. */
-const workAttemptId = (ep: Episode) => ep.repairAttemptId ?? ep.initialAttemptId ?? '';
-
-/** Never wider than the assignment's own ceiling. */
-const pivotPolicy = (ep: Episode, a: Assignment): EpisodePolicy => ({ ...ep.policy, maxLevel: Math.min(ep.policy.maxLevel, a.policyMaxLevel) as HelpLevel });
-
-/** The first help on an untouched episode needs a copy of the attempt first. */
-const needsInitialSnap = (ep: Episode) => ep.phase === 'attempt' && !!ep.initialAttemptId && !ep.attempts[ep.initialAttemptId]?.snapshot;
-
-/** Stores a snapshot on an attempt once; a later call never replaces it. */
-const withSnapshot = (ep: Episode, attemptId: string, snap: Snapshot | undefined): Episode => {
-  const at = ep.attempts[attemptId];
-  if (!snap || !at || at.snapshot) return ep;
-  return { ...ep, attempts: { ...ep.attempts, [attemptId]: { ...at, snapshot: snap } } };
-};
-
-/** The first flagged line of a check, as the ink signature repairEvidence matches on, with the lines it was seen in. */
-type Flag = { sig: string; before: Line[] };
-const flagFrom = (lines: Line[], verdicts: LineVerdict[]): Flag | null => {
-  const flagged = verdicts.find((v) => v.verdict === 'incorrect' || v.verdict === 'partial');
-  const line = flagged && lines.find((l) => l.id === flagged.id);
-  return line ? { sig: lineInkSig(line), before: lines } : null;
-};
-
-/** New ink in the flagged line's place (same test as repairEvidence) is all valid. */
-const replacementValid = (flag: Flag, after: Line[], verdicts: LineVerdict[]): boolean => {
-  const flagged = flag.before.find((l) => lineInkSig(l) === flag.sig);
-  if (!flagged) return false;
-  const old = new Set(flag.before.map(lineInkSig));
-  const overlap = (l: Line) => Math.max(0, Math.min(l.y + l.h, flagged.y + flagged.h) - Math.max(l.y, flagged.y)) / Math.max(1, Math.min(l.h, flagged.h));
-  const fresh = after.filter((l) => !old.has(lineInkSig(l)) && overlap(l) >= 0.5);
-  const verdict = new Map(verdicts.map((v) => [v.id, v.verdict]));
-  return fresh.length > 0 && fresh.every((l) => verdict.get(l.id) === 'valid');
-};
 
 const tutorContext = (a: Assignment): TutorContext => ({
   course: a.course,

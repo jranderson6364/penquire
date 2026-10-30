@@ -1,63 +1,10 @@
 import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { HelpLevel } from '../ai/types';
-import { clampMove } from '../learning/session';
-import type { Assistance, EpisodePolicy, HelpMove, Phase } from '../learning/types';
+import type { HelpMove, Phase } from '../learning/types';
+import { MOVE_TITLE, phaseLabel } from '../learning/workspaceFlow';
 import { C, R, S, T } from '../theme';
 import { Button } from './Button';
-
-// ---- pure helpers (no React; kept small so they can move to src/learning/ with tests) ----
-
-/** docs/03 "Required learning states" */
-export function phaseLabel(phase: Phase): string {
-  switch (phase) {
-    case 'attempt':
-      return 'Attempting';
-    case 'repair':
-      return 'Repairing with help';
-    case 'repair_verified':
-      return 'Repair verified';
-    case 'independent':
-      return 'Independent attempt';
-    case 'independent_submitted':
-      return 'Independent attempt submitted';
-    case 'outcome':
-      return 'Result recorded';
-  }
-}
-
-/** The move a stored HelpLevel stands for (typed chat, voice): 0 check … 4 step. */
-export function levelMove(level: HelpLevel): HelpMove {
-  return (['check', 'pointer', 'explain', 'example', 'step'] as const)[level];
-}
-
-const STRONGEST_FIRST: HelpMove[] = ['step', 'example', 'explain', 'pointer', 'check'];
-
-/** The strongest move below `move` that the policy allows (for a denied move), or undefined. */
-export function fallbackMove(move: HelpMove, policy: EpisodePolicy): HelpMove | undefined {
-  const from = STRONGEST_FIRST.indexOf(move === 'start' ? 'explain' : move === 'dispute' ? 'check' : move);
-  return STRONGEST_FIRST.slice(from + 1).find((m) => 'level' in clampMove(m, policy));
-}
-
-const HELP_NAME: Record<HelpLevel, string> = { 0: 'a check', 1: 'a pointer', 2: 'an explanation', 3: 'an example', 4: 'a step' };
-
-/** "Repaired after an explanation": the strongest help actually delivered in this episode. */
-export function repairedAfter(assistance: Assistance[]): string {
-  if (assistance.length === 0) return 'Repaired';
-  const top = Math.max(...assistance.map((x) => x.level)) as HelpLevel;
-  return `Repaired after ${HELP_NAME[top]}`;
-}
-
-export const MOVE_TITLE: Record<HelpMove, string> = {
-  check: 'Check',
-  pointer: 'Find the issue',
-  explain: 'Explain the idea',
-  example: 'Show another example',
-  step: 'Show one step',
-  start: 'Help me start',
-  dispute: 'I think this is right',
-};
 
 // ---- the bar ------------------------------------------------------------------------------
 
