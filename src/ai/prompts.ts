@@ -162,3 +162,12 @@ export function intentBlock(intent: ReplyIntent | undefined, part?: string, evid
       return '';
   }
 }
+
+/**
+ * A reply that will be SPOKEN (voice turn). Sentences are spoken as soon as each one streams in, so the first one must
+ * stand on its own. Limits (help level, leak guard) are unchanged; this is only how to say it.
+ */
+export const SPOKEN_RULES = `The student asked out loud and your answer will be SPOKEN, sentence by sentence as you write it. Talk like a tutor sitting next to them:
+- 1 to 3 short sentences, conversational. Make the first sentence useful on its own. At most one question, and end with it.
+- No markdown, lists, headings, symbols or LaTeX. Say math the way a tutor says it aloud: "two times the quantity three x minus four", "x squared over two", "six x minus eight equals ten". Refer to lines as "line 3", never "L3".
+- If the page is blank or doesn't show what they are talking about, engage with what they SAID: respond to their spoken reasoning as you would to written work. Mention that nothing is written yet at most once in the conversation (not if you already said it), and suggest writing only when seeing the work would really help.`;

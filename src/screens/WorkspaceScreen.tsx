@@ -25,9 +25,10 @@ import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, 
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
-import { listen, speak, stopAllVoice, stopSpeaking, voiceAvailable, type Listening } from '../voice/engine';
-import { pointedLine, sentences, speakable } from '../voice/text';
-import { turnDecision } from '../voice/turns';
+import { beginSpeech, listen, refreshVoice, stopAllVoice, stopSpeaking, stopSpeakingIfTalking, voiceAvailable, type Listening } from '../voice/engine';
+import { pointedLine, speakable, unspoken } from '../voice/text';
+import { createVoiceActivity, listenState, turnDecision, type TurnState } from '../voice/turns';
+import { withSpeechExposure, type SpokenReply } from '../voice/session';
 import { done as hapticDone, tick } from '../ui/haptics';
 import { getAssignment, getEpisodes, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, updateEpisode, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
@@ -402,8 +403,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const onDrawingChanged = React.useCallback(
     (e: { strokeCount: number }) => {
       setStrokeCount(e.strokeCount);
-      // writing means the student is thinking: the tutor stops talking (barge-in by pen)
-      stopSpeaking();
+      // writing means the student is thinking: the tutor stops talking (barge-in by pen); a reply still loading is kept
+      stopSpeakingIfTalking();
       // check as you write: a quiet check once the Pencil has rested (opt-in, capped; src/check/auto.ts)
       if (autoTimer.current) clearTimeout(autoTimer.current);
       // pivot flow: no ambient checks, whatever the setting says (feedback only when asked)
@@ -756,7 +757,9 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     /** pivot flow: the help move this reply delivers (recorded as assistance) */
     move?: HelpMove,
     /** pivot flow: an initial-attempt snapshot the caller already took */
-    presnap?: Snapshot
+    presnap?: Snapshot,
+    /** voice: speak guarded sentences as they stream, and record speech exposure only once speech really started */
+    speech?: SpokenReply
   ): Promise<string | undefined> => {
     const e0 = pivotRef.current ? epRef.current : undefined;
     const stamp = gate.stamp();
@@ -790,7 +793,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
         pointingAt: cap && (spoken || /\b(this|here|that|these|those)\b/i.test(message)) ? pointedLine(cap.lines, cap.strokeList) : undefined,
         spoken,
-        onPartial: guardPartial(stamp, setStreamText),
+        onPartial: guardPartial(stamp, (t: string) => {
+          setStreamText(t);
+          speech?.onPartial(t);
+        }),
         part: activePart,
         markLineIds: cap && image ? cap.lines.map((l) => l.id) : undefined,
         }),
@@ -817,11 +823,15 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         ],
       }));
       if (e0) {
-        const channels: Channel[] = ['text', ...(reply.marks.length ? (['marks'] as const) : []), ...(spoken ? (['speech'] as const) : [])];
+        // speech counts as delivered only once it actually started; if it starts later, the voice turn adds it
+        const saidAloud = spoken && (speech ? speech.started() : true);
+        const channels: Channel[] = ['text', ...(reply.marks.length ? (['marks'] as const) : []), ...(saidAloud ? (['speech'] as const) : [])];
+        const hid = newId('h_');
         updateEpisode(e0.id, (e) => {
           const n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
-          return recordAssistance(n, { attemptId: workAttemptId(n), move: move ?? levelMove(level), level, channels, revealed: 'unknown', text: reply.text, at: Date.now() }, newId('h_'));
+          return recordAssistance(n, { attemptId: workAttemptId(n), move: move ?? levelMove(level), level, channels, revealed: 'unknown', text: reply.text, at: Date.now() }, hid);
         });
+        if (spoken && !saidAloud) speech?.recorded(e0.id, hid);
       }
       return reply.text;
     } catch (e) {
@@ -837,6 +847,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   // ---- voice: hold Check (or squeeze the Pencil) to talk; the answer is spoken (docs/10 §4) ----------------
   const [voice, setVoice] = React.useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [heard, setHeard] = React.useState('');
+  /** hands-free: the student said something and is pausing, so the tutor is waiting for them (src/voice/turns.ts) */
+  const [pausing, setPausing] = React.useState(false);
   const listening = React.useRef<Listening | null>(null);
   const starting = React.useRef(false);
   const releasedEarly = React.useRef(false);
@@ -851,6 +863,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     }
     if (listening.current || starting.current) return;
     stopSpeaking();
+    refreshVoice(getSettings().voiceId);
     setHeard('');
     setVoice('listening');
     starting.current = true;
@@ -887,27 +900,63 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     setVoice((v) => (v === 'speaking' || v === 'thinking' ? 'idle' : v));
   };
 
-  /** One spoken turn: send what was heard (with the page), then say the guarded reply. Shared by push-to-talk and hands-free. */
+  /**
+   * One spoken turn: send what was heard (with the page), then say the guarded reply. Shared by push-to-talk and
+   * hands-free. The utterance exists before the fetch, so a Stop while the reply loads kills it (src/voice/session.ts).
+   * Sentences are spoken as the stream releases them, each one already through the leak guard (src/ai/index.ts); the
+   * final, fully guarded reply supplies only what was not said yet. Nothing unguarded is ever spoken.
+   */
   const voiceTurn = async (text: string) => {
     const stamp = gate.stamp();
     const gen = voiceGen.current;
+    const said: string[] = [];
+    let exposure: { episodeId: string; id: string } | null = null;
+    const sentAt = Date.now();
+    const u = beginSpeech({
+      onStart: () => {
+        console.warn(`[penquire:voice] first audio ${Date.now() - sentAt} ms after the turn was sent`);
+        setVoice('speaking');
+        const x = exposure;
+        exposure = null;
+        if (x) updateEpisode(x.episodeId, (e) => withSpeechExposure(e, x.id, Date.now()));
+      },
+    });
+    const live = () => u.live() && gate.isCurrent(stamp) && gen === voiceGen.current;
+    const sayNew = (t: string, final: boolean) => {
+      if (!live()) return;
+      for (const s of unspoken(said, t, final)) {
+        said.push(s);
+        u.push(speakable(s));
+      }
+    };
     setVoice('thinking');
     setTab('chat');
-    const reply = await send(text, true, undefined, undefined, undefined, true);
-    if (!reply || !gate.isCurrent(stamp) || gen !== voiceGen.current) return;
-    setVoice('speaking');
-    await speak(sentences(speakable(reply)));
+    const reply = await send(text, true, undefined, undefined, undefined, true, undefined, undefined, {
+      onPartial: (t) => sayNew(t, false),
+      started: u.started,
+      recorded: (episodeId, id) => {
+        exposure = { episodeId, id };
+      },
+    });
+    if (reply) sayNew(reply, true);
+    u.end();
+    await u.finished;
   };
 
   // ---- hands-free conversation: the mic stays open; a pause ends your turn; the tutor answers aloud; repeat ----
   const [conversation, setConversation] = React.useState(false);
   const convo = React.useRef(false);
   const convoTimer = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  /** the turn being heard now; "Send now" marks it */
+  const turnRef = React.useRef<TurnState | null>(null);
 
   const listenForTurn = async () => {
     if (!convo.current) return;
-    const turn = { startedAt: Date.now(), lastChangeAt: Date.now(), text: '' };
+    const turn: TurnState = { startedAt: Date.now(), lastChangeAt: Date.now(), text: '' };
+    turnRef.current = turn;
+    const activity = createVoiceActivity();
     setHeard('');
+    setPausing(false);
     setVoice('listening');
     let l: Listening | null = null;
     try {
@@ -925,6 +974,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           if (convoTimer.current) clearInterval(convoTimer.current);
           listening.current = null;
           setTimeout(() => void listenForTurn(), 300);
+        },
+        // the turn stays open while the student is audibly talking, even before the transcript catches up
+        (level) => {
+          if (activity.sample(level)) turn.lastVoiceAt = Date.now();
         }
       );
     } catch (e) {
@@ -938,10 +991,13 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     listening.current = l;
     if (convoTimer.current) clearInterval(convoTimer.current);
     convoTimer.current = setInterval(() => {
-      const d = turnDecision(turn, Date.now());
+      const now = Date.now();
+      setPausing(!!turn.text.trim() && listenState(turn, now) === 'waiting');
+      const d = turnDecision(turn, now);
       if (d === 'wait') return;
       if (convoTimer.current) clearInterval(convoTimer.current);
       convoTimer.current = null;
+      turnRef.current = null;
       const cur = listening.current;
       listening.current = null;
       if (d === 'give_up') {
@@ -952,6 +1008,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       void (async () => {
         const text = (await cur?.finish()) || turn.text;
         setHeard('');
+        setPausing(false);
         if (!convo.current) return;
         await voiceTurn(text);
         if (convo.current) void listenForTurn();
@@ -959,15 +1016,23 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     }, 200);
   };
 
+  /** Hands-free: the student is done talking; don't wait for the pause. */
+  const sendNow = () => {
+    if (turnRef.current) turnRef.current.sendNow = true;
+  };
+
+  /** Hands-free: cut the tutor off and go back to listening; the conversation goes on (Stop ends it). */
+  const yourTurn = () => stopSpeaking();
+
   const startConversation = () => {
     if (!voiceAvailable()) {
       say('Voice needs the newest app build. Install it from the Expo build page.', 'warn');
       return;
     }
     stopSpeaking();
+    refreshVoice(getSettings().voiceId);
     convo.current = true;
     setConversation(true);
-    say('Conversation on: talk any time; pause when you are done. Tap the mic to end.');
     void listenForTurn();
   };
 
@@ -977,10 +1042,12 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     setConversation(false);
     if (convoTimer.current) clearInterval(convoTimer.current);
     convoTimer.current = null;
+    turnRef.current = null;
     listening.current?.cancel();
     listening.current = null;
     stopSpeaking();
     setHeard('');
+    setPausing(false);
     setVoice('idle');
     if (message) say(message);
   };
@@ -1400,13 +1467,30 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         )}
         {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}
         {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
-        {voice === 'listening' && (
-          <View pointerEvents="none" style={[styles.notice, styles.listening]} accessibilityLiveRegion="polite">
-            <Text style={styles.listeningDot}>●</Text>
-            <Text style={styles.noticeText} numberOfLines={2}>{heard || 'Listening…'}</Text>
+        {(voice !== 'idle' || conversation) && (
+          <View style={[styles.notice, styles.listening, voice !== 'listening' && { borderColor: C.line }]} accessibilityLiveRegion="polite">
+            <Text style={[styles.listeningDot, voice !== 'listening' && { color: C.sub }]}>●</Text>
+            <View style={{ flexShrink: 1 }}>
+              <Text style={styles.voiceState}>
+                {voice === 'thinking' ? 'Thinking…' : voice === 'speaking' ? 'Speaking…' : pausing ? "I'm waiting for you…" : 'Listening…'}
+              </Text>
+              {voice === 'listening' && !!heard && (
+                <Text style={styles.noticeText} numberOfLines={2}>
+                  {heard}
+                </Text>
+              )}
+              {notice && notice.tone !== 'info' && (
+                <Text style={[styles.noticeText, { color: notice.tone === 'error' ? C.incorrect : C.partial }]} numberOfLines={2}>
+                  {notice.text}
+                </Text>
+              )}
+            </View>
+            {conversation && voice === 'listening' && !!heard && <Button title="Send now" kind="primary" small onPress={sendNow} />}
+            {conversation && voice === 'speaking' && <Button title="Your turn" small onPress={yourTurn} />}
+            <Button title={conversation ? 'End' : 'Stop'} small onPress={stopVoice} />
           </View>
         )}
-        {notice && voice !== 'listening' && (
+        {notice && voice === 'idle' && !conversation && (
           <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
             <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>
           </Pressable>
@@ -1490,4 +1574,5 @@ const styles = StyleSheet.create({
   noticeText: { fontSize: 14, color: C.ink, textAlign: 'center' },
   listening: { flexDirection: 'row', alignItems: 'center', gap: 8, borderColor: C.incorrect },
   listeningDot: { color: C.incorrect, fontSize: 12 },
+  voiceState: { fontSize: 13, fontWeight: '700', color: C.sub },
 });

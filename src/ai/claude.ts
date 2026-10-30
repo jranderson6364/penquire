@@ -1,4 +1,4 @@
-import { TUTOR_RULES, contextBlock, intentBlock, levelBlock } from './prompts';
+import { SPOKEN_RULES, TUTOR_RULES, contextBlock, intentBlock, levelBlock } from './prompts';
 import { StreamAssembler, partialStringField } from './stream';
 import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
@@ -555,7 +555,7 @@ Check my work. First verify each line yourself, including steps I did in my head
         input.pointingAt ? `\n\nThe student's Pencil is on ${input.pointingAt} (the line they wrote most recently): "this", "here" or "that" in their message means ${input.pointingAt} unless they say otherwise.` : ''
       }\n\nSTUDENT: ${input.message}\n\n(${
         input.spoken
-          ? 'The student asked out loud and your answer will be SPOKEN. Answer in at most three short sentences a person would say aloud: no markdown, no lists, no LaTeX; say math in words ("x squared over two"). Refer to lines as "line 3", never "L3". One question max.'
+          ? SPOKEN_RULES
           : 'Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.'
       })`,
     });

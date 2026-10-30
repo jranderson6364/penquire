@@ -100,6 +100,8 @@ export type Settings = {
   twoFingerScroll?: boolean;
   /** light / dark / follow the system (src/appearance.ts); absent = system */
   appearance?: 'system' | 'light' | 'dark';
+  /** the tutor's voice (an expo-speech identifier); absent or no longer installed = the best installed voice */
+  voiceId?: string;
 };
 
 export type DB = {
