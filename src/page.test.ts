@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { IDENTITY_VIEWPORT, boxToScreen, intersectsView, pageToScreenX, parseViewport, sameViewport, screenToPageX, screenToPageY, pageToScreenY, type Viewport } from './page.ts';
-import { DEFAULT_TOOL_STATE, normalizeToolState, selectTool, setColor, setWidth, toNativeSpec, toggleEraser, WIDTHS } from './tools.ts';
+import { DEFAULT_TOOL_STATE, eraserRing, normalizeToolState, selectTool, setColor, setWidth, toNativeSpec, toggleEraser, WIDTHS } from './tools.ts';
 
 const v = (over: Partial<Viewport> = {}): Viewport => ({ scale: 2, tx: -100, ty: 40, viewWidth: 800, viewHeight: 600, interacting: false, ...over });
 
@@ -42,7 +42,13 @@ test('tool spec: pen, marker, eraser modes, lasso', () => {
   assert.deepEqual(toNativeSpec(s), { kind: 'ink', ink: 'pen', color: '#111111', width: WIDTHS.pen[1] });
   assert.deepEqual(toNativeSpec(selectTool(s, 'marker')), { kind: 'ink', ink: 'marker', color: '#FDE047', width: WIDTHS.marker[1] });
   assert.deepEqual(toNativeSpec(selectTool(s, 'eraser')), { kind: 'eraser', eraser: 'vector' });
-  assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }), { kind: 'eraser', eraser: 'fixed', eraserWidth: 36 });
+  assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }), { kind: 'eraser', eraser: 'fixed', eraserWidth: 28 });
+  // the same size on screen at any zoom: the page width shrinks as the page is zoomed in
+  assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }, 2), { kind: 'eraser', eraser: 'fixed', eraserWidth: 14 });
+  assert.deepEqual(toNativeSpec({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 2 }, 0), { kind: 'eraser', eraser: 'fixed', eraserWidth: 28 });
+  assert.equal(eraserRing({ ...selectTool(s, 'eraser'), eraserMode: 'pixel', eraserSizeIdx: 3 }), 44);
+  assert.equal(eraserRing({ ...selectTool(s, 'eraser'), eraserMode: 'stroke' }), 0);
+  assert.equal(eraserRing(s), 0);
   assert.deepEqual(toNativeSpec(selectTool(s, 'lasso')), { kind: 'lasso' });
 });
 

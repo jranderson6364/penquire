@@ -100,9 +100,9 @@ export function ToolPopover({ tool, anchor, windowWidth, onChange, onClose }: Pr
               <View style={styles.widths}>
                 {ERASER_SIZES.map((s, i) => {
                   const on = tool.eraserSizeIdx === i;
-                  const d = 10 + i * 8;
+                  const d = 8 + i * 7;
                   return (
-                    <Pressable key={s} onPress={() => onChange({ ...tool, eraserSizeIdx: i })} accessibilityRole="button" accessibilityLabel={['Small', 'Medium', 'Large'][i]} accessibilityState={{ selected: on }} style={[styles.widthItem, on && styles.segOn]}>
+                    <Pressable key={s} onPress={() => onChange({ ...tool, eraserSizeIdx: i })} accessibilityRole="button" accessibilityLabel={['Extra small', 'Small', 'Medium', 'Large'][i] ?? `Size ${i + 1}`} accessibilityState={{ selected: on }} style={[styles.widthItem, on && styles.segOn]}>
                       <View style={{ width: d, height: d, borderRadius: d / 2, borderWidth: 1.5, borderColor: on ? C.primary : C.faint }} />
                     </Pressable>
                   );

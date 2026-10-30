@@ -23,7 +23,7 @@ import { AUTO_IDLE_MS, autoCheckAllowed, recentAuto } from '../check/auto';
 import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
 import { IDENTITY_VIEWPORT, PAGE_HEIGHT, PAGE_WIDTH, boxToLayer, parseViewport, sameViewport, visibleInLayer, type Viewport } from '../page';
-import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
+import { eraserRing, normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { fetch as expoFetch } from 'expo/fetch';
 import { buildPdfRequest } from '../export/pdf';
 import { beginSpeech, listen, refreshVoice, stopAllVoice, stopSpeaking, stopSpeakingIfTalking, voiceAvailable, type Listening } from '../voice/engine';
@@ -238,11 +238,13 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   React.useEffect(() => subscribeEvals(() => setEvals({ ...loadEvals() })), []);
 
   // Tools: the toolbar is JS; the native canvas only receives a small generic spec.
+  // The part-of-a-stroke eraser keeps its size on screen: its page width follows the settled zoom.
+  const eraserZoom = toolState.tool === 'eraser' && toolState.eraserMode === 'pixel' ? viewport.scale : 1;
   React.useEffect(() => {
     if (!modern) return;
     const c = canvasRef.current;
     if (!c) return;
-    c.setTool(toNativeSpec(toolState)).catch((e) => console.warn('setTool failed', e));
+    c.setTool(toNativeSpec(toolState, eraserZoom)).catch((e) => console.warn('setTool failed', e));
     // only when it changed: toggling the ruler can make PencilKit adjust the view
     if (rulerSent.current !== toolState.ruler) {
       rulerSent.current = toolState.ruler;
@@ -251,6 +253,11 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     toolChangedAt.current = Date.now();
     saveSettings({ toolState });
   }, [modern, toolState]);
+  // only on a zoom change (tool changes are sent above, without saving settings or the jump diagnostic)
+  React.useEffect(() => {
+    if (!modern || toolState.tool !== 'eraser' || toolState.eraserMode !== 'pixel') return;
+    canvasRef.current?.setTool(toNativeSpec(toolState, eraserZoom)).catch((e) => console.warn('setTool failed', e));
+  }, [eraserZoom]);
   const rulerSent = React.useRef<boolean | null>(null);
   // dev diagnostic for "the page jumps when I change tools": log any viewport move right after a tool change
   const toolChangedAt = React.useRef(0);
@@ -1471,6 +1478,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           onDrawingChanged={onDrawingChanged}
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
           {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
+          {...(nativeApiVersion >= 8 ? { eraserCursor: eraserRing(toolState) } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
           {...(NATIVE_OVERLAY ? { overlayScale: OVERLAY_K } : {})}
         >

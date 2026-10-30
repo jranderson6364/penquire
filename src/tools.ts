@@ -18,7 +18,11 @@ export type ToolState = {
 
 export const COLORS = ['#111111', '#1D4ED8', '#DC2626', '#16A34A', '#9333EA', '#F59E0B', '#0891B2', '#6B7280'];
 export const HIGHLIGHT_COLORS = ['#FDE047', '#86EFAC', '#93C5FD', '#F9A8D4', '#FDBA74'];
-export const ERASER_SIZES = [10, 20, 36];
+/**
+ * Part-of-a-stroke eraser diameters in SCREEN points: the eraser keeps its size on screen at any zoom (the width sent to
+ * PencilKit is divided by the zoom), and the ring around the Pencil tip (build 8+) shows exactly this size.
+ */
+export const ERASER_SIZES = [8, 16, 28, 44];
 
 /** Width presets per tool, in page points. Thin / medium / thick. */
 export const WIDTHS: Record<'pen' | 'fountain' | 'pencil' | 'marker', number[]> = {
@@ -44,17 +48,27 @@ export type NativeToolSpec =
   | { kind: 'eraser'; eraser: 'vector' | 'fixed'; eraserWidth?: number }
   | { kind: 'lasso' };
 
-/** Inks only exist from iOS 17 for 'fountain'; the native side falls back to the pen on older systems. */
-export function toNativeSpec(s: ToolState): NativeToolSpec {
+/**
+ * Inks only exist from iOS 17 for 'fountain'; the native side falls back to the pen on older systems. `zoom` (screen
+ * points per page point) keeps the part-of-a-stroke eraser the same size on screen.
+ */
+export function toNativeSpec(s: ToolState, zoom = 1): NativeToolSpec {
   if (s.tool === 'eraser') {
+    const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     return s.eraserMode === 'stroke'
       ? { kind: 'eraser', eraser: 'vector' }
-      : { kind: 'eraser', eraser: 'fixed', eraserWidth: ERASER_SIZES[clampIdx(s.eraserSizeIdx, ERASER_SIZES.length)] };
+      : { kind: 'eraser', eraser: 'fixed', eraserWidth: Math.round((eraserDiameter(s) / z) * 10) / 10 };
   }
   if (s.tool === 'lasso') return { kind: 'lasso' };
   const t = s.tool;
   return { kind: 'ink', ink: t, color: s.colors[t], width: WIDTHS[t][clampIdx(s.widthIdx[t], WIDTHS[t].length)] };
 }
+
+/** The part-of-a-stroke eraser's diameter on screen (points). */
+export const eraserDiameter = (s: ToolState) => ERASER_SIZES[clampIdx(s.eraserSizeIdx, ERASER_SIZES.length)];
+
+/** Diameter of the ring drawn around the Pencil tip: only for the part-of-a-stroke eraser; 0 = no ring. */
+export const eraserRing = (s: ToolState) => (s.tool === 'eraser' && s.eraserMode === 'pixel' ? eraserDiameter(s) : 0);
 
 const clampIdx = (i: number, len: number) => Math.max(0, Math.min(len - 1, Math.round(Number.isFinite(i) ? i : 0)));
 
