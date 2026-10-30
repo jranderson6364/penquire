@@ -7,6 +7,7 @@
  * available" on an older binary instead of crashing.
  */
 import { nativeApiVersion } from '../../modules/pencil-canvas';
+import { cloudTtsConfig, createCloudTts, expoPlayer } from './cloudTts';
 import { chooseVoice, createSpeaker, rankVoices, sentenceBackend, voiceTier, voiceTuning, type SpeechBackend, type Utterance, type VoiceInfo } from './session';
 
 export type { Utterance, VoiceInfo } from './session';
@@ -137,11 +138,57 @@ const apple = sentenceBackend({
   stop: () => void speech()?.stop(),
 });
 
+/** Apple's voice for one sentence: cloud TTS falls back to it on any error or timeout. */
+const appleSay = (s: string) =>
+  new Promise<void>((resolve) => {
+    const lib = speech();
+    if (!lib) return resolve();
+    const t = voiceTuning(voice);
+    lib.speak(s, { voice: voice?.identifier, rate: t.rate, pitch: t.pitch, onDone: () => resolve(), onStopped: () => resolve(), onError: () => resolve() });
+  });
+
+let cloudTts: ReturnType<typeof createCloudTts> | null = null;
+let loggedFallback = '';
+/** ElevenLabs Flash v2.5 (src/voice/cloudTts.ts), created on first use; null without a key or below build 7. */
+function cloud() {
+  if (cloudTts) return cloudTts;
+  const config = cloudTtsConfig();
+  if (!config.apiKey || nativeApiVersion < 7) return null;
+  const player = expoPlayer(nativeApiVersion);
+  if (!player) return null;
+  console.warn('[penquire:voice] cloud voice: ElevenLabs Flash v2.5 (falls back to the Apple voice on any error)');
+  cloudTts = createCloudTts({
+    ...config,
+    fetch,
+    player,
+    fallback: appleSay,
+    stopFallback: () => void speech()?.stop(),
+    // reasons are fixed strings and never contain the key
+    onFallback: (reason) => {
+      if (reason !== loggedFallback) console.warn(`[penquire:voice] cloud voice fell back to Apple: ${reason}`);
+      loggedFallback = reason;
+    },
+  });
+  return cloudTts;
+}
+
+const cloudBackend: SpeechBackend = {
+  play: async (sentences, o) => {
+    const lib = speech();
+    if (lib) await pickVoice(lib); // the Apple fallback voice
+    playbackSession();
+    if (!o.live()) return;
+    await cloud()!.speak(sentences, { onStart: o.onStart, onSentence: o.onSentence });
+  },
+  stop: () => cloudTts?.stop(),
+};
+
 /**
- * The voice that speaks. Cloud TTS (T13B src/voice/cloudTts.ts) plugs in HERE, as another SpeechBackend; the
- * generation and stop handling in the speaker then cover it too. See tasks/handoff/T13A.md for the exact code.
+ * The voice that speaks: ElevenLabs when the key is configured and the build has an audio player (7+), else Apple's.
+ * The speaker's generation and stop handling cover both: stopAllVoice() -> backend().stop() -> cloud.stop() aborts
+ * fetches and stops playback.
  */
-const backend = (): SpeechBackend => apple;
+const backend = (): SpeechBackend => (cloud() ? cloudBackend : apple);
 
 /** One speaker for the app: a new utterance interrupts the old one; stopAllVoice() stops everything. */
 const speaker = createSpeaker(backend);
