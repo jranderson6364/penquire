@@ -78,7 +78,7 @@ test('a late result for the old snapshot after an edit stays hidden', () => {
   assert.equal(resultVisible(late), false);
 });
 
-test('linesToConfirm picks low-confidence, unreadable and reading-guarded lines, not context or blanks', () => {
+test('linesToConfirm picks low-confidence, unreadable (even read as blank) and reading-guarded lines, not context', () => {
   const c = check([
     line({ id: 'L1' }),
     line({ id: 'L2', readConfidence: 'low', verdict: 'unreadable', guard: 'reading', modelVerdict: 'valid' }),
@@ -86,7 +86,7 @@ test('linesToConfirm picks low-confidence, unreadable and reading-guarded lines,
     line({ id: 'L4', verdict: 'context', readConfidence: 'low' }),
     line({ id: 'L5', reading: '  ', verdict: 'unreadable' }),
   ]);
-  assert.deepEqual(linesToConfirm(c).map((l) => l.id), ['L2', 'L3']);
+  assert.deepEqual(linesToConfirm(c).map((l) => l.id), ['L2', 'L3', 'L5']);
 });
 
 test('withConfirmedReadings sets the confirmed text with high confidence and keeps the verdict', () => {

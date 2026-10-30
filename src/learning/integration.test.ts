@@ -8,7 +8,7 @@ import { assessSubmission } from './assess.ts';
 import { independentCheckInput } from './context.ts';
 import { DEMO_PACK, DEMO_TASK_IDS, demoTask } from './demoPack.ts';
 import { createGate } from './gate.ts';
-import { helpReplyInput, independentAttemptId, outcomeRows } from './independentFlow.ts';
+import { helpReplyInput, independentAttemptId, linesToConfirm, liveMatchesSnapshot, outcomeRows } from './independentFlow.ts';
 import { buildDemoEpisode, demoContent } from './seedData.ts';
 import { learnerText } from './demoPack.ts';
 import {
@@ -286,4 +286,24 @@ test('the flag survives a relaunch only through the latest check (documented lim
   const afterErase = result([v('L1', '2(3x - 4) = 10')]);
   const rebuilt: Flag | null = flagFrom(erased, afterErase.lines);
   assert.equal(rebuilt, null);
+});
+
+// ---- T10 reviewer findings (regressions) -------------------------------------------------------------------
+
+test('a line read as nothing, or left out of the check, makes the attempt unassessable, not a pass', () => {
+  const ids = freshLines.map((l) => l.id).concat('F6');
+  const blank = result([...freshCorrect.lines, v('F6', '', 'unreadable')]);
+  assert.equal(assessSubmission(independentTask, blank, 's', 1, ids).result, 'unassessable');
+  assert.equal(assessSubmission(independentTask, blank, 's', 1).result, 'unassessable', 'even without the submitted ids');
+  assert.deepEqual(linesToConfirm(blank).map((l) => l.id), ['F6'], 'the student is asked what it says');
+  // the model returned five of six submitted lines
+  assert.equal(assessSubmission(independentTask, freshCorrect, 's', 1, ids).result, 'unassessable');
+  assert.equal(assessSubmission(independentTask, freshCorrect, 's', 1, freshLines.map((l) => l.id)).result, 'pass');
+});
+
+test('Retry after a relaunch exports the live page only when it is the loaded, unchanged submission', () => {
+  const snap = snapOf('s', 'p-fresh', freshLines, 1);
+  assert.equal(liveMatchesSnapshot(snap, { loaded: true, strokeCount: snap.strokeCount }), true);
+  assert.equal(liveMatchesSnapshot(snap, { loaded: false, strokeCount: snap.strokeCount }), false, 'stored page never loaded');
+  assert.equal(liveMatchesSnapshot(snap, { loaded: true, strokeCount: snap.strokeCount + 1 }), false, 'ink differs');
 });
