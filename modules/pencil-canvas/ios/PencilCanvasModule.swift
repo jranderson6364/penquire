@@ -15,8 +15,9 @@ public class PencilCanvasModule: Module {
     // 6: React children = overlay layer moved natively with the ink (overlayScale)
     // 7: palm rejection (large contacts and touches that land while writing never pan), palmRejectRadius, penPauseMs
     // 8: overlay animates with the zoom bounce, overlay text/SVG redrawn sharp after zoom, eraserCursor ring
+    // 9: overlay and paper follow the ink's on-screen frame during UIKit animations; ring follows PencilKit's gesture
     Constant("apiVersion") {
-      return 8
+      return 9
     }
 
     // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }

@@ -246,6 +246,19 @@ final class OverlayHostView: UIView {
   }
 }
 
+/// CADisplayLink retains its target: this holds the canvas weakly.
+@MainActor
+private final class DisplayLinkTarget: NSObject {
+  weak var view: PencilCanvasView?
+  init(_ view: PencilCanvasView) {
+    self.view = view
+  }
+
+  @objc func tick() {
+    view?.followTick()
+  }
+}
+
 final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractionDelegate {
   let canvas = PKCanvasView()
   let paper = PaperView(frame: .zero)
@@ -335,7 +348,8 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
 
     palmWatcher.onChange = { [weak self] in self?.updateGestureGate() }
     palmWatcher.isSuspectOnLanding = { [weak self] in self?.withinPenWindow() ?? false }
-    palmWatcher.onPencilPoint = { [weak self] p in self?.moveEraserRing(to: p) }
+    // apiVersion >= 9: the ring follows PencilKit's own drawing gesture, which reports every move while erasing
+    canvas.drawingGestureRecognizer.addTarget(self, action: #selector(drawingGestureChanged(_:)))
     canvas.addGestureRecognizer(palmWatcher)
 
     eraserRing.fillColor = nil
@@ -365,14 +379,88 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     scheduleSharpen()
   }
 
-  /// screen = (-contentOffset) + (zoom / overlayScale) * layer. Same frame as the ink: called from the scroll delegate.
+  /// screen = origin + (scale / overlayScale) * layer, where (origin, scale) is where the ink is on screen right now.
   private func updateOverlayTransform() {
-    let r = canvas.zoomScale / overlayScale
-    let t = CGAffineTransform(a: r, b: 0, c: 0, d: r, tx: -canvas.contentOffset.x, ty: -canvas.contentOffset.y)
-    // No CATransaction.setDisableActions here (apiVersion >= 8): a UIView never animates outside an animation block, so
-    // pinches and scrolls stay exact, and inside UIKit's zoom-bounce block the overlay now animates with the ink.
-    if overlayHost.transform != t {
-      overlayHost.transform = t
+    let ink = inkFrame()
+    let r = ink.scale / overlayScale
+    let t = CGAffineTransform(a: r, b: 0, c: 0, d: r, tx: ink.origin.x, ty: ink.origin.y)
+    guard overlayHost.transform != t || isAnimating(overlayHost.layer) else { return }
+    // apiVersion >= 9: set exactly, never animated. While UIKit animates the ink (a zoom bounce), inkFrame() reads the
+    // ink's on-screen (presentation) frame and the display link below re-applies it every frame, so the overlay and the
+    // paper stay stuck to the page through the whole animation instead of jumping to its end.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    overlayHost.layer.removeAllAnimations()
+    overlayHost.transform = t
+    CATransaction.commit()
+  }
+
+  // MARK: Follow the ink frame by frame (apiVersion >= 9)
+
+  private weak var inkView: UIView?
+  private var displayLink: CADisplayLink?
+  private var followUntil: CFTimeInterval = 0
+  private var followStarted: CFTimeInterval = 0
+
+  private func isAnimating(_ layer: CALayer) -> Bool {
+    !(layer.animationKeys() ?? []).isEmpty
+  }
+
+  /// PencilKit's zoomed content view: the subview exactly the size of the zoomed page.
+  private func inkContentView() -> UIView? {
+    let size = canvas.contentSize
+    if let v = inkView, v.superview === canvas, abs(v.frame.width - size.width) < 1 { return v }
+    inkView = canvas.subviews.first { abs($0.frame.width - size.width) < 1 && abs($0.frame.height - size.height) < 1 && !$0.isHidden }
+    return inkView
+  }
+
+  /// Where the page is on screen (origin) and its screen points per page point (scale). The scroll view's own values,
+  /// unless UIKit is animating the ink: then what is actually on screen, from the presentation layers.
+  private func inkFrame() -> (origin: CGPoint, scale: CGFloat) {
+    let model = (origin: CGPoint(x: -canvas.contentOffset.x, y: -canvas.contentOffset.y), scale: canvas.zoomScale)
+    // Only with an animation attached: otherwise the presentation is one frame behind during a pinch.
+    guard let v = inkContentView(), isAnimating(v.layer) || isAnimating(canvas.layer),
+          let ink = v.layer.presentation(), let scroll = canvas.layer.presentation(), pageSize.width > 1, ink.frame.width > 1 else {
+      return model
+    }
+    let mf = v.frame, pf = ink.frame, mb = canvas.bounds, pb = scroll.bounds
+    let same = abs(pf.width - mf.width) < 0.01 && abs(pf.minX - mf.minX) < 0.01 && abs(pf.minY - mf.minY) < 0.01
+      && abs(pb.minX - mb.minX) < 0.01 && abs(pb.minY - mb.minY) < 0.01
+    if same { return model }
+    followInk()
+    // the model position, corrected by how far the animation has still to go (no jump when it switches back)
+    return (
+      origin: CGPoint(x: model.origin.x + (pf.minX - mf.minX) - (pb.minX - mb.minX), y: model.origin.y + (pf.minY - mf.minY) - (pb.minY - mb.minY)),
+      scale: model.scale * pf.width / mf.width
+    )
+  }
+
+  /// Keep following for a moment after the last change: an animation reports its end values once, at its start.
+  private func followInk() {
+    followUntil = CACurrentMediaTime() + 0.35
+    guard displayLink == nil, window != nil else { return }
+    followStarted = CACurrentMediaTime()
+    let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick))
+    link.add(to: .main, forMode: .common)
+    displayLink = link
+  }
+
+  fileprivate func followTick() {
+    updateOverlayTransform()
+    updatePaper()
+    let now = CACurrentMediaTime()
+    // never more than 2 s: an animation left attached (not removed on completion) must not keep this running
+    if now > followUntil || now - followStarted > 2 {
+      displayLink?.invalidate()
+      displayLink = nil
+    }
+  }
+
+  override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    if newWindow == nil {
+      displayLink?.invalidate()
+      displayLink = nil
     }
   }
 
@@ -426,12 +514,20 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     CATransaction.commit()
   }
 
-  private func moveEraserRing(to windowPoint: CGPoint?) {
-    let show = windowPoint != nil && eraserDiameter > 0 && canvas.tool is PKEraserTool
+  @objc private func drawingGestureChanged(_ gesture: UIGestureRecognizer) {
+    switch gesture.state {
+    case .began, .changed: moveEraserRing(toLocal: gesture.location(in: self))
+    default: moveEraserRing(toLocal: nil)
+    }
+  }
+
+  /// point in this view's coordinates; nil hides the ring
+  private func moveEraserRing(toLocal point: CGPoint?) {
+    let show = point != nil && eraserDiameter > 0 && canvas.tool is PKEraserTool
     CATransaction.begin()
     CATransaction.setDisableActions(true) // a standalone layer animates implicitly; the ring must sit on the tip
-    if show, let p = windowPoint {
-      eraserRing.position = convert(p, from: nil)
+    if show, let p = point {
+      eraserRing.position = p
       eraserRing.isHidden = false
     } else {
       eraserRing.isHidden = true
@@ -519,8 +615,9 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   }
 
   private func updatePaper() {
-    let z = canvas.zoomScale
-    let pageRect = CGRect(x: -canvas.contentOffset.x, y: -canvas.contentOffset.y, width: pageSize.width * z, height: pageSize.height * z)
+    let ink = inkFrame()
+    let z = ink.scale
+    let pageRect = CGRect(x: ink.origin.x, y: ink.origin.y, width: pageSize.width * z, height: pageSize.height * z)
     let visible = pageRect.intersection(bounds)
     if visible.isNull || visible.isEmpty || visible.width < 1 || visible.height < 1 {
       paper.isHidden = true
@@ -538,6 +635,8 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     updateOverlayTransform()
     guard !isAdjusting else { return }
     updateInsets()
+    // a zoom bounce may attach its animation after this callback: follow the ink for a moment anyway
+    if canvas.isZoomBouncing || canvas.isZooming { followInk() }
     updatePaper()
     updateOverlayTransform()
     // Every frame (up to 120 Hz): JS only moves one overlay layer per event (PageLayer), so it can keep up, and the
