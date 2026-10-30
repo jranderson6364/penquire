@@ -11,11 +11,22 @@ import { loadEvals, writeExport } from '../store/evals';
 import type { Settings } from '../store/types';
 import { C } from '../theme';
 import { applyAppearance } from '../appearance';
+import { englishVoices, previewVoice, voiceAvailable } from '../voice/engine';
+import { VOICE_DOWNLOAD_HINT, chooseVoice, needsBetterVoice, voiceLabel, type VoiceInfo } from '../voice/session';
+
+/** how many voices the picker lists (best first); the saved pick is always included */
+const VOICE_ROWS = 12;
 
 export function SettingsScreen({ onDone }: { onDone: () => void }) {
   const insets = useSafeAreaInsets();
   const [s, setS] = React.useState<Settings>(getSettings());
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((prev) => ({ ...prev, [k]: v }));
+  const [voices, setVoices] = React.useState<VoiceInfo[] | null>(null);
+  React.useEffect(() => {
+    if (voiceAvailable()) void englishVoices().then(setVoices);
+  }, []);
+  const shownVoices = (voices ?? []).filter((v, i) => i < VOICE_ROWS || v.identifier === s.voiceId);
+  const autoVoice = voices ? chooseVoice(voices) : undefined;
 
   return (
     <ScrollView style={{ backgroundColor: C.bg }} contentContainerStyle={[styles.root, { paddingTop: insets.top + 12 }]}>
@@ -104,6 +115,30 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
         ))}
       </View>
 
+      <Text style={styles.section}>Tutor voice</Text>
+      {!voiceAvailable() ? (
+        <Text style={styles.hint}>Voice needs the newest app build.</Text>
+      ) : voices === null ? (
+        <Text style={styles.hint}>Looking for installed voices…</Text>
+      ) : (
+        <>
+          {needsBetterVoice(voices) && <Text style={styles.hint}>{VOICE_DOWNLOAD_HINT}</Text>}
+          {!!s.voiceId && !voices.some((v) => v.identifier === s.voiceId) && <Text style={styles.hint}>The voice you picked is no longer installed; the best installed voice is used instead.</Text>}
+          <View style={styles.voiceRow}>
+            <Text style={[styles.label, { flex: 1 }]}>Automatic{autoVoice ? ` (${voiceLabel(autoVoice)})` : ''}</Text>
+            <Button title="Preview" small onPress={() => void previewVoice(undefined)} />
+            <Button title={s.voiceId ? 'Use' : 'In use'} kind={s.voiceId ? 'secondary' : 'primary'} small onPress={() => set('voiceId', undefined)} />
+          </View>
+          {shownVoices.map((v) => (
+            <View key={v.identifier} style={styles.voiceRow}>
+              <Text style={[styles.label, { flex: 1 }]}>{voiceLabel(v)}</Text>
+              <Button title="Preview" small onPress={() => void previewVoice(v.identifier)} />
+              <Button title={s.voiceId === v.identifier ? 'In use' : 'Use'} kind={s.voiceId === v.identifier ? 'primary' : 'secondary'} small onPress={() => set('voiceId', v.identifier)} />
+            </View>
+          ))}
+        </>
+      )}
+
       <Text style={styles.section}>Canvas</Text>
       <Text style={styles.label}>Paper</Text>
       <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -144,4 +179,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  hint: { fontSize: 14, color: C.sub },
 });
