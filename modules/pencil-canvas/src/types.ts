@@ -81,6 +81,8 @@ export type PencilCanvasProps = {
   palmRejectRadius?: number;
   /** apiVersion >= 7: after the Pencil lifts, fingers cannot pan for this long (ms). Native default 350. */
   penPauseMs?: number;
+  /** apiVersion >= 8: diameter in screen points of a dashed ring around the Pencil tip while the eraser is the tool; 0 = off */
+  eraserCursor?: number;
   /** apiVersion >= 6: children are the overlay layer, laid out at page * overlayScale; native moves them with the ink */
   overlayScale?: number;
   children?: import('react').ReactNode;

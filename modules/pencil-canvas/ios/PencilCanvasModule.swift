@@ -14,8 +14,9 @@ public class PencilCanvasModule: Module {
     // 5: twoFingerScroll, pan paused while the Pencil draws, scrollToPageRect, tool changes keep the scroll position
     // 6: React children = overlay layer moved natively with the ink (overlayScale)
     // 7: palm rejection (large contacts and touches that land while writing never pan), palmRejectRadius, penPauseMs
+    // 8: overlay animates with the zoom bounce, overlay text/SVG redrawn sharp after zoom, eraserCursor ring
     Constant("apiVersion") {
-      return 7
+      return 8
     }
 
     // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }
@@ -50,6 +51,11 @@ public class PencilCanvasModule: Module {
       // apiVersion >= 7: after the Pencil lifts, fingers cannot pan for this long (ms)
       Prop("penPauseMs") { (view: PencilCanvasView, value: Double) in
         view.setPenPauseMs(value)
+      }
+
+      // apiVersion >= 8: diameter (screen points) of a dashed ring around the Pencil tip while erasing; 0 = off
+      Prop("eraserCursor") { (view: PencilCanvasView, value: Double) in
+        view.setEraserCursor(value)
       }
 
       // apiVersion >= 5: page rect in page points; scrolls only if it is not already visible

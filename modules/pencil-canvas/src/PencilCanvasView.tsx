@@ -119,6 +119,7 @@ export function PencilCanvas({
   onPencilSqueeze,
   palmRejectRadius,
   penPauseMs,
+  eraserCursor,
   ...props
 }: PencilCanvasProps & { ref?: React.Ref<PencilCanvasHandle> }) {
   const nativeRef = React.useRef<NativeMethods>(null);
@@ -164,6 +165,7 @@ export function PencilCanvas({
       ref={nativeRef}
       {...props}
       {...(nativeApiVersion >= 7 ? palmProps(palmRejectRadius, penPauseMs) : {})}
+      {...(nativeApiVersion >= 8 && eraserCursor != null ? { eraserCursor } : {})}
       onDrawingChanged={(e) => onDrawingChanged?.(e.nativeEvent)}
       onViewportChanged={(e) => onViewportChanged?.(e.nativeEvent)}
       onPencilDoubleTap={() => onPencilDoubleTap?.()}
