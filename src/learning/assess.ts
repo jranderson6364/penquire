@@ -85,10 +85,10 @@ export function assessSubmission(task: DemoTask, check: CheckResult, snapshotId:
   const returned = new Set(check.lines.map((l) => l.id));
   const unread = [
     ...(submittedLineIds ?? []).filter((id) => !returned.has(id)),
-    ...check.lines.filter((l) => l.verdict === 'unreadable' && reading(l) === '').map((l) => l.id),
+    ...check.lines.filter((l) => l.verdict !== 'context' && reading(l) === '').map((l) => l.id),
   ];
   if (unread.length > 0) {
-    return done('unassessable', [COULD_NOT_ASSESS, `${unread.join(', ')} could not be read. Confirm what you wrote, then check again.`]);
+    return done('unassessable', [COULD_NOT_ASSESS, `${unread.join(', ')} could not be read. Rewrite it more clearly, then submit again.`]);
   }
 
   const lines = check.lines.filter((l) => l.verdict !== 'context' && reading(l) !== '').sort((a, b) => lineNo(a.id) - lineNo(b.id));

@@ -296,6 +296,9 @@ test('a line read as nothing, or left out of the check, makes the attempt unasse
   assert.equal(assessSubmission(independentTask, blank, 's', 1, ids).result, 'unassessable');
   assert.equal(assessSubmission(independentTask, blank, 's', 1).result, 'unassessable', 'even without the submitted ids');
   assert.deepEqual(linesToConfirm(blank).map((l) => l.id), ['F6'], 'the student is asked what it says');
+  // confirmed with nothing typed, and the recheck now calls the line valid: still unread, still not a pass
+  const confirmedBlank = result([...freshCorrect.lines, v('F6', '', 'valid')]);
+  assert.equal(assessSubmission(independentTask, confirmedBlank, 's', 1, ids).result, 'unassessable');
   // the model returned five of six submitted lines
   assert.equal(assessSubmission(independentTask, freshCorrect, 's', 1, ids).result, 'unassessable');
   assert.equal(assessSubmission(independentTask, freshCorrect, 's', 1, freshLines.map((l) => l.id)).result, 'pass');
