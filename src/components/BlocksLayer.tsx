@@ -9,8 +9,10 @@ import { MathText } from './MathText';
 
 type Props = {
   blocks: PageBlock[];
-  /** settled zoom: the blocks are laid out in layer units (page * k) inside PageLayer */
+  /** layer scale: the blocks are laid out in layer units (page * k) */
   k: number;
+  /** screen points per page point (the current zoom); defaults to k, when the layer is laid out at the settled zoom */
+  zoom?: number;
   onMove: (id: string, x: number, y: number) => void;
   onRemove: (id: string) => void;
   /** ✓: stamp the block where it is (no handles, every touch to the Pencil) */
@@ -23,31 +25,35 @@ type Props = {
  * handles at all, takes no touches, and is cached as a still image (it never re-renders while you write).
  * Text sizes are page units (PAGE_TYPE), so a block reads at the same size as the rest of the page at any zoom.
  */
-export function BlocksLayer({ blocks, k, onMove, onRemove, onStamp }: Props) {
+export function BlocksLayer({ blocks, k, zoom, onMove, onRemove, onStamp }: Props) {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {blocks.map((b) => (
-        <Block key={b.id} block={b} k={k} onMove={onMove} onRemove={onRemove} onStamp={onStamp} />
+        <Block key={b.id} block={b} k={k} zoom={zoom ?? k} onMove={onMove} onRemove={onRemove} onStamp={onStamp} />
       ))}
     </View>
   );
 }
 
-function Block({ block, k, onMove, onRemove, onStamp }: { block: PageBlock; k: number } & Pick<Props, 'onMove' | 'onRemove' | 'onStamp'>) {
-  // the layer is at rest while a block is dragged, so a screen point is a layer unit and a page point is 1/k of one
+function Block({ block, k, zoom, onMove, onRemove, onStamp }: { block: PageBlock; k: number; zoom: number } & Pick<Props, 'onMove' | 'onRemove' | 'onStamp'>) {
+  // a finger moves in screen points: zoom of them per page point, k layer units per page point
   const drag = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  const live = React.useRef({ block, k });
-  live.current = { block, k };
+  const live = React.useRef({ block, k, zoom });
+  live.current = { block, k, zoom };
 
   const pan = React.useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onPanResponderMove: (_e, g) => drag.setValue({ x: g.dx, y: g.dy }), // moves the block without re-rendering it
+        // moves the block without re-rendering it
+        onPanResponderMove: (_e, g) => {
+          const r = live.current.k / live.current.zoom;
+          drag.setValue({ x: g.dx * r, y: g.dy * r });
+        },
         onPanResponderRelease: (_e, g) => {
-          const { block: b, k: sc } = live.current;
+          const { block: b, zoom: z } = live.current;
           drag.setValue({ x: 0, y: 0 });
-          onMove(b.id, b.x + g.dx / sc, b.y + g.dy / sc);
+          onMove(b.id, b.x + g.dx / z, b.y + g.dy / z);
         },
         onPanResponderTerminate: () => drag.setValue({ x: 0, y: 0 }),
       }),

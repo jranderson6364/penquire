@@ -59,6 +59,12 @@ const tutorContext = (a: Assignment): TutorContext => ({
 
 /** Build 6+: the page overlays are children of the native canvas, which moves them with the ink in the same frame. */
 const NATIVE_OVERLAY = nativeApiVersion >= 6;
+/**
+ * Build 6+: the overlay is laid out ONCE at this fixed scale (page * OVERLAY_K) and native scales it by zoom / OVERLAY_K,
+ * so zooming never re-lays it out: marks, notes and question text stay put on the page like ink (Jason, October 29,
+ * 2026: re-layout at each settled zoom shifted text and marks). 2 keeps text crisp up to about 2x zoom.
+ */
+const OVERLAY_K = 2;
 
 /** `spend.total` accumulates the estimated cost of every API call made through the returned provider (retries included). */
 const providerFromSettings = (spend?: { total: number }) => {
@@ -379,7 +385,9 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
   // old view-sized space and cannot be mapped onto the page, so they are not drawn (run Check again).
   const marksUsable = !!check && (!modern || check.space === 'page-v2');
   const oldCheck = !!check && modern && check.space !== 'page-v2';
-  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToLayer(l, viewport.scale) })) : check.lines) : [];
+  // Build 6+: margin marks are laid out in page units and scaled with the page (see the overlay below)
+  const markK = NATIVE_OVERLAY ? 1 : viewport.scale;
+  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToLayer(l, markK) })) : check.lines) : [];
 
   // ---- question blocks on the page ---------------------------------------
   const pageBlocks: PageBlock[] = (a?.blocks && a.blocks[pageId]) || [];
@@ -992,16 +1000,17 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
         />
   );
 
-  // every overlay on the page, in layer units (page * settled zoom); hosted natively on build 6+, else by PageLayer
-  const overlay = (
-    <>
-          {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
-          {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={viewport.scale} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
-          {check && marksUsable && showMarks && (
+  // every overlay on the page, in layer units (page * layerK). Build 6+: hosted natively at the fixed OVERLAY_K, so it
+  // never re-lays out on zoom; older builds: page * settled zoom, moved by PageLayer.
+  const layerK = NATIVE_OVERLAY ? OVERLAY_K : viewport.scale;
+  const markVisible = NATIVE_OVERLAY
+    ? { x: -viewport.tx / viewport.scale, y: -viewport.ty / viewport.scale, w: viewport.viewWidth / viewport.scale, h: viewport.viewHeight / viewport.scale }
+    : visibleInLayer(viewport);
+  const marks = check && marksUsable && showMarks && (
           <MarksOverlay
-            width={PAGE_WIDTH * viewport.scale}
-            height={PAGE_HEIGHT * viewport.scale}
-            visible={visibleInLayer(viewport)}
+            width={PAGE_WIDTH * markK}
+            height={PAGE_HEIGHT * markK}
+            visible={markVisible}
             lines={markLines}
             verdicts={check.result.lines}
             parts={check.result.parts}
@@ -1016,7 +1025,20 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
             onConfirmReading={confirmLine}
             onInputBlur={() => canvasRef.current?.focus()}
           />
-          )}
+  );
+  const overlay = (
+    <>
+          {modern && pageBlocks.length > 0 && <BlocksLayer blocks={pageBlocks} k={layerK} zoom={viewport.scale} onMove={moveBlock} onRemove={removeBlock} onStamp={(id) => setBlockLocked(id, true)} />}
+          {modern && tutorMarks.length > 0 && <TutorMarksLayer marks={tutorMarks} k={layerK} focusTurn={focusTurn} focusTag={focusTag} onDismiss={dismissMark} />}
+          {marks &&
+            (NATIVE_OVERLAY ? (
+              // page units, scaled up to the layer: the marks' sizes are page points, so they grow and shrink with the ink
+              <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, transformOrigin: 'left top', transform: [{ scale: OVERLAY_K }] }}>
+                {marks}
+              </View>
+            ) : (
+              marks
+            ))}
     </>
   );
 
@@ -1087,26 +1109,13 @@ export function WorkspaceScreen({ assignmentId, onBack }: Props) {
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
           {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
-          {...(NATIVE_OVERLAY ? { overlayScale: 1 } : {})}
+          {...(NATIVE_OVERLAY ? { overlayScale: OVERLAY_K } : {})}
         >
-          {/* Build 6+: the overlay layer lives INSIDE the native canvas view, which moves it with the ink in the same
-              frame (no JS round trip). Laid out once per settled zoom at page * k, then scaled by 1/k here, so native
-              sees a fixed overlayScale of 1. Changing overlayScale with the zoom raced the re-layout: for one frame
-              after a pinch the marks showed at the old zoom (October 29, 2026). Layout and this transform land in the
-              same commit. */}
+          {/* Build 6+: the overlay layer lives INSIDE the native canvas view, which moves and scales it with the ink in
+              the same frame (no JS round trip). Laid out once at page * OVERLAY_K; overlayScale never changes, so a
+              zoom neither re-lays it out nor races a prop update. */}
           {NATIVE_OVERLAY && size.w > 0 && (
-            <View
-              pointerEvents="box-none"
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                width: PAGE_WIDTH * viewport.scale,
-                height: PAGE_HEIGHT * viewport.scale,
-                transformOrigin: 'left top',
-                transform: [{ scale: 1 / viewport.scale }],
-              }}
-            >
+            <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, top: 0, width: PAGE_WIDTH * OVERLAY_K, height: PAGE_HEIGHT * OVERLAY_K }}>
               {overlay}
             </View>
           )}
