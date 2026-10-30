@@ -15,7 +15,7 @@ type Props = {
   onOpen: (id: string) => void;
   onNew: () => void;
   onSettings: () => void;
-  /** T08's independent-screen route; until App.tsx passes it, fresh-problem phases resume in the workspace. */
+  /** T08's independent-screen route. Until App.tsx passes it, fresh-problem phases cannot be resumed from here. */
   onOpenIndependent?: (episodeId: string) => void;
 };
 
@@ -90,10 +90,13 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
     const { assignmentId } = ensureDemo(Date.now());
     onOpen(assignmentId);
   };
+  // Never fall back to the workspace for a fresh problem: its marks, chat and examples would leak into the attempt.
+  // TODO(T08/T10): App.tsx passes onOpenIndependent once the independent route is merged.
+  const independent = !!episode && resumeTarget(episode.phase) === 'independent';
+  const blocked = independent && !onOpenIndependent;
   const resume = () => {
-    if (!episode) return;
-    if (resumeTarget(episode.phase) === 'independent' && onOpenIndependent) onOpenIndependent(episode.id);
-    // TODO(T08/T10): without the independent route this falls back to the workspace
+    if (!episode || blocked) return;
+    if (independent) onOpenIndependent!(episode.id);
     else onOpen(episode.assignmentId);
   };
   const reset = () =>
@@ -108,9 +111,10 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
       {episode ? (
         <EpisodeCard episode={episode}>
           <View style={styles.demoActions}>
-            <Button title={episode.phase === 'outcome' ? 'Open' : 'Resume'} kind="primary" small onPress={resume} />
+            <Button title={episode.phase === 'outcome' ? 'Open' : 'Resume'} kind="primary" small disabled={blocked} onPress={resume} />
             <Button title="Reset demo" kind="ghost" small onPress={reset} />
           </View>
+          {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
         </EpisodeCard>
       ) : (
         <Button title="Start demo: Distribute and solve" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
@@ -153,6 +157,7 @@ const styles = StyleSheet.create({
   fill: { height: 4, borderRadius: 2, backgroundColor: C.sub },
   demo: { gap: 12 },
   sectionLabel: { ...LABEL },
+  note: { fontSize: T.caption, color: C.faint },
   demoActions: { flexDirection: 'row', gap: 8, marginTop: 6 },
   progressText: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
 });
