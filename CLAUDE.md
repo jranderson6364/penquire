@@ -10,7 +10,7 @@ Read [demo spec](../docs/12-demo-spec.md), [architecture](../docs/04-architectur
 
 ## Current source versus target
 
-The app is an existing checker/tutor. It already includes canvas, parsing, marks, local storage, policy levels, disputes, streamed chat and voice. Auto-checking exists. The new episode model, isolated independent task and review due record are not implemented by the docs rewrite.
+The app is an existing checker/tutor: canvas, parsing, marks, local storage, policy levels, disputes, streamed chat and voice; auto-checking exists. As of October 30 (T10) the source also has the demo recovery loop: episode model and pure transitions (`src/learning/`), seeded pack, workspace pivot flow (LearningBar), isolated IndependentScreen with submit-only assessment, outcome card and review due record. It is covered by pure tests and **not yet verified on the iPad** (see `tasks/T11-device-checklist.md` in the workspace).
 
 Use a small learning-flow layer, not a replacement app. Keep App.tsx's state router. Do not introduce Expo Router, a new state library, SQLite, cloud sync or a curriculum graph for the deadline.
 
@@ -43,13 +43,13 @@ Do not launch EAS builds without user approval. Any native change/new native dep
 | Progress/disclosure | src/store/progress.ts; src/log.ts |
 | Voice | src/voice/engine.ts, turns.ts, text.ts |
 
-Suggested src/learning/* files in the architecture document are proposed additions. Do not claim they exist before writing them.
+`src/learning/` exists: types, session, gate, demoPack, context, assess, snapshot, seed/seedData, independentFlow, workspaceFlow. Other files proposed in the architecture document may not exist; check before claiming them.
 
 ## Native invariants
 
 - Windows host; no local Xcode workflow assumed.
 - Expo/RN versions come from package.json; check installed definitions, not remembered APIs.
-- Native source API 6: source 3 added points/exportPage; 4 PDF/squeeze/speech capabilities; 5 palm/scroll behavior; 6 native overlay movement. Detect the actual binary.
+- Native source API 9: source 3 added points/exportPage; 4 PDF/squeeze/speech capabilities; 5 palm/scroll behavior; 6 native overlay movement; 7 palm rejection + expo-audio; 8 zoom-bounce/sharp overlay/eraser ring; 9 overlay follows UIKit animations. Detect the actual binary (build 7 = API 8 is installed as of October 30).
 - Generic native primitives stay thin; JS owns workflow and UI.
 - Bridge JSON strings remain the existing transport.
 - Page geometry uses fixed page coordinates; viewport transforms map to screen. Do not judge or place marks using inconsistent coordinate spaces.

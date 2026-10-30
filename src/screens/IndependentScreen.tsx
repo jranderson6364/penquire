@@ -14,7 +14,7 @@ import { independentCheckInput } from '../learning/context';
 import { DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
 import { createGate } from '../learning/gate';
 import {
-  canSubmit, changedSinceSubmission, editInvalidates, helpReplyInput, independentAttemptId, independentView, linesToConfirm, resultVisible,
+  canSubmit, changedSinceSubmission, editInvalidates, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
   withConfirmedReadings,
 } from '../learning/independentFlow';
 import {
@@ -250,9 +250,12 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
     const task = demoTask(DEMO_TASK_IDS.independent);
     let check: CheckResult;
     try {
-      // In this phase the live page is the submitted one (any edit reopens the attempt), so exporting again is safe.
+      // After a relaunch there is no cached image: export the live page again only if it is provably the submitted ink.
       let image = imageRef.current?.snapshotId === snapshot.id ? imageRef.current.image : null;
       if (!image) {
+        const strokes = (await canvasRef.current?.getStrokes()) ?? [];
+        const live = { loaded: loadedPageRef.current === at.pageId, strokeCount: strokes.length };
+        if (!liveMatchesSnapshot(snapshot, live)) throw new Error('live page does not match the submitted snapshot');
         image = await exportPageImage(snapshot.lines);
         if (!image) throw new Error('page image unavailable');
         imageRef.current = { snapshotId: snapshot.id, image };
@@ -284,7 +287,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
       });
     }
     const now = Date.now();
-    const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, check, snapshot.id, now)));
+    const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, check, snapshot.id, now, snapshot.lines.map((l) => l.id))));
     if (next?.phase === 'outcome') commit((x) => scheduleReview(x, DEMO_TASK_IDS.review, Date.now()));
   };
 
@@ -362,7 +365,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
         const snapId = at.snapshot.id;
         const task = demoTask(DEMO_TASK_IDS.independent);
         setFindings(c.check.lines);
-        const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, c.check, snapId, Date.now())));
+        const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, c.check, snapId, Date.now(), at.snapshot!.lines.map((l) => l.id))));
         if (next?.phase === 'outcome') commit((x) => scheduleReview(x, DEMO_TASK_IDS.review, Date.now()));
       });
     }

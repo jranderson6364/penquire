@@ -65,10 +65,12 @@ const isProse = (src: string) => equations(src).length === 0 && (src.match(/[A-Z
 /**
  * Map the provider's check of the submitted independent work to an Assessment.
  *
+ * `submittedLineIds` are the submitted snapshot's line ids; any the check left out make the result unassessable.
+ *
  * Only call this with a check that actually came back. On a provider or guard error the caller keeps the work and
  * offers retry; it must not call this or invent a result.
  */
-export function assessSubmission(task: DemoTask, check: CheckResult, snapshotId: string, now: number): Assessment {
+export function assessSubmission(task: DemoTask, check: CheckResult, snapshotId: string, now: number, submittedLineIds?: string[]): Assessment {
   const done = (result: AssessmentResult, reasons: string[]): Assessment => ({
     result,
     reasons,
@@ -77,6 +79,17 @@ export function assessSubmission(task: DemoTask, check: CheckResult, snapshotId:
     snapshotId,
     at: now,
   });
+
+  // A submitted line the check never returned, or one it could not read at all (empty reading), is unread work:
+  // assessing the rest would grade only part of the submission.
+  const returned = new Set(check.lines.map((l) => l.id));
+  const unread = [
+    ...(submittedLineIds ?? []).filter((id) => !returned.has(id)),
+    ...check.lines.filter((l) => l.verdict !== 'context' && reading(l) === '').map((l) => l.id),
+  ];
+  if (unread.length > 0) {
+    return done('unassessable', [COULD_NOT_ASSESS, `${unread.join(', ')} could not be read. Rewrite it more clearly, then submit again.`]);
+  }
 
   const lines = check.lines.filter((l) => l.verdict !== 'context' && reading(l) !== '').sort((a, b) => lineNo(a.id) - lineNo(b.id));
   if (lines.length === 0) return done('unassessable', [COULD_NOT_ASSESS, 'No written work was found on the page.']);

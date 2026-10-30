@@ -1,7 +1,7 @@
 // Pure helpers for the independent-attempt screen (T08). No React, no store: the screen owns side effects.
 import type { ChatTurn, CheckResult, HelpLevel, LineVerdict, PageImage, ReplyInput } from '../ai/types';
 import { outcomeLabels } from './session.ts';
-import type { Attempt, DemoTask, Episode, HelpMove, OutcomeLabel } from './types';
+import type { Attempt, DemoTask, Episode, HelpMove, OutcomeLabel, Snapshot } from './types';
 
 export const independentAttemptId = (episodeId: string) => `${episodeId}:independent`;
 
@@ -45,9 +45,22 @@ export const editInvalidates = (phase: Episode['phase']) => phase === 'independe
 
 /** Lines whose reading the student must confirm before assessment (assess.ts treats them as unassessable). */
 export function linesToConfirm(check: CheckResult): LineVerdict[] {
-  return check.lines.filter(
-    (l) => l.verdict !== 'context' && (typeof l.reading === 'string' ? l.reading.trim() : '') !== '' && (l.verdict === 'unreadable' || l.readConfidence === 'low' || l.guard === 'reading')
-  );
+  return check.lines.filter((l) => {
+    if (l.verdict === 'context') return false;
+    // a line read as nothing at all is still unread work: the student types what it says
+    if (l.verdict === 'unreadable') return true;
+    return (typeof l.reading === 'string' ? l.reading.trim() : '') !== '' && (l.readConfidence === 'low' || l.guard === 'reading');
+  });
+}
+
+/**
+ * Retry after a relaunch has no cached image of the submitted page, so it exports the live canvas again. That is the
+ * submitted work only if the stored page actually loaded (before that, ink drawn on the canvas is neither saved nor
+ * noticed as an edit) and it still has the snapshot's strokes. Once loaded, any edit reopens the attempt. Line
+ * signatures are not compared: re-grouping reloaded strokes can jitter, and a false mismatch would block Retry.
+ */
+export function liveMatchesSnapshot(snap: Pick<Snapshot, 'strokeCount'>, live: { loaded: boolean; strokeCount: number }): boolean {
+  return live.loaded && live.strokeCount === snap.strokeCount;
 }
 
 /**
