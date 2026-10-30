@@ -1168,7 +1168,6 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     setPanelOpen(false);
     setDenied(undefined);
     gate.enter({ episodeId: e0.id, attemptId: workAttemptId(e0), phase: 'independent' });
-    // TODO(T08): App.tsx passes onStartIndependent → { name: 'independent', episodeId }; until then, back to Home
     if (onStartIndependent) onStartIndependent(e0.id);
     else onBack();
   };

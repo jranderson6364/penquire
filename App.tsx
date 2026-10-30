@@ -28,7 +28,6 @@ type Route =
 export default function App() {
   const [route, setRoute] = React.useState<Route>({ name: 'home' });
   const home = () => setRoute({ name: 'home' });
-  // TODO(wave 2 merge): pass as WorkspaceScreen onStartIndependent (T07) and HomeScreen onOpenIndependent (T09).
   const toIndependent = (episodeId: string) => setRoute({ name: 'independent', episodeId });
 
   return (
@@ -39,11 +38,12 @@ export default function App() {
           onOpen={(id) => setRoute({ name: 'workspace', id })}
           onNew={() => setRoute({ name: 'new' })}
           onSettings={() => setRoute({ name: 'settings' })}
+          onOpenIndependent={toIndependent}
         />
       )}
       {route.name === 'new' && <NewAssignmentScreen onCancel={home} onCreated={(id) => setRoute({ name: 'workspace', id })} />}
       {route.name === 'settings' && <SettingsScreen onDone={home} />}
-      {route.name === 'workspace' && <WorkspaceScreen key={route.id} assignmentId={route.id} onBack={home} />}
+      {route.name === 'workspace' && <WorkspaceScreen key={route.id} assignmentId={route.id} onBack={home} onStartIndependent={toIndependent} />}
       {route.name === 'independent' && <IndependentScreen key={route.episodeId} episodeId={route.episodeId} onDone={home} />}
     </SafeAreaProvider>
   );
