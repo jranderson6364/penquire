@@ -164,9 +164,10 @@ function cloud() {
     fallback: appleSay,
     stopFallback: () => void speech()?.stop(),
     // reasons are fixed strings and never contain the key
-    onFallback: (reason) => {
-      if (reason !== loggedFallback) console.warn(`[penquire:voice] cloud voice fell back to Apple: ${reason}`);
-      loggedFallback = reason;
+    onFallback: (reason, status) => {
+      const why = status ? `${reason} ${status}` : reason;
+      if (why !== loggedFallback) console.warn(`[penquire:voice] cloud voice fell back to Apple: ${why}`);
+      loggedFallback = why;
     },
   });
   return cloudTts;

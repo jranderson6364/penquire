@@ -231,11 +231,13 @@ test('the key never appears in a fallback reason, even when the server echoes it
   const origErr = console.error;
   console.warn = console.log = console.error = (...a: unknown[]) => void logged.push(a.map(String).join(' '));
   try {
-    const { d, reasons } = deps({ fetch: echo });
+    const statuses: (number | undefined)[] = [];
+    const { d, reasons } = deps({ fetch: echo, onFallback: (r, st) => (reasons.push(r), statuses.push(st)) });
     const r = await createCloudTts(d).speak(['One.']);
     const out = JSON.stringify({ r, reasons, logged });
     assert.ok(!out.includes(KEY));
     assert.equal(r.fellBack, 'http_error');
+    assert.deepEqual(statuses, [401]);
   } finally {
     console.warn = origWarn;
     console.log = origLog;

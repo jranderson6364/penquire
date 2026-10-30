@@ -14,8 +14,11 @@
  */
 
 export const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
-/** A premade ElevenLabs voice ("Rachel"); override with EXPO_PUBLIC_ELEVENLABS_VOICE_ID. */
-export const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8EUISK';
+/**
+ * "Bella - Professional, Bright, Warm" (premade, American, educational). Override with EXPO_PUBLIC_ELEVENLABS_VOICE_ID.
+ * The legacy "Rachel" id is not on current accounts (HTTP 404 voice_not_found, October 30, 2026).
+ */
+export const DEFAULT_VOICE_ID = 'hpp4J3VqNfWAUOO0d1Us';
 /** One sentence of audio must arrive within this, or the reply falls back to the Apple voice. */
 export const FETCH_TIMEOUT_MS = 3000;
 
@@ -36,8 +39,8 @@ export type CloudTtsDeps = {
   /** stop the Apple voice (called by stop()) */
   stopFallback?: () => void;
   timeoutMs?: number;
-  /** diagnostics; reasons are fixed strings and never contain the key */
-  onFallback?: (reason: FallbackReason) => void;
+  /** diagnostics; reasons are fixed strings and never contain the key. `status` is the HTTP status of an http_error. */
+  onFallback?: (reason: FallbackReason, status?: number) => void;
 };
 
 export type FallbackReason = 'no_key' | 'no_player' | 'timeout' | 'http_error' | 'network' | 'empty_audio' | 'play_failed';
@@ -52,9 +55,11 @@ export type CloudTts = {
 
 class TtsFailure extends Error {
   readonly reason: FallbackReason;
-  constructor(reason: FallbackReason) {
+  readonly status?: number;
+  constructor(reason: FallbackReason, status?: number) {
     super(reason);
     this.reason = reason;
+    this.status = status;
   }
 }
 
@@ -93,7 +98,7 @@ export function createCloudTts(deps: CloudTtsDeps): CloudTts {
       } catch {
         throw new TtsFailure(timedOut ? 'timeout' : 'network');
       }
-      if (!res.ok) throw new TtsFailure('http_error');
+      if (!res.ok) throw new TtsFailure('http_error', res.status);
       let bytes: Uint8Array;
       try {
         bytes = new Uint8Array(await res.arrayBuffer());
@@ -129,11 +134,11 @@ export function createCloudTts(deps: CloudTtsDeps): CloudTts {
 
     let fellBack: FallbackReason | null = !deps.apiKey ? 'no_key' : !deps.player ? 'no_player' : null;
     if (fellBack) deps.onFallback?.(fellBack);
-    const fallBack = (reason: FallbackReason) => {
+    const fallBack = (reason: FallbackReason, status?: number) => {
       if (fellBack) return;
       fellBack = reason;
       abortAll(); // the prefetched sentence will be said by the Apple voice instead
-      deps.onFallback?.(reason);
+      deps.onFallback?.(reason, status);
     };
 
     const iterator: Iterator<string> | AsyncIterator<string> =
@@ -177,7 +182,7 @@ export function createCloudTts(deps: CloudTtsDeps): CloudTts {
           spoken = true;
         } catch (e) {
           if (!live()) break;
-          fallBack(e instanceof TtsFailure ? e.reason : 'network');
+          fallBack(e instanceof TtsFailure ? e.reason : 'network', e instanceof TtsFailure ? e.status : undefined);
         }
       }
       if (!spoken) {
