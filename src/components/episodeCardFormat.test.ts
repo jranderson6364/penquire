@@ -27,10 +27,9 @@ test('reviewLine: scheduled date or an honest "none"', () => {
   assert.equal(reviewLine({ reviewDueAt: new Date(2026, 10, 9, 8).getTime() }), 'Review scheduled for Mon, Nov 9, 2026');
 });
 
-test('resumeTarget sends fresh-problem phases to the independent screen', () => {
-  assert.equal(resumeTarget('independent'), 'independent');
-  assert.equal(resumeTarget('independent_submitted'), 'independent');
-  for (const p of ['attempt', 'repair', 'repair_verified', 'outcome'] as const) assert.equal(resumeTarget(p), 'workspace');
+test('resumeTarget opens the independent screen once an independent attempt exists', () => {
+  assert.equal(resumeTarget({ independentAttemptId: 'e:independent' }), 'independent');
+  assert.equal(resumeTarget({}), 'workspace');
 });
 
 test('latestEpisode picks the newest episode of that assignment only', () => {

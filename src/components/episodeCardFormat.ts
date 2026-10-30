@@ -58,9 +58,12 @@ export function reviewLine(ep: Pick<Episode, 'reviewDueAt'>): string {
   return ep.reviewDueAt === undefined ? 'No review scheduled' : `Review scheduled for ${localDate(ep.reviewDueAt)}`;
 }
 
-/** The fresh-problem phases open the independent screen; everything else opens the workspace. */
-export function resumeTarget(phase: Phase): 'independent' | 'workspace' {
-  return phase === 'independent' || phase === 'independent_submitted' ? 'independent' : 'workspace';
+/**
+ * T08 route contract: once an independent attempt exists (phases independent, independent_submitted, outcome) the
+ * episode resumes on the independent screen, which also shows the outcome; before that, the workspace.
+ */
+export function resumeTarget(ep: Pick<Episode, 'independentAttemptId'>): 'independent' | 'workspace' {
+  return ep.independentAttemptId ? 'independent' : 'workspace';
 }
 
 /** Newest episode of the given assignment, or undefined. */

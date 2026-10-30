@@ -92,7 +92,7 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
   };
   // Never fall back to the workspace for a fresh problem: its marks, chat and examples would leak into the attempt.
   // TODO(T08/T10): App.tsx passes onOpenIndependent once the independent route is merged.
-  const independent = !!episode && resumeTarget(episode.phase) === 'independent';
+  const independent = !!episode && resumeTarget(episode) === 'independent';
   const blocked = independent && !onOpenIndependent;
   const resume = () => {
     if (!episode || blocked) return;
