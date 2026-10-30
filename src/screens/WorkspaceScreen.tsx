@@ -123,6 +123,14 @@ const NATIVE_OVERLAY = nativeApiVersion >= 6;
  * 2026: re-layout at each settled zoom shifted text and marks). 2 keeps text crisp up to about 2x zoom.
  */
 const OVERLAY_K = 2;
+/**
+ * Build 10+: host the overlay and the paper INSIDE PencilKit's zoomed page, so UIKit moves them with the ink in every
+ * pinch, scroll and bounce (no syncing at all). Native falls back to the synced layers if it can't find the page view.
+ * Kill switches: set false here (JS only, no rebuild) if either misbehaves on a device.
+ */
+const OVERLAY_IN_PAGE = true;
+/** off until [penquire:canvas] on the device shows PencilKit's ink is in subviews of its page (else paper could hide it) */
+const PAPER_IN_PAGE = false;
 
 /** `spend.total` accumulates the estimated cost of every API call made through the returned provider (retries included). */
 const providerFromSettings = (spend?: { total: number }) => {
@@ -228,6 +236,17 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const [probedModern, setProbedModern] = React.useState(false);
   const modern = nativeApiVersion >= 2 || nativeHasNewFunctions || probedModern;
   React.useEffect(() => console.warn(`[penquire] native canvas apiVersion=${nativeApiVersion} module=${JSON.stringify(nativeModuleInfo)}`), []);
+  // build 10+: how the canvas is hosted on this device (page-hosted overlay/paper or the synced fallback), once
+  React.useEffect(() => {
+    if (nativeApiVersion < 10) return;
+    const t = setTimeout(() => {
+      canvasRef.current
+        ?.debugInfo()
+        .then((j) => j && console.warn(`[penquire:canvas] ${j}`))
+        .catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, []);
   const [viewport, setViewport] = React.useState<Viewport>(IDENTITY_VIEWPORT);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
   const toolIsPixelEraser = toolState.tool === 'eraser' && toolState.eraserMode === 'pixel';
@@ -1496,6 +1515,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           {...(modern ? { pageWidth: PAGE_WIDTH, pageHeight: PAGE_HEIGHT, onViewportChanged, onPencilDoubleTap } : {})}
           {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
           {...(nativeApiVersion >= 8 ? { eraserCursor: eraserRing(toolState) } : {})}
+          {...(nativeApiVersion >= 10 ? { overlayInPage: OVERLAY_IN_PAGE, paperInPage: PAPER_IN_PAGE } : {})}
           {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround, onPencilSqueeze: (ph: 'began' | 'ended' | 'cancelled') => (ph === 'began' ? void startTalk() : ph === 'ended' ? void endTalk() : stopVoice()) } : {})}
           {...(NATIVE_OVERLAY ? { overlayScale: OVERLAY_K } : {})}
         >

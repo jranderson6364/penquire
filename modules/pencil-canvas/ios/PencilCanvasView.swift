@@ -246,6 +246,144 @@ final class OverlayHostView: UIView {
   }
 }
 
+// MARK: - Page-attached layers (apiVersion >= 10)
+
+/// The paper grid drawn in PAGE coordinates by tiles, at whatever resolution the zoom needs. Lives inside PencilKit's
+/// zoomed page, so UIKit moves and scales it exactly with the ink (no syncing). Drawn on background threads.
+final class TiledPaperLayer: CATiledLayer {
+  override class func fadeDuration() -> CFTimeInterval { 0 }
+  private let lock = NSLock()
+  private var styleValue = "grid"
+  /// written on the main thread, read by the tile threads
+  var style: String {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return styleValue
+    }
+    set {
+      lock.lock()
+      styleValue = newValue
+      lock.unlock()
+    }
+  }
+
+  override func draw(in ctx: CGContext) {
+    let style = self.style
+    guard style != "blank" else { return }
+    let rect = ctx.boundingBoxOfClipPath
+    let pixelsPerPoint = max(0.01, abs(ctx.ctm.a))
+    let step: CGFloat = 32
+    ctx.setStrokeColor(UIColor(red: 0.82, green: 0.87, blue: 0.95, alpha: 1).cgColor)
+    ctx.setLineWidth(1.2 / pixelsPerPoint) // about 0.6 pt on a 2x screen at any zoom, like the old paper
+    var y = max(step, ceil(rect.minY / step) * step)
+    while y <= rect.maxY {
+      ctx.move(to: CGPoint(x: rect.minX, y: y))
+      ctx.addLine(to: CGPoint(x: rect.maxX, y: y))
+      y += step
+    }
+    if style == "grid" {
+      var x = max(step, ceil(rect.minX / step) * step)
+      while x <= rect.maxX {
+        ctx.move(to: CGPoint(x: x, y: rect.minY))
+        ctx.addLine(to: CGPoint(x: x, y: rect.maxY))
+        x += step
+      }
+    }
+    ctx.strokePath()
+  }
+}
+
+final class TiledPaperView: UIView {
+  override class var layerClass: AnyClass { TiledPaperLayer.self }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = .white
+    isUserInteractionEnabled = false
+    layer.zPosition = -1 // under PencilKit's own layers whatever order it inserts them in
+    if let tiled = layer as? TiledPaperLayer {
+      tiled.levelsOfDetail = 8
+      tiled.levelsOfDetailBias = 4 // tile levels from 1/8x to 16x of page points
+      tiled.tileSize = CGSize(width: 512, height: 512)
+    }
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  var style: String = "grid" {
+    didSet {
+      (layer as? TiledPaperLayer)?.style = style
+      layer.setNeedsDisplay()
+    }
+  }
+}
+
+/// While a Pencil touch is on an overlay control (a mark, a block handle), PencilKit must not draw: inside the zoomed
+/// page the overlay is a descendant of the canvas, so its drawing gesture sees those touches too. Never recognizes.
+final class OverlayPencilGuard: UIGestureRecognizer, UIGestureRecognizerDelegate {
+  var onPencil: (@MainActor (Bool) -> Void)?
+  /// a finger is on an overlay control (a block handle being dragged): the page must not pan under it
+  var onFinger: (@MainActor (Bool) -> Void)?
+  private var pencils = Set<ObjectIdentifier>()
+  private var fingers = Set<ObjectIdentifier>()
+  private var down = Set<ObjectIdentifier>()
+
+  override init(target: Any?, action: Selector?) {
+    super.init(target: target, action: action)
+    cancelsTouchesInView = false
+    delaysTouchesBegan = false
+    delaysTouchesEnded = false
+    delegate = self
+  }
+
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+    let had = !pencils.isEmpty
+    let hadFinger = !fingers.isEmpty
+    for t in touches {
+      down.insert(ObjectIdentifier(t))
+      if t.type == .pencil { pencils.insert(ObjectIdentifier(t)) }
+      if t.type == .direct { fingers.insert(ObjectIdentifier(t)) }
+    }
+    if !had && !pencils.isEmpty { onPencil?(true) }
+    if !hadFinger && !fingers.isEmpty { onFinger?(true) }
+  }
+
+  override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { lift(touches) }
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { lift(touches) }
+
+  private func lift(_ touches: Set<UITouch>) {
+    let had = !pencils.isEmpty
+    let hadFinger = !fingers.isEmpty
+    for t in touches {
+      down.remove(ObjectIdentifier(t))
+      pencils.remove(ObjectIdentifier(t))
+      fingers.remove(ObjectIdentifier(t))
+    }
+    if had && pencils.isEmpty { onPencil?(false) }
+    if hadFinger && fingers.isEmpty { onFinger?(false) }
+    if down.isEmpty && state == .possible { state = .failed }
+  }
+
+  override func reset() {
+    super.reset()
+    let had = !pencils.isEmpty
+    let hadFinger = !fingers.isEmpty
+    pencils.removeAll()
+    fingers.removeAll()
+    down.removeAll()
+    if had { onPencil?(false) }
+    if hadFinger { onFinger?(false) }
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    true
+  }
+}
+
 /// CADisplayLink retains its target: this holds the canvas weakly.
 @MainActor
 private final class DisplayLinkTarget: NSObject {
@@ -296,6 +434,17 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   private var overlayScale: CGFloat = 1
   private var offsetObservation: NSKeyValueObservation?
   private var zoomObservation: NSKeyValueObservation?
+  /// apiVersion >= 10: the overlay and the paper inside PencilKit's zoomed page (JS turns these on; off = synced siblings)
+  private var wantsOverlayInPage = false
+  private var wantsPaperInPage = false
+  private weak var hostPage: UIView?
+  private var paperInPage = false
+  private let pagePaper = TiledPaperView(frame: .zero)
+  private let pencilGuard = OverlayPencilGuard(target: nil, action: nil)
+  private var lastSharpenWant: CGFloat = 0
+  /// the drawing gesture's own state before an overlay Pencil touch turned it off (restored after)
+  private var drawingWasEnabled: Bool?
+  private var overlayFingerDown = false
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -350,6 +499,12 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     palmWatcher.isSuspectOnLanding = { [weak self] in self?.withinPenWindow() ?? false }
     // apiVersion >= 9: the ring follows PencilKit's own drawing gesture, which reports every move while erasing
     canvas.drawingGestureRecognizer.addTarget(self, action: #selector(drawingGestureChanged(_:)))
+    pencilGuard.onPencil = { [weak self] on in self?.overlayPencil(on) }
+    pencilGuard.onFinger = { [weak self] on in
+      self?.overlayFingerDown = on
+      self?.updateGestureGate()
+    }
+    overlayHost.addGestureRecognizer(pencilGuard)
     canvas.addGestureRecognizer(palmWatcher)
 
     eraserRing.fillColor = nil
@@ -375,12 +530,126 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
 
   func setOverlayScale(_ k: Double) {
     overlayScale = CGFloat(max(0.01, k))
+    placeLayers()
     updateOverlayTransform()
+    lastSharpenWant = 0
     scheduleSharpen()
+  }
+
+  func setOverlayInPage(_ on: Bool) {
+    wantsOverlayInPage = on
+    placeLayers()
+  }
+
+  func setPaperInPage(_ on: Bool) {
+    wantsPaperInPage = on
+    placeLayers()
+  }
+
+  // MARK: Hosting inside the zoomed page (apiVersion >= 10)
+
+  /// PencilKit's zoomed page: the subview UIKit scales by the zoom, page-sized in its own coordinates. nil if none fits.
+  private func zoomedPageView() -> UIView? {
+    let z = canvas.zoomScale
+    return canvas.subviews.first { v in
+      !v.isHidden && v !== pagePaper && abs(v.bounds.width - pageSize.width) < 1 && abs(v.bounds.height - pageSize.height) < 1
+        && abs(v.transform.a - z) < 0.001 && abs(v.transform.d - z) < 0.001
+    }
+  }
+
+  private var overlayInPage: Bool { hostPage != nil && overlayHost.superview === hostPage }
+
+  private func overlayPencil(_ on: Bool) {
+    if on {
+      if drawingWasEnabled == nil { drawingWasEnabled = canvas.drawingGestureRecognizer.isEnabled }
+      canvas.drawingGestureRecognizer.isEnabled = false
+    } else {
+      canvas.drawingGestureRecognizer.isEnabled = drawingWasEnabled ?? true
+      drawingWasEnabled = nil
+    }
+  }
+
+  /// Put the overlay (and the paper) inside the zoomed page when asked and possible, else beside the canvas, synced.
+  private func placeLayers() {
+    var page: UIView? = nil
+    if wantsOverlayInPage || wantsPaperInPage {
+      // keep the page found before while it is still PencilKit's page (re-matching each frame could flip-flop)
+      if let p = hostPage, p.superview === canvas, !p.isHidden, abs(p.bounds.width - pageSize.width) < 1, abs(p.bounds.height - pageSize.height) < 1 {
+        page = p
+      } else {
+        page = zoomedPageView()
+      }
+    }
+    hostPage = page
+    CATransaction.begin()
+    CATransaction.setDisableActions(true) // a move inside UIKit's bounce animation block must not animate
+    defer { CATransaction.commit() }
+    // overlay: only into a page that takes touches, or its marks and handles could not be tapped
+    if wantsOverlayInPage, let page = page, page.isUserInteractionEnabled {
+      if overlayHost.superview !== page {
+        overlayHost.removeFromSuperview()
+        page.addSubview(overlayHost)
+      }
+      if page.subviews.last !== overlayHost { page.bringSubviewToFront(overlayHost) }
+      overlayHost.layer.anchorPoint = .zero
+      overlayHost.bounds = CGRect(origin: .zero, size: CGSize(width: pageSize.width * overlayScale, height: pageSize.height * overlayScale))
+      overlayHost.layer.position = page.bounds.origin
+      let t = CGAffineTransform(scaleX: 1 / overlayScale, y: 1 / overlayScale)
+      if overlayHost.transform != t {
+        overlayHost.layer.removeAllAnimations()
+        overlayHost.transform = t
+      }
+    } else if overlayHost.superview !== self {
+      overlayHost.removeFromSuperview()
+      overlayHost.layer.anchorPoint = .zero
+      addSubview(overlayHost)
+    }
+    // paper: only where PencilKit draws its ink in subviews, so the paper can go underneath them
+    if wantsPaperInPage, let page = page, page.subviews.contains(where: { $0 !== pagePaper && $0 !== overlayHost }) {
+      if pagePaper.superview !== page { page.insertSubview(pagePaper, at: 0) }
+      if page.subviews.first !== pagePaper { page.sendSubviewToBack(pagePaper) }
+      if pagePaper.frame != page.bounds { pagePaper.frame = page.bounds }
+      paperInPage = true
+      paper.isHidden = true
+    } else {
+      if pagePaper.superview != nil { pagePaper.removeFromSuperview() }
+      let was = paperInPage
+      paperInPage = false
+      if was {
+        paper.isHidden = false
+        updatePaper()
+      }
+    }
+  }
+
+  /// What the canvas is made of on this device, for diagnosing the page hosting (logged once from JS).
+  func debugJSON() -> String {
+    let subs: [[String: Any]] = canvas.subviews.map { v in
+      [
+        "class": String(describing: type(of: v)),
+        "frame": NSCoder.string(for: v.frame),
+        "bounds": NSCoder.string(for: v.bounds),
+        "scale": Double(v.transform.a),
+        "subviews": v.subviews.count,
+        "layerSublayers": v.layer.sublayers?.count ?? 0,
+      ]
+    }
+    return jsonString([
+      "overlayInPage": overlayInPage,
+      "paperInPage": paperInPage,
+      "wants": ["overlay": wantsOverlayInPage, "paper": wantsPaperInPage],
+      "pageFound": zoomedPageView() != nil,
+      "pageInteractive": zoomedPageView()?.isUserInteractionEnabled ?? false,
+      "zoom": Double(canvas.zoomScale),
+      "contentSize": NSCoder.string(for: canvas.contentSize),
+      "pageSize": NSCoder.string(for: pageSize),
+      "canvasSubviews": subs,
+    ])
   }
 
   /// screen = origin + (scale / overlayScale) * layer, where (origin, scale) is where the ink is on screen right now.
   private func updateOverlayTransform() {
+    if overlayInPage { return } // UIKit moves it with the page
     let ink = inkFrame()
     let r = ink.scale / overlayScale
     let t = CGAffineTransform(a: r, b: 0, c: 0, d: r, tx: ink.origin.x, ty: ink.origin.y)
@@ -475,16 +744,19 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     sharpenTask = Task { @MainActor [weak self] in
       try? await Task.sleep(nanoseconds: 50_000_000) // after Fabric has laid the new views out
       guard let self = self, !Task.isCancelled else { return }
-      self.sharpenOverlay()
+      self.sharpenOverlay(force: true)
     }
   }
 
   /// Text and SVG in the overlay are drawn at their own layout size and then scaled with the page, so past
   /// overlayScale they blur. Once a zoom settles, redraw them at the scale they are shown at. No React work and no
   /// re-layout: only the backing stores change, so nothing moves.
-  private func sharpenOverlay() {
+  private func sharpenOverlay(force: Bool = false) {
     let screen = window?.screen.scale ?? 2
     let want = screen * max(1, canvas.zoomScale / overlayScale)
+    // every redraw at a new scale is a visible pop: only when the zoom changed by more than a quarter (or on mount)
+    if !force && lastSharpenWant > 0 && abs(want / lastSharpenWant - 1) < 0.25 { return }
+    lastSharpenWant = want
     sharpen(overlayHost, want: want, screen: screen)
   }
 
@@ -538,14 +810,13 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   override func layoutSubviews() {
     super.layoutSubviews()
     canvas.frame = bounds
-    // the host's origin is the page's top-left; its transform does the rest (anchor at the top-left corner)
-    if overlayHost.superview == nil {
-      overlayHost.layer.anchorPoint = .zero
-      addSubview(overlayHost)
+    placeLayers()
+    if !overlayInPage {
+      // beside the canvas: the host's origin is the page's top-left; its transform does the rest (anchor top-left)
+      bringSubviewToFront(overlayHost)
+      overlayHost.bounds = CGRect(origin: .zero, size: bounds.size)
+      overlayHost.layer.position = .zero
     }
-    bringSubviewToFront(overlayHost)
-    overlayHost.bounds = CGRect(origin: .zero, size: bounds.size)
-    overlayHost.layer.position = .zero
     updateOverlayTransform()
     if bounds.size != lastBoundsSize, bounds.width > 1, bounds.height > 1 {
       lastBoundsSize = bounds.size
@@ -588,6 +859,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       clampOffset()
     }
     isAdjusting = false
+    if wantsOverlayInPage || wantsPaperInPage { placeLayers() }
     updatePaper()
     updateOverlayTransform()
     sendViewport()
@@ -615,6 +887,10 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   }
 
   private func updatePaper() {
+    if paperInPage {
+      paper.isHidden = true
+      return
+    }
     let ink = inkFrame()
     let z = ink.scale
     let pageRect = CGRect(x: ink.origin.x, y: ink.origin.y, width: pageSize.width * z, height: pageSize.height * z)
@@ -636,7 +912,8 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
     guard !isAdjusting else { return }
     updateInsets()
     // a zoom bounce may attach its animation after this callback: follow the ink for a moment anyway
-    if canvas.isZoomBouncing || canvas.isZooming { followInk() }
+    if !(overlayInPage && paperInPage) && (canvas.isZoomBouncing || canvas.isZooming) { followInk() }
+    if wantsOverlayInPage || wantsPaperInPage { placeLayers() }
     updatePaper()
     updateOverlayTransform()
     // Every frame (up to 120 Hz): JS only moves one overlay layer per event (PageLayer), so it can keep up, and the
@@ -695,6 +972,7 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
 
   func setPaper(_ style: String) {
     paper.style = style
+    pagePaper.style = style
   }
 
   private func updateToolPicker() {
@@ -745,7 +1023,12 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
       case "fixed":
         canvas.tool = PKEraserTool(.fixedWidthBitmap, width: CGFloat(spec.eraserWidth ?? 16))
       default:
-        canvas.tool = PKEraserTool(.vector)
+        // apiVersion >= 10: the whole-stroke eraser has a size too
+        if let w = spec.eraserWidth {
+          canvas.tool = PKEraserTool(.vector, width: CGFloat(w))
+        } else {
+          canvas.tool = PKEraserTool(.vector)
+        }
       }
     case "lasso":
       canvas.tool = PKLassoTool()
@@ -796,12 +1079,12 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   /// any palm-sized touch, or any touch that landed during writing, is still down. Disabling a recognizer cancels a
   /// pan already in progress, so a palm that spreads mid-gesture stops the page.
   private func updateGestureGate() {
-    let blocked = withinPenWindow() || palmWatcher.hasSuspect
+    let blocked = withinPenWindow() || palmWatcher.hasSuspect || overlayFingerDown
     if canvas.panGestureRecognizer.isEnabled == blocked { canvas.panGestureRecognizer.isEnabled = !blocked }
     if let pinch = canvas.pinchGestureRecognizer, pinch.isEnabled == blocked { pinch.isEnabled = !blocked }
     resumeGestures?.cancel()
     resumeGestures = nil
-    if blocked && !pencilDown && !palmWatcher.pencilTouching && !palmWatcher.hasSuspect {
+    if blocked && !pencilDown && !palmWatcher.pencilTouching && !palmWatcher.hasSuspect && !overlayFingerDown {
       // only the post-lift window is holding the gate: look again when it runs out
       let lifted = max(pencilLiftedAt, palmWatcher.pencilLiftedAt)
       let wait = max(0, penPause - (CACurrentMediaTime() - lifted))
@@ -840,6 +1123,8 @@ final class PencilCanvasView: ExpoView, PKCanvasViewDelegate, UIPencilInteractio
   }
 
   func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+    // PencilKit may add views to its page while drawing: keep the overlay on top and the paper underneath
+    if wantsOverlayInPage || wantsPaperInPage { placeLayers() }
     if suppressChangeEvents { return }
     // Debounce: report once the pen has been idle for a moment.
     pendingChange?.cancel()

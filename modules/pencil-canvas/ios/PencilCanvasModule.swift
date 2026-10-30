@@ -16,8 +16,9 @@ public class PencilCanvasModule: Module {
     // 7: palm rejection (large contacts and touches that land while writing never pan), palmRejectRadius, penPauseMs
     // 8: overlay animates with the zoom bounce, overlay text/SVG redrawn sharp after zoom, eraserCursor ring
     // 9: overlay and paper follow the ink's on-screen frame during UIKit animations; ring follows PencilKit's gesture
+    // 10: overlayInPage / paperInPage (hosted inside PencilKit's zoomed page), debugInfo, sized whole-stroke eraser
     Constant("apiVersion") {
-      return 9
+      return 10
     }
 
     // pagesJSON: { title, pageWidth, pageHeight, pages: [{ drawing (base64), blocks?: [{ x, y, w, heading?, lines, fontSize? }] }] }
@@ -52,6 +53,21 @@ public class PencilCanvasModule: Module {
       // apiVersion >= 7: after the Pencil lifts, fingers cannot pan for this long (ms)
       Prop("penPauseMs") { (view: PencilCanvasView, value: Double) in
         view.setPenPauseMs(value)
+      }
+
+      // apiVersion >= 10: host the overlay layer / the paper inside PencilKit's zoomed page, so UIKit moves them with the
+      // ink in every pinch, scroll and animation (falls back to the synced sibling layers when the page view isn't found)
+      Prop("overlayInPage") { (view: PencilCanvasView, value: Bool) in
+        view.setOverlayInPage(value)
+      }
+
+      Prop("paperInPage") { (view: PencilCanvasView, value: Bool) in
+        view.setPaperInPage(value)
+      }
+
+      // apiVersion >= 10: JSON describing how the canvas is hosted on this device (diagnostics)
+      AsyncFunction("debugInfo") { (view: PencilCanvasView) -> String in
+        return MainActor.assumeIsolated { view.debugJSON() }
       }
 
       // apiVersion >= 8: diameter (screen points) of a dashed ring around the Pencil tip while erasing; 0 = off

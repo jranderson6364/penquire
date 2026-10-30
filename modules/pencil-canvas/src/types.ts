@@ -83,6 +83,10 @@ export type PencilCanvasProps = {
   penPauseMs?: number;
   /** apiVersion >= 8: diameter in screen points of a dashed ring around the Pencil tip while the eraser is the tool; 0 = off */
   eraserCursor?: number;
+  /** apiVersion >= 10: host the overlay children inside PencilKit's zoomed page (moves with the ink natively) */
+  overlayInPage?: boolean;
+  /** apiVersion >= 10: draw the paper inside PencilKit's zoomed page */
+  paperInPage?: boolean;
   /** apiVersion >= 6: children are the overlay layer, laid out at page * overlayScale; native moves them with the ink */
   overlayScale?: number;
   children?: import('react').ReactNode;
@@ -118,4 +122,6 @@ export type PencilCanvasHandle = {
   exportPage(options: ExportPageOptions): Promise<ExportedPage | null>;
   /** apiVersion >= 5: bring a page rect into view (no-op if visible or on older binaries) */
   scrollToPageRect(r: { x: number; y: number; w: number; h: number }): Promise<void>;
+  /** apiVersion >= 10: how the canvas is hosted on this device (JSON), or null on older binaries */
+  debugInfo(): Promise<string | null>;
 };

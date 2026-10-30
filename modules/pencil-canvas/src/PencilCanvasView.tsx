@@ -23,6 +23,8 @@ type NativeMethods = {
   exportPage?(optionsJSON: string): Promise<string>;
   // apiVersion >= 5
   scrollToPageRect?(x: number, y: number, w: number, h: number): Promise<void>;
+  // apiVersion >= 10
+  debugInfo?(): Promise<string>;
 };
 
 type NativeProps = Omit<PencilCanvasProps, 'onDrawingChanged' | 'onViewportChanged' | 'onPencilDoubleTap' | 'onPencilSqueeze'> & {
@@ -120,6 +122,8 @@ export function PencilCanvas({
   palmRejectRadius,
   penPauseMs,
   eraserCursor,
+  overlayInPage,
+  paperInPage,
   ...props
 }: PencilCanvasProps & { ref?: React.Ref<PencilCanvasHandle> }) {
   const nativeRef = React.useRef<NativeMethods>(null);
@@ -153,6 +157,7 @@ export function PencilCanvas({
         scrollToPageRect: async (r) => {
           await n().scrollToPageRect?.(r.x, r.y, r.w, r.h);
         },
+        debugInfo: async () => (n().debugInfo ? n().debugInfo!() : null),
         exportPage: async (options) => (n().exportPage ? parse<ExportedPage | null>(await n().exportPage!(JSON.stringify(options)), null) : null),
       };
     },
@@ -166,6 +171,7 @@ export function PencilCanvas({
       {...props}
       {...(nativeApiVersion >= 7 ? palmProps(palmRejectRadius, penPauseMs) : {})}
       {...(nativeApiVersion >= 8 && eraserCursor != null ? { eraserCursor } : {})}
+      {...(nativeApiVersion >= 10 ? { ...(overlayInPage != null ? { overlayInPage } : {}), ...(paperInPage != null ? { paperInPage } : {}) } : {})}
       onDrawingChanged={(e) => onDrawingChanged?.(e.nativeEvent)}
       onViewportChanged={(e) => onViewportChanged?.(e.nativeEvent)}
       onPencilDoubleTap={() => onPencilDoubleTap?.()}
