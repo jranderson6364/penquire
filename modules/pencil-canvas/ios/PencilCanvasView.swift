@@ -255,7 +255,7 @@ final class TiledPaperLayer: CATiledLayer {
   private let lock = NSLock()
   private var styleValue = "grid"
   /// written on the main thread, read by the tile threads
-  var style: String {
+  var paperStyle: String { // not `style`: CALayer already has `style: [AnyHashable: Any]?`
     get {
       lock.lock()
       defer { lock.unlock() }
@@ -269,7 +269,7 @@ final class TiledPaperLayer: CATiledLayer {
   }
 
   override func draw(in ctx: CGContext) {
-    let style = self.style
+    let style = paperStyle
     guard style != "blank" else { return }
     let rect = ctx.boundingBoxOfClipPath
     let pixelsPerPoint = max(0.01, abs(ctx.ctm.a))
@@ -316,7 +316,7 @@ final class TiledPaperView: UIView {
 
   var style: String = "grid" {
     didSet {
-      (layer as? TiledPaperLayer)?.style = style
+      (layer as? TiledPaperLayer)?.paperStyle = style
       layer.setNeedsDisplay()
     }
   }
