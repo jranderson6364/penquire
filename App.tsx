@@ -9,6 +9,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { WorkspaceScreen } from './src/screens/WorkspaceScreen';
 import { applyAppearance } from './src/appearance';
 import { getSettings } from './src/store/db';
+import { dumpRecentSession } from './src/devDump';
 
 // light / dark / system, before the first frame (colors are dynamic, so later changes apply instantly)
 try {
@@ -16,6 +17,7 @@ try {
 } catch (e) {
   console.warn('settings not readable yet; using the system appearance', e);
 }
+dumpRecentSession(); // DEV ONLY, temporary (T11 diagnosis)
 
 type Route =
   | { name: 'home' }
