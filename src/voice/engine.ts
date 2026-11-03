@@ -2,12 +2,15 @@
  * Speech in and out, on the device (docs/10 §4). Free, private and offline:
  *  - out: Apple's voices via expo-speech, preferring a Premium/Enhanced English voice (src/voice/session.ts), spoken
  *    sentence by sentence as the reply streams;
- *  - in: SFSpeechRecognizer via expo-speech-recognition, streaming partial text while they talk.
+ *  - in: SFSpeechRecognizer via expo-speech-recognition, streaming partial text while they talk. With an ElevenLabs
+ *    key, each turn's recorded audio is re-transcribed by Scribe for the final message (src/voice/cloudStt.ts); Apple's
+ *    transcript is the fallback.
  * Both libraries exist only in native build 4+, so they are loaded lazily and every entry point degrades to "not
  * available" on an older binary instead of crashing.
  */
 import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { cloudTtsConfig, createCloudTts, expoPlayer } from './cloudTts';
+import { SCRIBE_MODEL, STT_BUDGET_MS, createCloudStt, createRecording, expoSttFiles, finalTranscript, nativeMultipart, recordingSuspect, sttLogLine, type CloudStt, type SttFiles } from './cloudStt';
 import { contextualStrings, createRecognizerChoice } from './recognizer';
 import { chooseVoice, createSpeaker, rankVoices, sentenceBackend, voiceTier, voiceTuning, type SpeechBackend, type Utterance, type VoiceInfo } from './session';
 
@@ -243,6 +246,8 @@ export function stopAllVoice() {
   speaker.stopAll();
   activeListen?.();
   activeListen = null;
+  activeStt?.(); // a turn being transcribed by Scribe: drop it (finish() resolves "")
+  activeStt = null;
   try {
     recognition()?.ExpoSpeechRecognitionModule.abort();
   } catch (e) {
@@ -298,6 +303,18 @@ export async function listen(
     console.warn(`[penquire:voice] recognizer: ${mode}${onDevice ? '' : onDeviceSupported ? ' (on-device is the fallback)' : ' (no on-device recognizer)'}`);
   }
 
+  // Scribe needs this session's audio: persist it when there is a key and the build can record (src/voice/cloudStt.ts)
+  const stt = scribe();
+  let canRecord = false;
+  try {
+    canRecord = M.supportsRecording();
+  } catch {}
+  const persist = !!stt && canRecord && !recordingOff;
+  flushRecordings(); // files of earlier sessions that were aborted or timed out; none is still uploading
+  const rec = createRecording();
+  /** finish() took over the files (it deletes them after the upload); otherwise cleanup() queues them for deletion */
+  let handedOff = false;
+
   let latest = '';
   let settle: ((t: string) => void) | null = null;
   const subs = [
@@ -306,16 +323,29 @@ export async function listen(
       onPartial(latest);
     }),
     ...(onVolume ? [M.addListener('volumechange', (e) => onVolume(e.value))] : []),
-    M.addListener('end', () => (settle ? settle(latest) : onEnded?.())),
+    M.addListener('audiostart', (e) => rec.audioStart(e.uri)),
+    M.addListener('audioend', (e) => rec.audioEnd(e.uri)),
+    M.addListener('end', () => {
+      if (settle) return settle(latest);
+      cleanup(); // ended by itself: drop this session's listeners so a later session's events don't reach them
+      onEnded?.();
+    }),
     M.addListener('error', (e) => {
       if (!onDevice && recognizerChoice.serverError(e.error, onDeviceSupported))
         console.warn(`[penquire:voice] recognizer: Apple server failed (${e.error}); on-device from now on`);
-      settle ? settle(latest) : onEnded?.();
+      if (!recordingOff && recordingSuspect({ persisted: persist, error: e.error, audioStarted: rec.started(), heard: !!latest })) {
+        recordingOff = true;
+        console.warn(`[penquire:voice] stt: recording disabled for this run (${e.error}); Apple's transcript only`);
+      }
+      if (settle) return settle(latest);
+      cleanup();
+      onEnded?.();
     }),
   ];
   const cleanup = () => {
     subs.forEach((s) => s.remove());
     if (activeListen === cleanup) activeListen = null;
+    if (!handedOff) staleRecordings.push(...rec.uris());
   };
   activeListen = cleanup;
 
@@ -328,17 +358,22 @@ export async function listen(
     contextualStrings: contextualStrings(vocabulary),
     iosTaskHint: 'dictation',
     ...(onVolume ? { volumeChangeEventOptions: { enabled: true, intervalMillis: 100 } } : {}),
+    // 16 kHz 16-bit mono WAV: about 32 KB per second, small enough to upload quickly
+    ...(persist ? { recordingOptions: { persist: true, outputSampleRate: 16000, outputEncoding: 'pcmFormatInt16' as const } } : {}),
   });
 
   return {
     finish: () =>
       new Promise<string>((resolve) => {
+        const endedAt = Date.now(); // the turn's STT_BUDGET_MS starts now
         const timer = setTimeout(() => settle?.(latest), 1500); // never hang if 'end' doesn't come
         settle = (t) => {
           clearTimeout(timer);
           settle = null;
+          handedOff = true;
           cleanup();
-          resolve(t.trim());
+          if (!persist) return resolve(t.trim());
+          void scribeTurn(stt, rec, t, STT_BUDGET_MS - (Date.now() - endedAt)).then(resolve);
         };
         M.stop();
       }),
@@ -347,4 +382,60 @@ export async function listen(
       M.abort();
     },
   };
+}
+
+// ---------------------------------------------------------------- cloud dictation (Scribe)
+
+let cloudSttInst: CloudStt | null | undefined;
+/** ElevenLabs Scribe (src/voice/cloudStt.ts), created on first use; null without a key. */
+function scribe(): CloudStt | null {
+  if (cloudSttInst !== undefined) return cloudSttInst;
+  const { apiKey } = cloudTtsConfig();
+  cloudSttInst = apiKey ? createCloudStt({ apiKey, fetch, body: nativeMultipart }) : null;
+  console.warn(
+    cloudSttInst
+      ? `[penquire:voice] stt: ElevenLabs ${SCRIBE_MODEL} for the final transcript (Apple's live transcript is the fallback)`
+      : "[penquire:voice] stt: Apple's transcript only (no ElevenLabs key)"
+  );
+  return cloudSttInst;
+}
+
+let sttFilesInst: SttFiles | null | undefined;
+const sttFiles = () => (sttFilesInst === undefined ? (sttFilesInst = expoSttFiles(nativeApiVersion)) : sttFilesInst);
+
+/** Turned on by a session that failed before capturing any audio while recording: persist no more this run. */
+let recordingOff = false;
+/** recordings nobody is uploading any more (aborted, ended by themselves, timed out), deleted at the next listen() */
+const staleRecordings: string[] = [];
+function flushRecordings() {
+  const files = sttFiles();
+  for (const uri of staleRecordings.splice(0)) files?.remove(uri);
+}
+
+/** aborts the Scribe upload of the turn being finished (stopAllVoice) */
+let activeStt: (() => void) | null = null;
+
+/**
+ * The turn's message: Scribe's transcript of the recording, or Apple's on any failure. Resolves "" when Stop was
+ * pressed during the upload, so a stopped turn is not sent. One log line per turn.
+ */
+async function scribeTurn(stt: CloudStt | null, rec: ReturnType<typeof createRecording>, apple: string, remainingMs: number): Promise<string> {
+  const controller = new AbortController();
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+    controller.abort();
+  };
+  activeStt = stop;
+  const file = rec.file();
+  const files = sttFiles();
+  const bytes = 'uri' in file ? files?.size(file.uri) ?? null : null;
+  const r = await finalTranscript(stt, { apple, file, remainingMs, signal: controller.signal });
+  if (activeStt === stop) activeStt = null;
+  const uris = rec.uris();
+  // an aborted upload may still be reading its file: delete it at the next listen() instead of now
+  if (!r.outcome.ok && (r.outcome.reason === 'timeout' || r.outcome.reason === 'cancelled')) staleRecordings.push(...uris);
+  else for (const uri of uris) files?.remove(uri);
+  console.warn(sttLogLine(r.outcome, bytes !== null ? ` (${Math.round(bytes / 1024)} KB audio)` : ''));
+  return stopped ? '' : r.text;
 }
