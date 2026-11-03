@@ -144,7 +144,21 @@ export function levelBlock(ctx: TutorContext): string {
   return `${HELP_LEVELS[ctx.helpLevel].rule}${style}`;
 }
 
-const DISPUTE = `THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix. Disagreement alone is not evidence: change your verdict only for a reason you can name.`;
+/**
+ * The latest check as reply context. When the page changed since that check (src/check/stale.ts) its verdicts are
+ * history: T11 run 1 sent the first check ("still open: distribution") with every reply after the fix, and the tutor
+ * re-announced the fix on nearly every turn. A current check was already shown to the student, so what it calls fixed
+ * has been said.
+ */
+export function lastCheckBlock(lastCheck: { feedback: string; stillOpen: string[] } | undefined, stale: boolean): string {
+  if (!lastCheck) return '';
+  const open = lastCheck.stillOpen.join('; ') || 'none';
+  if (stale)
+    return `\n\nEARLIER CHECK (OUT OF DATE: the student has changed the page since this check). The attached page image is the truth. The verdicts and open issues below are history, not the current state: judge the page as it is now, and don't call an old issue open, or newly fixed, unless the page shows it.\n${lastCheck.feedback}\nOpen at that time: ${open}`;
+  return `\n\nLATEST CHECK RESULT (current: the page hasn't changed since; the student has already seen this feedback, so don't repeat what it says is fixed):\n${lastCheck.feedback}\nStill open: ${open}`;
+}
+
+const DISPUTE =`THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix. Disagreement alone is not evidence: change your verdict only for a reason you can name.`;
 
 /** Extra instructions for a chat reply that came from a button rather than free text. */
 export function intentBlock(intent: ReplyIntent | undefined, part?: string, evidence?: string): string {

@@ -19,6 +19,7 @@ import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, pa
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { guardMerged } from '../check/finalize';
+import { checkOutOfDate } from '../check/stale';
 import { AUTO_IDLE_MS, autoCheckAllowed, recentAuto } from '../check/auto';
 import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
@@ -45,7 +46,7 @@ import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../t
 import { HELP_LEVELS } from '../ai/prompts';
 import { LearningBar } from '../components/LearningBar';
 import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
-import { fallbackMove, flagFrom, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, withSnapshot, workAttemptId, type Flag } from '../learning/workspaceFlow';
+import { fallbackMove, flagFrom, givenEquation, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { takeSnapshot } from '../learning/snapshot';
@@ -796,16 +797,26 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       }
       const strokeBox = new Map((cap?.strokeList ?? []).map((st) => [st.i, st]));
       const chunksByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, chunkLine(l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b))]));
+      // Has the ink changed since the latest check? Then the reply is told the check is history (src/check/stale.ts).
+      const checkStale = cap
+        ? checkOutOfDate(
+            check && { strokeCount: check.strokeCount, sigs: check.result.lines.map((l) => l.sig) },
+            { strokes: cap.strokes, sigs: [...signatures(cap.lines, cap.strokeList).values()] },
+            pixelErased.current.has(pageId) || toolIsPixelEraser
+          )
+        : stale;
       const spend = { total: 0 };
       const replied = await gate.guard(
         providerFromSettings(spend).reply({
         ...tutorContext(ax),
         helpLevel: level,
-        lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
+        // the guard keeps judging against the check's lines even when they are out of date (no lines: no guard)
+        lines: replyGuardLines(check?.result.lines, e0 ? givenEquation(e0) : undefined),
         history: ax.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
+        checkStale,
         intent,
         evidence,
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)

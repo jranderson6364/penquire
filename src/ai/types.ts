@@ -120,7 +120,13 @@ export type ReplyInput = TutorContext & {
   /** attach the current page when the student asks about their work */
   image?: PageImage;
   lastCheck?: { feedback: string; stillOpen: string[] };
-  /** the latest check's transcribed lines, so the leak guard can judge the reply against the student's work */
+  /** the page changed since `lastCheck` (src/check/stale.ts): the model is told its verdicts are history */
+  checkStale?: boolean;
+  /**
+   * The leak guard's view of the student's work (src/verify/guard.ts): the latest check's transcribed lines, stale or
+   * not, plus a demo task's given equation (src/learning/workspaceFlow.ts replyGuardLines). Guard input only, never
+   * sent to the model. Without lines the guard passes everything through.
+   */
   lines?: { id: string; reading: string; verdict: string }[];
   /** set when the reply came from a button (Help me start, I think this is right, More help) */
   intent?: ReplyIntent;

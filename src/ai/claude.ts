@@ -1,4 +1,4 @@
-import { SPOKEN_RULES, TUTOR_RULES, contextBlock, intentBlock, levelBlock } from './prompts';
+import { SPOKEN_RULES, TUTOR_RULES, contextBlock, intentBlock, lastCheckBlock, levelBlock } from './prompts';
 import { StreamAssembler, partialStringField } from './stream';
 import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
@@ -530,9 +530,7 @@ Check my work. First verify each line yourself, including steps I did in my head
   }
 
   async reply(input: ReplyInput): Promise<ReplyResult> {
-    const last = input.lastCheck
-      ? `\n\nLATEST CHECK RESULT:\n${input.lastCheck.feedback}\nStill open: ${input.lastCheck.stillOpen.join('; ') || 'none'}`
-      : '';
+    const last = lastCheckBlock(input.lastCheck, !!input.checkStale);
     const messages: Message[] = [
       {
         role: 'user',

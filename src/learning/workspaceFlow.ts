@@ -3,6 +3,7 @@
 import type { HelpLevel, LineVerdict } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Assignment } from '../store/types';
+import { TASK_EQUATIONS } from './demoPack.ts';
 import { clampMove, lineInkSig } from './session.ts';
 import type { Assistance, Episode, EpisodePolicy, HelpMove, Phase, Snapshot } from './types';
 
@@ -93,3 +94,27 @@ export const replacementValid = (flag: Flag, after: Line[], verdicts: LineVerdic
   const verdict = new Map(verdicts.map((v) => [v.id, v.verdict]));
   return fresh.length > 0 && fresh.every((l) => verdict.get(l.id) === 'valid');
 };
+
+// ---- the reply leak guard's view of the work ----------------------------------------------------------------
+
+type GuardLine = { id: string; reading: string; verdict: string };
+
+/** The equation the episode's workspace task starts from (demo pack only; it is in the learner's prompt already). */
+export const givenEquation = (ep: Episode | undefined): string | undefined => {
+  const taskId = ep ? ep.attempts[workAttemptId(ep)]?.taskId : undefined;
+  return taskId ? TASK_EQUATIONS[taskId] : undefined;
+};
+
+/** Sorts first (src/verify/guard.ts orders by line number) and reads sensibly in the guard's fallback question. */
+export const GIVEN_LINE_ID = 'the given equation';
+
+/**
+ * What the reply leak guard judges a reply against: the latest check's lines, kept even when the page changed since
+ * (with no lines the guard passes everything), plus the task's given equation as a valid first line. The given is
+ * what makes a stated final answer detectable: "x = 3" doesn't satisfy a wrong "6x − 4 = 10", but it solves
+ * "2(3x − 4) = 10". Only for demo tasks: a physics given like "v = 3 m/s" would scrub a tutor restating it.
+ */
+export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, given?: string): GuardLine[] {
+  const lines = (checkLines ?? []).map(({ id, reading, verdict }) => ({ id, reading, verdict }));
+  return given ? [{ id: GIVEN_LINE_ID, reading: given, verdict: 'valid' }, ...lines] : lines;
+}

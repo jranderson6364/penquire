@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { problemsText } from './prompts.ts';
+import { lastCheckBlock, problemsText } from './prompts.ts';
 import { flatten } from '../problems/flatten.ts';
 import type { ProblemGroup } from '../problems/types.ts';
 
@@ -49,4 +49,20 @@ test('a dispute with deterministic evidence tells the tutor not to concede on di
   const withEv = intentBlock('dispute', undefined, 'Algebra check: this does not follow from L1.');
   assert.match(withEv, /INDEPENDENT CHECK[^\n]*does not follow from L1/);
   assert.match(withEv, /Do not concede just because the student disagrees/);
+});
+
+test('a current check is context the student has seen; an out-of-date one is labelled history, and the page wins', () => {
+  const last = { feedback: 'Part 1: L1 is incorrect (distribution).', stillOpen: ['distribution'] };
+  const cur = lastCheckBlock(last, false);
+  assert.match(cur, /LATEST CHECK RESULT \(current/);
+  assert.match(cur, /Still open: distribution/);
+  const old = lastCheckBlock(last, true);
+  assert.match(old, /OUT OF DATE/);
+  assert.match(old, /page image is the truth/);
+  assert.match(old, /history, not the current state/);
+  assert.match(old, /Open at that time: distribution/);
+  assert.doesNotMatch(old, /Still open:/);
+  // the old feedback is still there as history
+  assert.ok(old.includes(last.feedback));
+  assert.equal(lastCheckBlock(undefined, true), '');
 });

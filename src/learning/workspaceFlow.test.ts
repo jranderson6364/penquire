@@ -6,8 +6,10 @@ import { lineInkSig, recordAssistance, startEpisode } from './session.ts';
 import type { Assistance, Snapshot } from './types';
 import {
   MOVE_TITLE, fallbackMove, flagFrom, levelMove, needsInitialSnap, phaseLabel, pivotPolicy, repairedAfter, replacementValid,
-  withSnapshot, workAttemptId,
+  withSnapshot, workAttemptId, GIVEN_LINE_ID, givenEquation, replyGuardLines,
 } from './workspaceFlow.ts';
+import { applyReplyLeakGuard } from '../verify/guard.ts';
+import { DEMO_TASK_IDS } from './demoPack.ts';
 
 const line = (id: string, y: number, strokes: number[]): Line => ({ id, x: 10, y, w: 200, h: 30, strokes });
 const v = (id: string, verdict: LineVerdict['verdict']): LineVerdict => ({ id, reading: id, verdict, note: '' });
@@ -76,4 +78,32 @@ test('work attempt, initial snapshot, and snapshots are never replaced', () => {
   assert.equal(withSnapshot(ep, 'missing', snap('s3')), ep);
   ep = recordAssistance(ep, { attemptId: 'e:initial', move: 'pointer', level: 1, channels: ['text'], revealed: 'unknown', at: 2 }, 'h1');
   assert.equal(workAttemptId(ep), 'e:repair');
+});
+
+// ---- the reply leak guard on an out-of-date check ------------------------------------------------------------
+
+test('a stale-page reply stating the answer is still scrubbed: the guard keeps the old lines and gets the given', () => {
+  // T11 run 1: the only check read "6x - 4 = 10" (incorrect); the page had moved on to x = 3
+  const stale = [{ id: 'L1', reading: '6x - 4 = 10', verdict: 'incorrect' }];
+  const reply = 'Nice, the distribution is fixed now. So x = 3 is your answer.';
+  // the gap: x = 3 doesn't satisfy the wrong line, so the old lines alone let it through
+  assert.equal(applyReplyLeakGuard(reply, stale, 1), reply);
+  const ep = ep0();
+  const lines = replyGuardLines(stale, givenEquation({ ...ep, attempts: { [ep.initialAttemptId!]: { ...ep.attempts[ep.initialAttemptId!], taskId: DEMO_TASK_IDS.recovery } } }));
+  assert.deepEqual(lines.map((l) => l.id), [GIVEN_LINE_ID, 'L1']);
+  const out = applyReplyLeakGuard(reply, lines, 1);
+  assert.ok(!/x\s*=\s*3/.test(out), out);
+  assert.match(out, /distribution is fixed/);
+  // spoken replies write plain symbols too, so the same guard sees them
+  assert.ok(!/x\s*=\s*3/.test(applyReplyLeakGuard('Yes. You get x = 3.', lines, 1)));
+});
+
+test('with no check yet the given alone keeps the guard on; outside the demo pack there is no given', () => {
+  const lines = replyGuardLines(undefined, '2(3x - 4) = 10');
+  assert.ok(!/x\s*=\s*3/.test(applyReplyLeakGuard('The answer is x = 3.', lines, 1)));
+  // the given itself and other talk pass
+  assert.equal(applyReplyLeakGuard('Start from 2(3x - 4) = 10 and look at the two.', lines, 1), 'Start from 2(3x - 4) = 10 and look at the two.');
+  assert.equal(givenEquation(ep0()), undefined);
+  assert.equal(givenEquation(undefined), undefined);
+  assert.deepEqual(replyGuardLines(undefined), []);
 });
