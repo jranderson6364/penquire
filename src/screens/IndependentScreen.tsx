@@ -6,6 +6,8 @@ import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunc
 import { getProvider } from '../ai';
 import type { ChatTurn, CheckResult, LineVerdict, PageImage } from '../ai/types';
 import { Button } from '../components/Button';
+import { FloatingToolbar, useToolbarDock } from '../components/FloatingToolbar';
+import { pageSlots } from '../ui/toolbarDock';
 import { OutcomeCard } from '../components/OutcomeCard';
 import { ENV } from '../config';
 import { groupLines, type Line } from '../ink/lines';
@@ -25,7 +27,7 @@ import type { Episode } from '../learning/types';
 import { PAGE_HEIGHT, PAGE_WIDTH } from '../page';
 import { getEpisode, getSettings, newId, readPage, recordUsage, updateEpisode, writePage } from '../store/db';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
-import { normalizeToolState, selectTool, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
+import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { C, LABEL, PALETTE, R, T } from '../theme';
 import { stopAllVoice } from '../voice/engine';
 
@@ -114,6 +116,9 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
   const editSeq = React.useRef(0);
   const [toolState, setToolState] = React.useState<ToolState>(() => normalizeToolState(getSettings().toolState));
   const prevTool = React.useRef<ToolKind>('pen');
+  // tools only (T14C): the same floating toolbar and saved edge as the workspace; no help, chat or marks here
+  const [dock, setDock] = useToolbarDock();
+  const [pageSize, setPageSize] = React.useState({ w: 0, h: 0 });
 
   /** false when the page could NOT be saved (its stored drawing never loaded: saving could erase it) */
   const savePage = React.useCallback(async (): Promise<boolean> => {
@@ -464,7 +469,6 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
   const showResult = resultVisible(ep);
   const changed = changedSinceSubmission(ep);
   const submitOk = canSubmit({ phase: ep.phase, busy, strokeCount, loaded });
-  const eraser = toolState.tool === 'eraser';
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -482,7 +486,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
       </View>
 
       <View style={styles.body}>
-        <View style={styles.page}>
+        <View style={styles.page} onLayout={(e) => setPageSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
           <PencilCanvas
             ref={canvasRef}
             style={StyleSheet.absoluteFill}
@@ -494,16 +498,22 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
             {...(nativeApiVersion >= 5 ? { twoFingerScroll: settings.twoFingerScroll !== false } : {})}
             {...(nativeApiVersion >= 4 ? { surroundColor: PALETTE[scheme === 'dark' ? 'dark' : 'light'].surround } : {})}
           />
-          {modern && (
-            <View style={styles.tools}>
-              <Button title="Pen" small kind={eraser ? 'secondary' : 'primary'} onPress={() => setToolState((s) => selectTool(s, 'pen'))} />
-              <Button title="Eraser" small kind={eraser ? 'primary' : 'secondary'} onPress={() => setToolState((s) => selectTool(s, 'eraser'))} />
-              <Button title="Undo" small onPress={() => void canvasRef.current?.undo()} />
-              <Button title="Redo" small onPress={() => void canvasRef.current?.redo()} />
-            </View>
+          {pageSize.w > 0 && (
+            <FloatingToolbar
+              tool={toolState}
+              onToolChange={(s) => setToolState({ ...s, ruler: false })}
+              onUndo={() => void canvasRef.current?.undo()}
+              onRedo={() => void canvasRef.current?.redo()}
+              modern={modern}
+              dock={dock}
+              onDock={setDock}
+              bounds={pageSize}
+              insets={{ top: 0, left: insets.left, bottom: insets.bottom, right: 0 }}
+              allowRuler={false}
+            />
           )}
           {loadFailed && (
-            <View style={styles.loadBanner}>
+            <View style={[styles.loadBanner, { top: pageSlots(dock.edge).top }]}>
               <Text style={styles.loadBannerText}>{loadFailed} Nothing has been overwritten.</Text>
               <Button title="Retry" small onPress={() => setLoadNonce((n) => n + 1)} />
             </View>
@@ -594,7 +604,6 @@ const styles = StyleSheet.create({
   badgeText: { color: C.partial, fontWeight: '700', fontSize: T.small },
   body: { flex: 1, flexDirection: 'row' },
   page: { flex: 1, overflow: 'hidden' },
-  tools: { position: 'absolute', left: 12, bottom: 12, flexDirection: 'row', gap: 8 },
   loadBanner: { position: 'absolute', top: 8, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.incorrectSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
   loadBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 13 },
   side: { width: 360, flexGrow: 0, backgroundColor: C.bg, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: C.line },

@@ -44,9 +44,12 @@ import { marksAfterCheck, marksAfterReply } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
-import { LearningBar } from '../components/LearningBar';
+import { DeniedNotice, PracticeStatus, RepairCard } from '../components/LearningBar';
+import { FloatingToolbar, useToolbarDock } from '../components/FloatingToolbar';
+import { MenuItem, MenuSection } from '../components/MenuPopover';
+import { pageSlots, pickNotice, type NoticeKind } from '../ui/toolbarDock';
 import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
-import { fallbackMove, flagFrom, givenEquation, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
+import { MOVE_TITLE, fallbackMove, flagFrom, givenEquation, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { takeSnapshot } from '../learning/snapshot';
@@ -55,7 +58,9 @@ import type { Channel, Episode, HelpMove, Snapshot } from '../learning/types';
 import { applyReplyLeakGuard } from '../verify/guard';
 import { costUSD } from '../ai/pricing';
 import type { Assignment } from '../store/types';
-import { C, PALETTE } from '../theme';
+import { C, PALETTE, R } from '../theme';
+
+const HELP_MOVES: HelpMove[] = ['pointer', 'explain', 'example', 'start'];
 
 type Props = {
   assignmentId: string;
@@ -191,6 +196,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     [assignmentId]
   );
   const [showQuestion, setShowQuestion] = React.useState<boolean>(() => getSettings().showQuestion ?? true);
+  // the floating toolbar's edge (saved in Settings); the page's notices and cards keep clear of it
+  const [dock, setDock] = useToolbarDock();
   const toggleQuestion = () =>
     setShowQuestion((v) => {
       saveSettings({ showQuestion: !v });
@@ -1368,6 +1375,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   // centre and fit) shrinks to the space that is left. In a very narrow window (Split View) it overlays instead.
   const narrow = winW < 600;
   const drawerWidth = narrow ? Math.round(winW * 0.94) : Math.min(520, Math.max(340, Math.round(winW * 0.4)));
+  const working = !!ep && (ep.phase === 'attempt' || ep.phase === 'repair' || ep.phase === 'repair_verified');
+  // page chrome stays clear of the floating toolbar: one notice slot at the top, the repair card on the free edge
+  const slots = pageSlots(dock.edge);
+  const docked = panelOpen && !narrow;
   const counts = check?.result.lines.reduce<Record<string, number>>((m, l) => ((m[l.verdict] = (m[l.verdict] ?? 0) + 1), m), {});
 
   const panel = (
@@ -1389,11 +1400,14 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           onSelectPart={setActivePart}
           marksByTurn={marksByTurn}
           onShowMarks={showTurnMarks}
+          compact={pivot}
           header={
+            pivot ? undefined : (
             <View style={styles.sideHeader}>
               <HelpLevelPicker value={tutorContext(a).helpLevel} max={a.policyMaxLevel} onChange={setLevel} />
               <Button small title={showMarks ? 'Hide marks' : 'Show marks'} onPress={() => setShowMarks((v) => !v)} />
             </View>
+            )
           }
           onClose={() => setPanelOpen(false)}
           onInputBlur={() => canvasRef.current?.focus()}
@@ -1478,10 +1492,6 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         onNextPage={() => goToPage(pageIndex + 1)}
         onAddPage={addPage}
         modern={modern}
-        tool={toolState}
-        onToolChange={setToolState}
-        onUndo={() => canvasRef.current?.undo()}
-        onRedo={() => canvasRef.current?.redo()}
         onFit={() => canvasRef.current?.fitToWidth()}
         zoomPercent={Math.round(viewport.scale * 100)}
         zoomedAway={Math.abs(viewport.scale - viewport.viewWidth / PAGE_WIDTH) > 0.03 * (viewport.viewWidth / PAGE_WIDTH)}
@@ -1501,23 +1511,45 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         onTogglePanel={() => setPanelOpen((o) => !o)}
         counts={counts}
         stale={stale}
+        info={pivot && ep ? <PracticeStatus phase={ep.phase} assistance={ep.assistance} /> : undefined}
+        help={
+          pivot && ep && working
+            ? { items: HELP_MOVES.map((m) => ({ key: m, title: MOVE_TITLE[m] })), disabled: checking || sending, onPick: (k) => void runMove(k as HelpMove) }
+            : undefined
+        }
+        menuExtra={
+          pivot
+            ? (close) => (
+                <>
+                  <MenuItem
+                    title={showMarks ? 'Hide marks' : 'Show marks'}
+                    onPress={() => {
+                      close();
+                      setShowMarks((v) => !v);
+                    }}
+                  />
+                  <MenuSection title="Help level for typed and spoken questions" />
+                  {([0, 1, 2, 3, 4] as HelpLevel[]).map((l) => (
+                    <MenuItem
+                      key={l}
+                      title={`${l}. ${HELP_LEVELS[l].name}`}
+                      detail={l > a.policyMaxLevel ? 'Not allowed by this policy' : undefined}
+                      locked={l > a.policyMaxLevel}
+                      selected={tutorContext(a).helpLevel === l}
+                      onPress={() => {
+                        close();
+                        setLevel(l);
+                      }}
+                    />
+                  ))}
+                </>
+              )
+            : undefined
+        }
         insetTop={insets.top}
         insetLeft={insets.left}
         insetRight={insets.right}
       />
-      {pivot && ep && (
-        <LearningBar
-          phase={ep.phase}
-          repairedText={repairedAfter(ep.assistance)}
-          busy={checking || sending}
-          denied={denied}
-          onMove={(m) => void runMove(m)}
-          onDismissDenied={() => setDenied(undefined)}
-          onFresh={() => void startFresh()}
-          insetLeft={insets.left}
-          insetRight={insets.right}
-        />
-      )}
       {showQuestion && (
         <QuestionBanner
           assignment={a}
@@ -1562,7 +1594,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
             {overlay}
           </PageLayer>
         )}
-        {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} />}
+        {modern && tutorMarks.length > 0 && <ClearMarksButton onClear={clearMarks} top={dock.edge === 'top' ? slots.top : undefined} />}
         {openMark && openVerdict && size.w > 0 && (
           <FloatingCard key={openMark.id} initial={openMark.at} bounds={size} width={POPOVER_W} height={POPOVER_H}>
             <MarkPopoverCard>
@@ -1581,55 +1613,104 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
             </MarkPopoverCard>
           </FloatingCard>
         )}
-        {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} />}
-        {(voice !== 'idle' || conversation) && (
-          <View style={[styles.notice, styles.listening, voice !== 'listening' && { borderColor: C.line }]} accessibilityLiveRegion="polite">
-            <Text style={[styles.listeningDot, voice !== 'listening' && { color: C.sub }]}>●</Text>
-            <View style={{ flexShrink: 1 }}>
-              <Text style={styles.voiceState}>
-                {voice === 'thinking' ? 'Thinking…' : voice === 'speaking' ? 'Speaking…' : pausing ? "I'm waiting for you…" : 'Listening…'}
-              </Text>
-              {voice === 'listening' && !!heard && (
-                <Text style={styles.noticeText} numberOfLines={2}>
-                  {heard}
-                </Text>
+        {!showQuestion && <QuestionPill label={activePart} onPress={toggleQuestion} insetLeft={insets.left} top={dock.edge === 'top' ? slots.top : undefined} />}
+        {size.w > 0 && (
+          <FloatingToolbar
+            tool={toolState}
+            onToolChange={setToolState}
+            onUndo={() => canvasRef.current?.undo()}
+            onRedo={() => canvasRef.current?.redo()}
+            modern={modern}
+            dock={dock}
+            onDock={setDock}
+            bounds={size}
+            insets={{ top: 0, left: insets.left, bottom: insets.bottom, right: docked ? 0 : insets.right }}
+          />
+        )}
+        {/* ONE notice at a time (src/ui/toolbarDock.ts pickNotice): a failed load, the voice state, a denied move, a
+            transient notice, no key, then the quiet stale hint */}
+        {(() => {
+          const top = pickNotice<{ kind: NoticeKind; node: React.ReactNode }>([
+            !!loadFailed && {
+              kind: 'load',
+              node: (
+                <Pressable onPress={() => setLoadNonce((n) => n + 1)} style={styles.loadBanner} accessibilityRole="button">
+                  <Text style={styles.loadBannerText}>{loadFailed} Tap to retry. Nothing has been overwritten.</Text>
+                </Pressable>
+              ),
+            },
+            (voice !== 'idle' || conversation) && {
+              kind: 'voice',
+              node: (
+                <View style={[styles.notice, styles.listening, voice !== 'listening' && { borderColor: C.line }]} accessibilityLiveRegion="polite">
+                  <Text style={[styles.listeningDot, voice !== 'listening' && { color: C.sub }]}>●</Text>
+                  <View style={{ flexShrink: 1 }}>
+                    <Text style={styles.voiceState}>
+                      {voice === 'thinking' ? 'Thinking…' : voice === 'speaking' ? 'Speaking…' : pausing ? "I'm waiting for you…" : 'Listening…'}
+                    </Text>
+                    {voice === 'listening' && !!heard && (
+                      <Text style={styles.noticeText} numberOfLines={2}>
+                        {heard}
+                      </Text>
+                    )}
+                    {notice && notice.tone !== 'info' && (
+                      <Text style={[styles.noticeText, { color: notice.tone === 'error' ? C.incorrect : C.partial }]} numberOfLines={2}>
+                        {notice.text}
+                      </Text>
+                    )}
+                  </View>
+                  {conversation && voice === 'listening' && !!heard && <Button title="Send now" kind="primary" small onPress={sendNow} />}
+                  {conversation && voice === 'speaking' && <Button title="Your turn" small onPress={yourTurn} />}
+                  <Button title={conversation ? 'End' : 'Stop'} small onPress={stopVoice} />
+                </View>
+              ),
+            },
+            pivot && !!denied && {
+              kind: 'denied',
+              node: <DeniedNotice reason={denied.reason} alt={denied.alt} busy={checking || sending} onMove={(m) => void runMove(m)} onDismiss={() => setDenied(undefined)} />,
+            },
+            !!notice && {
+              kind: 'notice',
+              node: (
+                <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
+                  <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>
+                </Pressable>
+              ),
+            },
+            !hasKey && {
+              kind: 'key',
+              node: (
+                <View pointerEvents="none" style={styles.keyBanner}>
+                  <Text style={styles.keyBannerText}>No API key: add one in Settings to check your work</Text>
+                </View>
+              ),
+            },
+            (oldCheck || stale) && showMarks && {
+              kind: 'stale',
+              node: (
+                <View pointerEvents="none" style={styles.staleTag}>
+                  <Text style={styles.staleText}>{oldCheck ? 'Marks from an older version · Check again' : 'Page changed since the check'}</Text>
+                </View>
+              ),
+            },
+          ]);
+          const card = pivot && ep && ep.phase === 'repair_verified' ? <RepairCard key={ep.id} repairedText={repairedAfter(ep.assistance)} onFresh={() => void startFresh()} /> : null;
+          return (
+            <>
+              {(top || (card && slots.card === 'top')) && (
+                <View pointerEvents="box-none" style={[styles.stack, { top: slots.top }]}>
+                  {top?.node}
+                  {slots.card === 'top' && card}
+                </View>
               )}
-              {notice && notice.tone !== 'info' && (
-                <Text style={[styles.noticeText, { color: notice.tone === 'error' ? C.incorrect : C.partial }]} numberOfLines={2}>
-                  {notice.text}
-                </Text>
+              {card && slots.card === 'bottom' && (
+                <View pointerEvents="box-none" style={[styles.stack, { bottom: 12 + insets.bottom }]}>
+                  {card}
+                </View>
               )}
-            </View>
-            {conversation && voice === 'listening' && !!heard && <Button title="Send now" kind="primary" small onPress={sendNow} />}
-            {conversation && voice === 'speaking' && <Button title="Your turn" small onPress={yourTurn} />}
-            <Button title={conversation ? 'End' : 'Stop'} small onPress={stopVoice} />
-          </View>
-        )}
-        {notice && voice === 'idle' && !conversation && (
-          <Pressable onPress={() => setNotice(null)} style={[styles.notice, notice.tone !== 'info' && { backgroundColor: notice.tone === 'error' ? C.incorrectSoft : C.partialSoft }]} accessibilityRole="alert" accessibilityLabel={notice.text}>
-            <Text style={[styles.noticeText, notice.tone !== 'info' && { color: notice.tone === 'error' ? C.incorrect : C.partial }]}>{notice.text}</Text>
-          </Pressable>
-        )}
-        {oldCheck && showMarks && (
-          <View pointerEvents="none" style={styles.staleTag}>
-            <Text style={styles.staleText}>Marks from an older version · Check again</Text>
-          </View>
-        )}
-        {loadFailed && (
-          <Pressable onPress={() => setLoadNonce((n) => n + 1)} style={styles.loadBanner}>
-            <Text style={styles.loadBannerText}>{loadFailed} Tap to retry. Nothing has been overwritten.</Text>
-          </Pressable>
-        )}
-        {!hasKey && (
-          <View pointerEvents="none" style={styles.keyBanner}>
-            <Text style={styles.keyBannerText}>No API key: add one in Settings to check your work</Text>
-          </View>
-        )}
-        {stale && showMarks && (
-          <View pointerEvents="none" style={styles.staleTag}>
-            <Text style={styles.staleText}>Page changed · Check again</Text>
-          </View>
-        )}
+            </>
+          );
+        })()}
         {panelOpen && narrow && (
           <View style={[styles.drawer, { width: drawerWidth, paddingBottom: insets.bottom, paddingRight: insets.right }]}>
             {panel}
@@ -1653,6 +1734,8 @@ const styles = StyleSheet.create({
   dock: { backgroundColor: C.bg, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   drawer: {
     position: 'absolute',
+    // above the floating toolbar (30) and the notice stack (20)
+    zIndex: 50,
     top: 0,
     right: 0,
     bottom: 0,
@@ -1664,16 +1747,15 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: -4, height: 0 },
   },
-  loadBanner: { position: 'absolute', top: 8, alignSelf: 'center', maxWidth: '90%', backgroundColor: C.incorrectSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, zIndex: 5 },
+  stack: { position: 'absolute', left: 12, right: 12, alignItems: 'center', gap: 8, zIndex: 20 },
+  loadBanner: { maxWidth: '90%', backgroundColor: C.incorrectSoft, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, zIndex: 5 },
   loadBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 13 },
-  keyBanner: { position: 'absolute', top: 8, alignSelf: 'center', backgroundColor: C.incorrectSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
+  keyBanner: { backgroundColor: C.incorrectSoft, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   keyBannerText: { color: C.incorrect, fontWeight: '700', fontSize: 12 },
-  staleTag: { position: 'absolute', top: 8, left: 8, backgroundColor: C.partialSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  staleText: { color: C.partial, fontWeight: '700', fontSize: 12 },
+  // quiet on purpose: a hint, not a warning
+  staleTag: { backgroundColor: C.card, opacity: 0.9, borderRadius: R.pill, paddingHorizontal: 10, paddingVertical: 3, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+  staleText: { color: C.sub, fontWeight: '500', fontSize: 12 },
   notice: {
-    position: 'absolute',
-    top: 12,
-    alignSelf: 'center',
     maxWidth: 520,
     backgroundColor: C.card,
     borderRadius: 999,

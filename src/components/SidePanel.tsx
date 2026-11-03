@@ -32,6 +32,7 @@ const tagStyle = (t: number): TextStyle => ({
 });
 import { C, F, LABEL, R, T, VERDICT_STYLE } from '../theme';
 import { Button } from './Button';
+import { Icon } from './Icon';
 import { Markdown } from './Markdown';
 import { ProblemsView } from './ProblemsView';
 
@@ -62,6 +63,8 @@ type Props = {
   onSelectPart: (label: string | undefined) => void;
   /** rendered above the tabs: Check, help level, marks toggle */
   header?: React.ReactNode;
+  /** pivot/demo: help moves live in the top bar's Help menu, so the panel drops its duplicate shortcuts */
+  compact?: boolean;
   onClose: () => void;
   onInputFocus?: () => void;
   onInputBlur?: () => void;
@@ -85,18 +88,20 @@ export function SidePanel(p: Props) {
     <View style={styles.panel}>
       {p.header}
       <View style={styles.tabs}>
-        {(
-          [
-            ['tutor', 'Tutor', 'chat'],
-            ['assignment', 'Assignment', 'problems'],
-          ] as const
-        ).map(([s, label, tab]) => (
-          <Pressable key={s} onPress={() => p.onTab(tab)} style={[styles.tab, surface === s && styles.tabActive]} accessibilityRole="tab" accessibilityState={{ selected: surface === s }}>
-            <Text style={[styles.tabText, surface === s && styles.tabTextActive]}>{label}</Text>
-          </Pressable>
-        ))}
-        <Pressable onPress={p.onClose} hitSlop={10} style={styles.close} accessibilityLabel="Close the tutor panel">
-          <Text style={styles.closeText}>✕</Text>
+        <View style={styles.seg}>
+          {(
+            [
+              ['tutor', 'Chat', 'chat'],
+              ['assignment', 'Problems & log', 'problems'],
+            ] as const
+          ).map(([s, label, tab]) => (
+            <Pressable key={s} onPress={() => p.onTab(tab)} style={[styles.tab, surface === s && styles.tabActive]} accessibilityRole="tab" accessibilityState={{ selected: surface === s }}>
+              <Text style={[styles.tabText, surface === s && styles.tabTextActive]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Pressable onPress={p.onClose} hitSlop={10} style={styles.close} accessibilityRole="button" accessibilityLabel="Close the tutor chat">
+          <Icon name="close" size={16} color={C.sub} />
         </Pressable>
       </View>
       {surface === 'tutor' ? <TutorStream {...p} /> : <AssignmentView {...p} />}
@@ -249,22 +254,44 @@ function CheckCard(p: Props & { check: StoredCheck }) {
 function TutorStream(p: Props) {
   const { assignment, check, draft, onDraft, onSend, sending, onInputFocus, onInputBlur } = p;
   const scrollRef = React.useRef<ScrollView>(null);
-  // "feedback" = a check just finished: show it from the top. Anything else: follow the conversation.
+  // The newest thing stays in view: a new check scrolls to it (it is at the top); a new or streaming message
+  // scrolls to the end. Driven by the content itself, not by which tab the caller selected.
+  const follow = React.useRef<'top' | 'end'>(p.tab === 'feedback' ? 'top' : 'end');
+  const prevCheck = React.useRef(check?.id);
   React.useEffect(() => {
-    if (p.tab === 'feedback') scrollRef.current?.scrollTo({ y: 0, animated: false });
-  }, [p.tab, check?.id]);
+    if (check?.id === prevCheck.current) return;
+    prevCheck.current = check?.id;
+    follow.current = 'top';
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [check?.id]);
+  const prevChat = React.useRef(assignment.chat.length);
+  React.useEffect(() => {
+    if (assignment.chat.length === prevChat.current && !p.streamText) return;
+    prevChat.current = assignment.chat.length;
+    follow.current = 'end';
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [assignment.chat.length, p.streamText]);
+  React.useEffect(() => {
+    if (p.tab !== 'chat') return;
+    follow.current = 'end';
+    scrollRef.current?.scrollToEnd({ animated: false });
+  }, [p.tab]);
   const empty = !check && assignment.chat.length === 0;
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }} keyboardVerticalOffset={80}>
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} onContentSizeChange={() => p.tab !== 'feedback' && scrollRef.current?.scrollToEnd({ animated: true })}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} onContentSizeChange={() => follow.current === 'end' && scrollRef.current?.scrollToEnd({ animated: true })}>
         {empty && (
           <View style={{ gap: 12 }}>
-            <Text style={styles.emptyText}>Write your work, then tap Check. Marks appear in the margin and the tutor's feedback shows up here. You can also ask anything, push back on a mark, or describe a fix in words.</Text>
-            <StartButton {...p} />
+            <Text style={styles.emptyText}>
+              {p.compact
+                ? 'Ask anything about your work here. Tap Check when you want feedback, or use Help.'
+                : "Write your work, then tap Check. Marks appear in the margin and the tutor's feedback shows up here. You can also ask anything, push back on a mark, or describe a fix in words."}
+            </Text>
+            {!p.compact && <StartButton {...p} />}
           </View>
         )}
         {check && <CheckCard {...p} check={check} />}
-        {!empty && assignment.chat.length === 0 && <StartButton {...p} />}
+        {!empty && !p.compact && assignment.chat.length === 0 && <StartButton {...p} />}
         {assignment.chat.map((m, i) => (
           <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.botBubble]}>
             {m.role === 'user' ? (
@@ -299,7 +326,7 @@ function TutorStream(p: Props) {
           />
           <Button kind="primary" title="Send" disabled={!draft.trim()} loading={sending} onPress={() => onSend(draft.trim(), true)} />
         </View>
-        {!draft.trim() && (
+        {!draft.trim() && !p.compact && (
           <Pressable onPress={() => onSend('Show me on my page where I should look first.', true)} disabled={sending} style={styles.quick} accessibilityRole="button">
             <Text style={styles.quickText}>Show me where to look</Text>
           </Pressable>
@@ -368,13 +395,13 @@ function LogTab({ assignment }: Props) {
 
 const styles = StyleSheet.create({
   panel: { flex: 1, backgroundColor: C.bg },
-  tabs: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderColor: C.line, paddingHorizontal: 8, backgroundColor: C.card },
-  tab: { paddingVertical: 12, paddingHorizontal: 10 },
-  tabActive: { borderBottomWidth: 2, borderColor: C.primary },
+  tabs: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, backgroundColor: C.bg, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line },
+  seg: { flexDirection: 'row', backgroundColor: C.line, borderRadius: R.pill, padding: 2 },
+  tab: { height: 30, paddingHorizontal: 14, borderRadius: R.pill, justifyContent: 'center' },
+  tabActive: { backgroundColor: C.card },
   tabText: { fontSize: T.small, color: C.sub, fontWeight: '600' },
-  tabTextActive: { color: C.primary },
-  close: { marginLeft: 'auto', padding: 8 },
-  closeText: { fontSize: 18, color: C.sub },
+  tabTextActive: { color: C.ink },
+  close: { marginLeft: 'auto', width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: 14, gap: 10, paddingBottom: 40 },
   empty: { padding: 20 },
   emptyText: { color: C.sub, fontSize: T.body, lineHeight: 21 },
@@ -401,11 +428,11 @@ const styles = StyleSheet.create({
   sectionTitle: { ...LABEL, color: C.ink },
   listItem: { fontSize: T.body - 1, color: C.ink },
   meta: { fontSize: T.caption, color: C.faint, fontFamily: F.mono },
-  bubble: { borderRadius: R.md, padding: 10, maxWidth: '92%' },
-  userBubble: { backgroundColor: C.primary, alignSelf: 'flex-end' },
-  botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: 1, borderColor: C.line },
+  bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '88%' },
+  userBubble: { backgroundColor: C.primary, alignSelf: 'flex-end', borderBottomRightRadius: 6 },
+  botBubble: { backgroundColor: C.card, alignSelf: 'flex-start', borderWidth: StyleSheet.hairlineWidth, borderColor: C.line, borderBottomLeftRadius: 6 },
   userText: { color: C.onPrimary, fontSize: T.body, lineHeight: 21 },
-  inputRow: { padding: 10, gap: 8, borderTopWidth: 1, borderColor: C.line, backgroundColor: C.card },
+  inputRow: { padding: 10, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, backgroundColor: C.bg },
   checkCard: { gap: 10, paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, marginBottom: 4 },
   checkHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   checkTitle: { ...LABEL, color: C.sub },
@@ -421,9 +448,9 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     borderWidth: 1,
     borderColor: C.line,
-    borderRadius: R.sm + 2,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     fontSize: T.body,
     backgroundColor: C.card,
   },

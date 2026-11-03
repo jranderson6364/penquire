@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
-import { isInk, selectTool, type ToolKind, type ToolState } from '../tools';
 import { C, R, T } from '../theme';
-import { Icon, type IconName } from './Icon';
-import { ToolPopover, type Anchor } from './ToolPopover';
+import type { Anchor } from '../ui/toolbarDock';
+import { Icon } from './Icon';
+import { MenuDivider, MenuItem, MenuPopover } from './MenuPopover';
 
 type Props = {
   title: string;
@@ -14,15 +14,11 @@ type Props = {
   onPrevPage: () => void;
   onNextPage: () => void;
   onAddPage: () => void;
-  /** false on an older binary: no tool spec, so the system palette is used and our tools are hidden */
+  /** false on an older binary: no tool spec, so the system palette is used (a note says so) and Fit is unavailable */
   modern: boolean;
-  tool: ToolState;
-  onToolChange: (s: ToolState) => void;
-  onUndo: () => void;
-  onRedo: () => void;
   onFit: () => void;
   zoomPercent: number;
-  /** the page is zoomed away from fit-to-width (the Fit chip is shown only then) */
+  /** the page is zoomed away from fit-to-width */
   zoomedAway: boolean;
   /** Export PDF of the whole assignment (share sheet) */
   onExport: () => void;
@@ -31,7 +27,7 @@ type Props = {
   onToggleQuestion: () => void;
   checking: boolean;
   onCheck: () => void;
-  /** the tutor panel (replaces the floating Tutor button); the dot counts lines that need attention */
+  /** the tutor panel; the dot counts lines that need attention */
   panelOpen: boolean;
   onTogglePanel: () => void;
   counts?: Partial<Record<'valid' | 'partial' | 'incorrect' | 'unreadable', number>>;
@@ -48,47 +44,36 @@ type Props = {
   /** 'saved' on disk, 'dirty' waiting for the autosave, 'blocked' could not be saved */
   saveStatus: 'saved' | 'dirty' | 'blocked';
   onSaveTap: () => void;
+  /** pivot flow: the ⓘ status popover next to the title (phase, feedback rule, help record) */
+  info?: React.ReactNode;
+  /** pivot flow: the Help menu (direct help moves) */
+  help?: { items: { key: string; title: string }[]; disabled: boolean; onPick: (key: string) => void };
+  /** extra rows at the end of the ⋯ menu; call `close` after acting */
+  menuExtra?: (close: () => void) => React.ReactNode;
   insetTop: number;
   insetLeft: number;
   insetRight: number;
 };
 
-const PEN_KINDS: ToolKind[] = ['pen', 'fountain', 'pencil'];
-const isPenKind = (k: ToolKind) => PEN_KINDS.includes(k);
-
-type Slot = 'pen' | 'marker' | 'eraser' | 'lasso';
-const SLOT_LABEL: Record<Slot, string> = { pen: 'Pen', marker: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso' };
+type Open = { which: 'info' | 'help' | 'more'; anchor: Anchor } | null;
 
 /**
- * GoodNotes-style top bar: navigation on the left, a tool tray in the middle, actions on the right.
- * Tap a tool to select it; tap the selected tool again for its options (type, color, thickness) in a popover.
+ * Slim top bar. Left: back, title and save state, page arrows. Right: Help (pivot), Check (hold to talk), hands-free
+ * conversation, the tutor panel and ⋯ (Fit, Export PDF, the question). The drawing tools float on the page
+ * (FloatingToolbar).
  */
 export function TopBar(p: Props) {
   const { width } = useWindowDimensions();
-  const narrow = width < 900;
+  const narrow = width < 700;
   const atFirst = p.pageIndex === 0;
   const atLast = p.pageIndex >= p.pageCount - 1;
-
-  const lastPen = React.useRef<ToolKind>('pen');
-  if (isPenKind(p.tool.tool)) lastPen.current = p.tool.tool;
-  const refs = React.useRef<Partial<Record<Slot, View | null>>>({});
-  const [pop, setPop] = React.useState<{ slot: Slot; anchor: Anchor } | null>(null);
-
-  const kindOf = (slot: Slot): ToolKind => (slot === 'pen' ? lastPen.current : slot);
-  const selectedSlot = (slot: Slot) => (slot === 'pen' ? isPenKind(p.tool.tool) : p.tool.tool === slot);
-
-  const press = (slot: Slot) => {
-    if (!selectedSlot(slot)) {
-      p.onToolChange(selectTool(p.tool, kindOf(slot)));
-      return;
-    }
-    refs.current[slot]?.measureInWindow((x, y, w, h) => setPop({ slot, anchor: { x, y, w, h } }));
-  };
-
-  const iconFor = (slot: Slot): IconName => (slot === 'pen' ? (lastPen.current as 'pen') : slot === 'marker' ? 'highlighter' : slot);
+  const [open, setOpen] = React.useState<Open>(null);
+  const refs = React.useRef<Partial<Record<'info' | 'help' | 'more', View | null>>>({});
+  const show = (which: 'info' | 'help' | 'more') => refs.current[which]?.measureInWindow((x, y, w, h) => setOpen({ which, anchor: { x, y, w, h } }));
+  const close = () => setOpen(null);
 
   const left = (
-    <View style={styles.group}>
+    <View style={[styles.group, !narrow && styles.leftGroup]}>
       <Pressable onPress={p.onBack} hitSlop={8} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel="Back to assignments">
         <Icon name="chevron-left" size={22} color={C.primary} />
       </Pressable>
@@ -96,8 +81,24 @@ export function TopBar(p: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {p.title}
         </Text>
-        <Text style={[styles.save, p.saveStatus === 'blocked' && styles.saveBad]}>{p.saveStatus === 'saved' ? 'Saved' : p.saveStatus === 'dirty' ? 'Saving…' : 'Not saved · tap to retry'}</Text>
+        <Text style={[styles.save, p.saveStatus === 'blocked' && styles.saveBad]} numberOfLines={1}>
+          {p.saveStatus === 'saved' ? 'Saved' : p.saveStatus === 'dirty' ? 'Saving…' : 'Not saved · tap to retry'}
+        </Text>
       </Pressable>
+      {!!p.info && (
+        <Pressable
+          ref={(r) => {
+            refs.current.info = r;
+          }}
+          onPress={() => show('info')}
+          hitSlop={6}
+          style={styles.infoBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Practice status and help used"
+        >
+          <Icon name="info" size={18} color={C.sub} />
+        </Pressable>
+      )}
       <View style={styles.pager}>
         <Pressable onPress={p.onPrevPage} disabled={atFirst} hitSlop={6} style={styles.pagerBtn} accessibilityLabel="Previous page">
           <Icon name="chevron-left" size={16} color={atFirst ? C.lineStrong : C.sub} />
@@ -112,102 +113,131 @@ export function TopBar(p: Props) {
           <Icon name="plus" size={16} color={C.sub} />
         </Pressable>
       </View>
+      {!p.modern && <Text style={styles.oldBuild}>Old app build: install the latest for zoom and the new tools</Text>}
     </View>
   );
 
-  const tray = p.modern ? (
-    <View style={styles.tray}>
-      {(['pen', 'marker', 'eraser', 'lasso'] as Slot[]).map((slot) => {
-        const on = selectedSlot(slot);
-        const colorKey = slot === 'pen' ? lastPen.current : slot;
-        const ink = on && isInk(p.tool.tool);
-        return (
-          <Pressable
-            key={slot}
-            ref={(r) => {
-              refs.current[slot] = r;
-            }}
-            onPress={() => press(slot)}
-            style={[styles.tool, on && styles.toolOn]}
-            accessibilityRole="button"
-            accessibilityLabel={SLOT_LABEL[slot]}
-            accessibilityHint={on ? 'Opens options' : 'Selects this tool'}
-            accessibilityState={{ selected: on }}
-          >
-            <Icon name={iconFor(slot)} size={22} color={on ? C.primary : C.sub} />
-            {(slot === 'pen' || slot === 'marker') && <View style={[styles.inkBar, { backgroundColor: p.tool.colors[colorKey as 'pen'] }, on && ink && styles.inkBarOn]} />}
-          </Pressable>
-        );
-      })}
-      {/* the ruler toggle lives in the pen/highlighter options (ToolPopover); a dot here shows it is on */}
-      {p.tool.ruler && (
-        <Pressable onPress={() => p.onToolChange({ ...p.tool, ruler: false })} style={[styles.tool, styles.toolOn]} accessibilityRole="button" accessibilityLabel="Ruler is on. Tap to hide it.">
-          <Icon name="ruler" size={22} color={C.primary} />
-        </Pressable>
-      )}
-    </View>
-  ) : (
-    <Text style={styles.oldBuild}>Old app build: install the latest build for zoom, rotation and the new tools</Text>
-  );
-
+  const attention = !!p.counts && (['incorrect', 'partial', 'unreadable'] as const).some((v) => p.counts?.[v]);
   const right = (
     <View style={styles.group}>
-      <Pressable onPress={p.onUndo} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel="Undo">
-        <Icon name="undo" size={22} color={C.ink} />
-      </Pressable>
-      <Pressable onPress={p.onRedo} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel="Redo">
-        <Icon name="redo" size={22} color={C.ink} />
-      </Pressable>
-      {/* only when it does something: the page is zoomed away from fit-to-width */}
-      {p.modern && p.zoomedAway && (
-        <Pressable onPress={p.onFit} style={styles.zoom} accessibilityRole="button" accessibilityLabel={`Zoom ${p.zoomPercent} percent. Fit page to width`}>
-          <Text style={styles.zoomText}>Fit</Text>
+      {p.help && (
+        <Pressable
+          ref={(r) => {
+            refs.current.help = r;
+          }}
+          onPress={() => show('help')}
+          disabled={p.help.disabled}
+          style={[styles.helpBtn, p.help.disabled && { opacity: 0.45 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Help"
+          accessibilityHint="Find the issue, explain the idea, show another example or help you start"
+        >
+          <Icon name="help" size={17} color={C.primary} />
+          <Text style={styles.helpText}>Help</Text>
+          <Icon name="chevron-down" size={12} color={C.primary} />
         </Pressable>
       )}
-      <Pressable onPress={p.onExport} disabled={p.exporting} style={[styles.iconBtn, p.exporting && { opacity: 0.4 }]} accessibilityRole="button" accessibilityLabel="Export the assignment as a PDF">
-        <Icon name="share" size={21} color={C.ink} />
-      </Pressable>
-      <Pressable
-        onPress={p.onToggleQuestion}
-        style={[styles.iconBtn, p.questionOn && styles.toolOn]}
-        accessibilityRole="button"
-        accessibilityLabel={p.questionOn ? 'Hide the question' : 'Show the question'}
-        accessibilityState={{ selected: p.questionOn }}
-      >
-        <Icon name="question" size={22} color={p.questionOn ? C.primary : C.sub} />
-      </Pressable>
-      <Pressable onPress={p.onToggleConversation} style={[styles.panelBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
+      <TutorButton {...p} />
+      <Pressable onPress={p.onToggleConversation} style={[styles.iconBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
         <Icon name="mic" size={19} color={p.conversation ? C.onPrimary : C.ink} />
       </Pressable>
-      <TutorButton {...p} />
-      <Pressable onPress={p.onTogglePanel} style={[styles.panelBtn, p.panelOpen && styles.toolOn]} accessibilityRole="button" accessibilityLabel={p.panelOpen ? 'Hide the tutor panel' : 'Show the tutor panel'} accessibilityState={{ selected: p.panelOpen }}>
+      <Pressable onPress={p.onTogglePanel} style={[styles.iconBtn, p.panelOpen && styles.on]} accessibilityRole="button" accessibilityLabel={p.panelOpen ? 'Hide the tutor chat' : 'Show the tutor chat'} accessibilityState={{ selected: p.panelOpen }}>
         <Icon name="sidebar" size={20} color={p.panelOpen ? C.primary : C.ink} />
-        {!!p.counts && (['incorrect', 'partial', 'unreadable'] as const).some((v) => p.counts?.[v]) && (
+        {attention && (
           <View style={[styles.countDot, p.stale && { opacity: 0.45 }]}>
-            <Text style={styles.countDotText}>{(p.counts.incorrect ?? 0) + (p.counts.partial ?? 0) + (p.counts.unreadable ?? 0)}</Text>
+            <Text style={styles.countDotText}>{(p.counts?.incorrect ?? 0) + (p.counts?.partial ?? 0) + (p.counts?.unreadable ?? 0)}</Text>
           </View>
         )}
       </Pressable>
+      <Pressable
+        ref={(r) => {
+          refs.current.more = r;
+        }}
+        onPress={() => show('more')}
+        style={styles.iconBtn}
+        accessibilityRole="button"
+        accessibilityLabel="More: fit, export, question"
+      >
+        <Icon name="more" size={20} color={C.ink} />
+      </Pressable>
     </View>
   );
 
-  const pad = { paddingTop: p.insetTop + 6, paddingLeft: Math.max(10, p.insetLeft), paddingRight: Math.max(10, p.insetRight) };
+  const pad = { paddingTop: p.insetTop + 4, paddingLeft: Math.max(8, p.insetLeft), paddingRight: Math.max(8, p.insetRight) };
   return (
     <View style={[styles.bar, pad]}>
       {narrow ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row} keyboardShouldPersistTaps="handled">
           {left}
-          {tray}
           {right}
         </ScrollView>
       ) : (
         <View style={styles.row}>
           {left}
-          <View style={styles.center}>{tray}</View>
           {right}
         </View>
       )}
-      {pop && <ToolPopover tool={p.tool} anchor={pop.anchor} windowWidth={width} onChange={p.onToolChange} onClose={() => setPop(null)} />}
+
+      {open?.which === 'info' && p.info && (
+        <MenuPopover anchor={open.anchor} onClose={close} width={300} label="Practice status">
+          {p.info}
+        </MenuPopover>
+      )}
+      {open?.which === 'help' && p.help && (
+        <MenuPopover anchor={open.anchor} onClose={close} label="Help">
+          {p.help.items.map((it) => (
+            <MenuItem
+              key={it.key}
+              title={it.title}
+              disabled={p.help!.disabled}
+              onPress={() => {
+                close();
+                p.help!.onPick(it.key);
+              }}
+            />
+          ))}
+        </MenuPopover>
+      )}
+      {open?.which === 'more' && (
+        <MenuPopover anchor={open.anchor} onClose={close} label="More">
+          {p.modern && (
+            <MenuItem
+              title="Fit page to width"
+              detail={`Zoom ${p.zoomPercent}%`}
+              disabled={!p.zoomedAway}
+              onPress={() => {
+                close();
+                p.onFit();
+              }}
+            />
+          )}
+          <MenuItem
+            title="Export PDF"
+            icon="share"
+            disabled={p.exporting}
+            onPress={() => {
+              close();
+              // the share sheet can't present while this menu's modal is still fading out
+              setTimeout(p.onExport, 350);
+            }}
+          />
+          <MenuItem
+            title={p.questionOn ? 'Hide the question' : 'Show the question'}
+            icon="question"
+            selected={p.questionOn}
+            onPress={() => {
+              close();
+              p.onToggleQuestion();
+            }}
+          />
+          {p.menuExtra && (
+            <>
+              <MenuDivider />
+              {p.menuExtra(close)}
+            </>
+          )}
+        </MenuPopover>
+      )}
     </View>
   );
 }
@@ -242,40 +272,38 @@ function TutorButton(p: Props) {
       {p.checking && !busy ? (
         <ActivityIndicator size="small" color={C.onPrimary} />
       ) : (
-        <Icon name={p.voice === 'listening' ? 'mic' : p.voice === 'speaking' ? 'speaker' : p.voice === 'thinking' ? 'sparkles' : 'sparkles'} size={16} color={C.onPrimary} />
+        <Icon name={p.voice === 'listening' ? 'mic' : p.voice === 'speaking' ? 'speaker' : 'sparkles'} size={16} color={C.onPrimary} />
       )}
       <Text style={styles.checkText}>{label}</Text>
+      {/* the page changed since the last check: a quiet dot, not a banner */}
+      {p.stale && !busy && !p.checking && <View style={styles.staleDot} accessibilityLabel="Page changed since the last check" />}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: { backgroundColor: C.card, borderBottomWidth: 1, borderColor: C.line, paddingBottom: 6 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 48 },
-  center: { flex: 1, alignItems: 'center' },
-  group: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  titleBox: { maxWidth: 220, paddingHorizontal: 4 },
+  bar: { backgroundColor: C.card, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingBottom: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 46 },
+  group: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  leftGroup: { flex: 1, minWidth: 0 },
+  titleBox: { flexShrink: 1, maxWidth: 300, paddingHorizontal: 2 },
   title: { fontSize: T.body, fontWeight: '600', color: C.ink, letterSpacing: -0.2 },
   save: { fontSize: 11, color: C.faint, marginTop: 1 },
   saveBad: { color: C.incorrect, fontWeight: '700' },
-  oldBuild: { fontSize: T.caption, color: C.partial, fontWeight: '700', maxWidth: 260 },
-  pager: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: R.pill, paddingHorizontal: 4, height: 32 },
+  infoBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  oldBuild: { fontSize: T.caption, color: C.partial, fontWeight: '700', flexShrink: 1, marginLeft: 8 },
+  pager: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: R.pill, paddingHorizontal: 4, height: 32, marginLeft: 6 },
   pagerBtn: { width: 28, height: 32, alignItems: 'center', justifyContent: 'center' },
   pagerText: { fontSize: T.small, color: C.sub, fontVariant: ['tabular-nums'], minWidth: 30, textAlign: 'center' },
-  tray: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: R.md + 2, padding: 3, gap: 2 },
-  tool: { width: 52, height: 42, borderRadius: R.md - 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
-  toolOn: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line },
-  inkBar: { width: 18, height: 3, borderRadius: 2 },
-  inkBarOn: { width: 22 },
-  trayDivider: { width: 1, height: 22, backgroundColor: C.lineStrong, marginHorizontal: 3 },
   iconBtn: { width: 42, height: 42, borderRadius: R.md - 1, alignItems: 'center', justifyContent: 'center' },
-  zoom: { minWidth: 56, height: 32, borderRadius: R.pill, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  zoomText: { fontSize: T.small, fontWeight: '600', color: C.ink, fontVariant: ['tabular-nums'] },
-  check: { marginLeft: 4, minWidth: 104, height: 36, paddingHorizontal: 14, borderRadius: R.pill, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  on: { backgroundColor: C.primarySoft },
+  helpBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 36, paddingHorizontal: 12, borderRadius: R.pill, backgroundColor: C.primarySoft, marginRight: 2 },
+  helpText: { fontSize: T.body, fontWeight: '600', color: C.primary },
+  check: { minWidth: 104, height: 36, paddingHorizontal: 14, borderRadius: R.pill, backgroundColor: C.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   checkListening: { backgroundColor: C.incorrect },
   convoOn: { backgroundColor: C.incorrect },
-  panelBtn: { width: 42, height: 42, borderRadius: R.md - 1, alignItems: 'center', justifyContent: 'center' },
   countDot: { position: 'absolute', top: 4, right: 3, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, backgroundColor: C.incorrect, alignItems: 'center', justifyContent: 'center' },
   countDotText: { color: C.onPrimary, fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
   checkText: { color: C.onPrimary, fontSize: T.body, fontWeight: '600', letterSpacing: -0.2 },
+  staleDot: { position: 'absolute', top: 3, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: C.partialSoft, borderWidth: 1.5, borderColor: C.onPrimary },
 });
