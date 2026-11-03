@@ -39,7 +39,7 @@ import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveG
 import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
 import { chunkLine } from '../tutor/chunks';
-import { pruneMarks, resolveMarks } from '../tutor/marks';
+import { marksAfterCheck, marksAfterReply } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -701,6 +701,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           issues,
           confirmedReadings: { ...(x.confirmedReadings ?? {}), [pageId]: conf.kept },
           checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, costUSD: spend.total, space: modern ? 'page-v2' : undefined } },
+          // the new check is the page's verdict now: reply marks drawn on older ink go
+          tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: marksAfterCheck() },
           events: [
             ...x.events,
             ...resolved.map((r) => ({
@@ -820,15 +822,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       updateAssignment(a.id, (x) => ({
         ...x,
         chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply.text, costUSD: spend.total }],
-        tutorMarks: reply.marks.length
-          ? {
-              ...(x.tutorMarks ?? {}),
-              [pageId]: pruneMarks(
-                [...((x.tutorMarks ?? {})[pageId] ?? []), ...resolveMarks(reply.marks, cap?.lines ?? [], chunksByLine, x.chat.length + 1, () => newId('t_'))],
-                x.chat.length + 1
-              ),
-            }
-          : x.tutorMarks,
+        // this reply's marks replace the earlier ones (none drawn: none left), on this capture's lines only
+        tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine } : null, x.chat.length + 1, () => newId('t_')) },
         events: [
           ...x.events,
           { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : spoken ? 'voice' : undefined, costUSD: spend.total },

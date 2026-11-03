@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTagged, pruneMarks, resolveMarks, sanitizeMarks, stripTags, tagColor } from './marks.ts';
+import { marksAfterCheck, marksAfterReply, parseTagged, pruneMarks, resolveMarks, sanitizeMarks, stripTags, tagColor } from './marks.ts';
 
 const known = new Set(['L1', 'L2', 'L3']);
 
@@ -80,6 +80,27 @@ test('a span is snapped to the chunks of its line; without a span the whole line
   assert.equal(out.length, 2);
   assert.deepEqual(out[0], { id: 'm1', turn: 3, tag: 2, kind: 'circle', lineId: 'L2', box: { x: 100, y: 20, w: 40, h: 30 } });
   assert.deepEqual(out[1].box, { x: 0, y: 20, w: 200, h: 30 });
+});
+
+test('a reply replaces earlier reply marks, also when it draws none; marks go only on lines of its own capture', () => {
+  let n = 0;
+  const id = () => `m${++n}`;
+  // turn 3 drew on L1 of a one-line page
+  const before = marksAfterReply([{ kind: 'underline', line: 'L1', tag: 1 }], { lines: [{ id: 'L1', x: 0, y: 0, w: 100, h: 20, strokes: [] }], chunksByLine: {} }, 3, id);
+  assert.equal(before.length, 1);
+  // turn 5: the page now has two lines (renumbered as the student wrote above); L9 is not on this capture
+  const cap = { lines: [{ id: 'L1', x: 0, y: 0, w: 100, h: 20, strokes: [] }, { id: 'L2', x: 0, y: 40, w: 120, h: 20, strokes: [] }], chunksByLine: {} };
+  const after = marksAfterReply([{ kind: 'circle', line: 'L2', tag: 1 }, { kind: 'circle', line: 'L9', tag: 2 }], cap, 5, id);
+  assert.deepEqual(after.map((m) => [m.turn, m.lineId, m.box.y]), [[5, 'L2', 40]]);
+  assert.ok(!after.some((m) => m.turn === 3), 'the turn-3 underline is gone');
+  // turn 7 draws nothing: nothing of turn 5 survives either
+  assert.deepEqual(marksAfterReply([], cap, 7, id), []);
+  // a reply without a page capture can't place marks
+  assert.deepEqual(marksAfterReply([{ kind: 'circle', line: 'L1', tag: 1 }], null, 9, id), []);
+});
+
+test('a new check clears every reply mark', () => {
+  assert.deepEqual(marksAfterCheck(), []);
 });
 
 test('only the latest turns keep their marks', () => {
