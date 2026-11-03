@@ -780,9 +780,13 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     setSending(true);
     setDraft('');
     try {
+      // The store at call time, not this render's copy: a hands-free turn can run on a closure from many turns ago,
+      // which sent every reply of T11 run 1 with no history and the first check (uncached input stayed flat at ~1760 tokens).
+      const ax = getAssignment(assignmentId) ?? a;
+      const check = ax.checks[pageId];
       const cap = attachPage ? await capture() : null;
       const image = cap?.image ?? null;
-      const level = levelOverride ?? tutorContext(a).helpLevel;
+      const level = levelOverride ?? tutorContext(ax).helpLevel;
       let initialSnap = presnap;
       if (e0 && !initialSnap && needsInitialSnap(e0)) {
         // flush the canvas first: the snapshot copies the saved page file
@@ -795,10 +799,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       const spend = { total: 0 };
       const replied = await gate.guard(
         providerFromSettings(spend).reply({
-        ...tutorContext(a),
+        ...tutorContext(ax),
         helpLevel: level,
         lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
-        history: a.chat,
+        history: ax.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
@@ -949,6 +953,9 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     u.end();
     await u.finished;
   };
+  /** the latest render's voiceTurn (and through it send, runMove and the current check): the hands-free loop below keeps running on the closure that started it */
+  const voiceTurnRef = React.useRef(voiceTurn);
+  voiceTurnRef.current = voiceTurn;
 
   // ---- hands-free conversation: the mic stays open; a pause ends your turn; the tutor answers aloud; repeat ----
   const [conversation, setConversation] = React.useState(false);
@@ -1017,7 +1024,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         setHeard('');
         setPausing(false);
         if (!convo.current) return;
-        await voiceTurn(text);
+        await voiceTurnRef.current(text);
         if (convo.current) void listenForTurn();
       })();
     }, 200);
