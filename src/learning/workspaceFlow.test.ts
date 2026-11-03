@@ -6,7 +6,7 @@ import { lineInkSig, recordAssistance, startEpisode } from './session.ts';
 import type { Assistance, Snapshot } from './types';
 import {
   MOVE_TITLE, fallbackMove, flagFrom, levelMove, needsInitialSnap, phaseLabel, pivotPolicy, repairedAfter, replacementValid,
-  withSnapshot, workAttemptId, GIVEN_LINE_ID, givenEquation, replyGuardLines,
+  withSnapshot, workAttemptId, GIVEN_LINE_ID, givenEquation, replyGuardLines, isDoneQuestion, doneVerdict, checkSaysDone,
 } from './workspaceFlow.ts';
 import { applyReplyLeakGuard } from '../verify/guard.ts';
 import { DEMO_TASK_IDS } from './demoPack.ts';
@@ -106,4 +106,75 @@ test('with no check yet the given alone keeps the guard on; outside the demo pac
   assert.equal(givenEquation(ep0()), undefined);
   assert.equal(givenEquation(undefined), undefined);
   assert.deepEqual(replyGuardLines(undefined), []);
+});
+
+// ---- done questions ----------------------------------------------------------------------------------------------
+
+test('asking whether the work is right or done is a done question (T11 run 1 wording included)', () => {
+  for (const t of [
+    'Is this right?',
+    'is that correct',
+    'Am I done?',
+    'So madam, so am I done?',
+    'Wait, did I finally do it right?',
+    'OK, did I do it right?',
+    'Yeah, OK how’s it looking?',
+    'How about now? Is it good?',
+    'Is that right now?',
+    'did i get it',
+    'Does this look right?',
+    'Is my answer correct?',
+    'Can you check my work?',
+    'Have I got it right?',
+    'Is this the right answer?',
+  ])
+    assert.equal(isDoneQuestion(t), true, t);
+});
+
+test('reasoning with a tag question, help requests and other questions go to the tutor', () => {
+  for (const t of [
+    "I'd distribute the two to get six x minus eight, is that right?",
+    'I think I subtract a from both sides, right?',
+    'Is it okay to divide first?',
+    'Is this the right way to start?',
+    "What's the answer?",
+    "It's OK what's wrong here?",
+    'How do I start?',
+    'Why is it wrong?',
+    'Eight',
+    '',
+  ])
+    assert.equal(isDoneQuestion(t), false, t);
+});
+
+const vd = (id: string, verdict: LineVerdict['verdict'], reading = ''): LineVerdict => ({ id, part: '1', reading, verdict, note: '' }) as LineVerdict;
+const done = (lines: LineVerdict[], parts: { status: 'complete' | 'in_progress' }[] = [{ status: 'complete' }], stillOpen: string[] = []) => ({
+  kind: 'checked' as const,
+  result: { lines, parts: parts.map((p) => ({ label: '1', missing: [], ...p })), stillOpen },
+});
+
+test('a check that is all valid and complete says plainly that the work is done, with no question', () => {
+  const t = doneVerdict(done([vd('L1', 'context', '2(3x-4)=10'), vd('L2', 'valid', '6x-8=10'), vd('L3', 'valid', 'x=3')]));
+  assert.equal(t, "That's correct. You're done with this one.");
+  assert.ok(!t!.includes('?'));
+  // the same check found again (nothing changed since) gives the same answer
+  assert.equal(doneVerdict({ kind: 'unchanged', result: done([vd('L1', 'valid', 'x=3')]).result }), t);
+});
+
+test('otherwise the verdict points at the earliest open line by what it says, never by its number', () => {
+  const t = doneVerdict(done([vd('L2', 'incorrect', 'x=14/6'), vd('L1', 'incorrect', '6x-4=10')], [{ status: 'in_progress' }], ['distribution']));
+  assert.equal(t, 'Not yet. Take another look at the line with 6x-4=10.');
+  assert.doesNotMatch(t!, /\bL\d|line \d/);
+  assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10'), vd('L2', 'unreadable')]))!, /couldn't read/);
+  // correct so far but not finished, or a part not complete: not done
+  assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10')], [{ status: 'in_progress' }]))!, /isn't finished/);
+  assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10')], [{ status: 'complete' }], ['solve for x']))!, /isn't finished/);
+  assert.equal(checkSaysDone(done([vd('L1', 'valid', 'x=3')], []).result), false, 'no parts: not provably complete');
+  assert.equal(checkSaysDone(done([vd('L1', 'context', '2(3x-4)=10')]).result), false, 'nothing valid written');
+});
+
+test('a dropped check says nothing; a failed or empty one says so', () => {
+  assert.equal(doneVerdict({ kind: 'dropped' }), undefined);
+  assert.match(doneVerdict({ kind: 'error' })!, /couldn't finish/);
+  assert.match(doneVerdict({ kind: 'empty' })!, /nothing on the page/);
 });

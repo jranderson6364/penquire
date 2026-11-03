@@ -1,6 +1,6 @@
 // Pure helpers for the workspace's pivot (demo episode) flow (T07, moved here by T10 so they can be tested).
 // No React, no store: WorkspaceScreen and LearningBar own the side effects.
-import type { HelpLevel, LineVerdict } from '../ai/types';
+import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Assignment } from '../store/types';
 import { TASK_EQUATIONS } from './demoPack.ts';
@@ -118,3 +118,96 @@ export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, gi
   const lines = (checkLines ?? []).map(({ id, reading, verdict }) => ({ id, reading, verdict }));
   return given ? [{ id: GIVEN_LINE_ID, reading: given, verdict: 'valid' }, ...lines] : lines;
 }
+
+// ---- "am I done?": the real check, then a short verdict --------------------------------------------------------
+
+const FILLER = new Set(
+  'so ok okay wait yeah yes yep um uh hmm well and but now then alright hey hi please tutor right too yet here there already at all so far or not just finally actually really'.split(' ')
+);
+
+/** Asking whether the work is right or finished; a check answers these, not a tutor's opinion. */
+const DONE_ASKS: RegExp[] = [
+  /\b(am i|are we) (done|finished|right|correct)\b/,
+  /\bis (this|that|it|everything|my (answer|work|working)) (all )?(right|correct|good|ok|okay|done|finished|complete)\b/,
+  /\b(is|does) (this|that|it|my work) look(ing)? (right|correct|good|ok|okay)\b/,
+  /\bdid i (finally |actually )?(do|get|solve|finish) (it|this|that)( right| correctly)?\b/,
+  /\bhave i (got|gotten|done|solved|finished) it( right)?\b/,
+  /\bhow('s| is| does) (it|this|that|my work|everything) look(ing)?\b/,
+  /\bhow am i doing\b/,
+  /\bis (this|that) (the )?(right|correct) answer\b/,
+  /\b(can you )?check (my work|this|it|that)( for me)?\b/,
+];
+
+const words = (s: string) => s.split(/\s+/).filter(Boolean);
+
+/**
+ * "Am I done?", "is this right?", "did I do it right?", "how's it looking?", spoken or typed. In a demo episode these
+ * run the real check (T11 run 1: the tutor said "yes, you're done" three times and nothing in the app changed). Each
+ * sentence is judged on its own: the ask, up to three other words before it ("so", "wait", a misheard word), and only
+ * filler after it. A longer sentence is reasoning with a tag on it ("I'd distribute the two to get 6x − 8, is that
+ * right?") and goes to the tutor; so does "is it okay to divide first?".
+ */
+export function isDoneQuestion(text: string): boolean {
+  const norm = text.toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9'?.!\s]/g, ' ');
+  return norm.split(/[.?!]+/).some((sentence) => {
+    const s = words(sentence).join(' ');
+    for (const re of DONE_ASKS) {
+      const m = re.exec(s);
+      if (!m) continue;
+      const before = words(s.slice(0, m.index)).filter((w) => !FILLER.has(w));
+      const after = words(s.slice(m.index + m[0].length)).filter((w) => !FILLER.has(w));
+      if (before.length <= 3 && after.length === 0) return true;
+    }
+    return false;
+  });
+}
+
+/** What runCheck reports back, so a done question can be answered from the check itself. */
+export type CheckOutcome =
+  | { kind: 'checked'; result: CheckVerdicts; assistanceId?: string }
+  /** nothing changed since the latest check: that check is the answer */
+  | { kind: 'unchanged'; result: CheckVerdicts }
+  | { kind: 'empty' }
+  /** a boundary (fresh problem, leaving) passed while checking: say nothing */
+  | { kind: 'dropped' }
+  | { kind: 'error' };
+
+type CheckVerdicts = Pick<CheckResult, 'lines' | 'parts' | 'stillOpen'>;
+
+const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
+
+/** Done means the check found nothing to do: some valid work, every line valid or context, every part complete, nothing open. */
+export function checkSaysDone(r: CheckVerdicts): boolean {
+  return (
+    r.lines.some((l) => l.verdict === 'valid') &&
+    r.lines.every((l) => l.verdict === 'valid' || l.verdict === 'context') &&
+    r.parts.length > 0 &&
+    r.parts.every((p) => p.status === 'complete') &&
+    r.stillOpen.length === 0
+  );
+}
+
+/**
+ * The short verdict said (or written) after a done question's check. Plain words and the student's own lines only
+ * (the check's marks and feedback carry the rest), so nothing here goes past a location reveal. undefined: say nothing.
+ */
+export function doneVerdict(o: CheckOutcome): string | undefined {
+  switch (o.kind) {
+    case 'dropped':
+      return undefined;
+    case 'error':
+      return "I couldn't finish checking. Tap Check to try again.";
+    case 'empty':
+      return "There's nothing on the page to check yet.";
+  }
+  const r = o.result;
+  if (checkSaysDone(r)) return "That's correct. You're done with this one.";
+  const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
+  const flagged = ordered.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+  if (flagged) return flagged.reading.trim() ? `Not yet. Take another look at the line with ${flagged.reading.trim()}.` : 'Not yet. Take another look at the marked line.';
+  if (ordered.some((l) => l.verdict === 'unreadable')) return "I couldn't read all of it. Could you rewrite the marked line more clearly?";
+  return "What you have so far is right, but it isn't finished yet.";
+}
+
+/** Said straight away while a done question's check runs (a check takes seconds; silence reads as not heard). */
+export const CHECKING_LINE = 'Let me check that.';
