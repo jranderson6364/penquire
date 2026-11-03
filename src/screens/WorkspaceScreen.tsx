@@ -821,7 +821,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         ...tutorContext(ax),
         helpLevel: level,
         // the guard keeps judging against the check's lines even when they are out of date (no lines: no guard)
-        lines: replyGuardLines(check?.result.lines, e0 ? givenEquation(e0) : undefined),
+        lines: replyGuardLines(check?.result.lines, e0 ? givenEquation(e0) : undefined, checkStale),
         history: ax.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,

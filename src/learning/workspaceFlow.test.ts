@@ -10,6 +10,7 @@ import {
 } from './workspaceFlow.ts';
 import { applyReplyLeakGuard } from '../verify/guard.ts';
 import { DEMO_TASK_IDS } from './demoPack.ts';
+import { speakable } from '../voice/text.ts';
 
 const line = (id: string, y: number, strokes: number[]): Line => ({ id, x: 10, y, w: 200, h: 30, strokes });
 const v = (id: string, verdict: LineVerdict['verdict']): LineVerdict => ({ id, reading: id, verdict, note: '' });
@@ -89,13 +90,33 @@ test('a stale-page reply stating the answer is still scrubbed: the guard keeps t
   // the gap: x = 3 doesn't satisfy the wrong line, so the old lines alone let it through
   assert.equal(applyReplyLeakGuard(reply, stale, 1), reply);
   const ep = ep0();
-  const lines = replyGuardLines(stale, givenEquation({ ...ep, attempts: { [ep.initialAttemptId!]: { ...ep.attempts[ep.initialAttemptId!], taskId: DEMO_TASK_IDS.recovery } } }));
-  assert.deepEqual(lines.map((l) => l.id), [GIVEN_LINE_ID, 'L1']);
+  const lines = replyGuardLines(stale, givenEquation({ ...ep, attempts: { [ep.initialAttemptId!]: { ...ep.attempts[ep.initialAttemptId!], taskId: DEMO_TASK_IDS.recovery } } }), true);
+  assert.deepEqual(lines.map((l) => l.id), ['L1', GIVEN_LINE_ID]);
   const out = applyReplyLeakGuard(reply, lines, 1);
   assert.ok(!/x\s*=\s*3/.test(out), out);
   assert.match(out, /distribution is fixed/);
   // spoken replies write plain symbols too, so the same guard sees them
   assert.ok(!/x\s*=\s*3/.test(applyReplyLeakGuard('Yes. You get x = 3.', lines, 1)));
+});
+
+test("stale: the student's own fix survives in a reply, the answer does not; current: a corrected step is still caught", () => {
+  const old = [{ id: 'L1', reading: '6x - 4 = 10', verdict: 'incorrect' }];
+  const given = '2(3x - 4) = 10';
+  const stale = replyGuardLines(old, given, true);
+  const fix = 'Yes, the line with 6x - 8 = 10 is right. What comes next?';
+  assert.equal(applyReplyLeakGuard(fix, stale, 1), fix);
+  // with a Unicode minus it survives too, but only because extractMath doesn't take "−" as maths (it sees "8 = 10"):
+  // a blind spot of the guard, which is why SPOKEN_RULES asks for ASCII
+  assert.equal(applyReplyLeakGuard(fix.replace('-', '−'), stale, 1), fix.replace('-', '−'));
+  assert.ok(!/xs*=s*3/.test(applyReplyLeakGuard('Right. So x = 3.', stale, 1)));
+  // the page hasn't changed: "6x - 8 = 10" is not on it, and saying it is the corrected step
+  const current = replyGuardLines(old, given, false);
+  assert.deepEqual(current.map((l) => l.id), [GIVEN_LINE_ID, 'L1']);
+  assert.ok(!applyReplyLeakGuard('Close. It should be 6x - 8 = 10. Check the two.', current, 1).includes('6x - 8 = 10'));
+});
+
+test('spoken replies use ASCII maths, which the voice reads as words', () => {
+  assert.equal(speakable('Look at the line with 6x - 8 = 10.'), 'Look at the line with 6x minus 8 equals 10.');
 });
 
 test('with no check yet the given alone keeps the guard on; outside the demo pack there is no given', () => {

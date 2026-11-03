@@ -110,13 +110,20 @@ export const GIVEN_LINE_ID = 'the given equation';
 
 /**
  * What the reply leak guard judges a reply against: the latest check's lines, kept even when the page changed since
- * (with no lines the guard passes everything), plus the task's given equation as a valid first line. The given is
- * what makes a stated final answer detectable: "x = 3" doesn't satisfy a wrong "6x − 4 = 10", but it solves
- * "2(3x − 4) = 10". Only for demo tasks: a physics given like "v = 3 m/s" would scrub a tutor restating it.
+ * (with no lines the guard passes everything), plus the task's given equation as a valid line. The given is what makes
+ * a stated final answer detectable: "x = 3" doesn't satisfy a wrong "6x − 4 = 10", but it solves "2(3x − 4) = 10".
+ * Only for demo tasks: a physics given like "v = 3 m/s" would scrub a tutor restating it.
+ *
+ * Order matters (src/verify/leak.ts reads a wrong line against the valid line before it). With a current check the
+ * given comes first, so a corrected step ("it should be 6x − 8 = 10" under a wrong "6x − 4 = 10") is caught. With a
+ * stale check the given goes last: the student may have written that very fix since, and it would be scrubbed from
+ * the tutor's "the line with 6x - 8 = 10 is right". The final answer is caught either way.
  */
-export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, given?: string): GuardLine[] {
+export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, given?: string, stale = false): GuardLine[] {
   const lines = (checkLines ?? []).map(({ id, reading, verdict }) => ({ id, reading, verdict }));
-  return given ? [{ id: GIVEN_LINE_ID, reading: given, verdict: 'valid' }, ...lines] : lines;
+  if (!given) return lines;
+  const g = { id: GIVEN_LINE_ID, reading: given, verdict: 'valid' };
+  return stale ? [...lines, g] : [g, ...lines];
 }
 
 // ---- "am I done?": the real check, then a short verdict --------------------------------------------------------

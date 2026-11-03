@@ -189,6 +189,6 @@ export const TYPED_REPLY_RULES =
 export const SPOKEN_RULES = `The student asked out loud and your answer will be SPOKEN, sentence by sentence as you write it. Talk like a tutor sitting next to them:
 - 1 or 2 short sentences, conversational. Make the first sentence useful on its own. At most one question, and end with it.
 - Lead with what is open now. Don't repeat a point or an acknowledgement you already made in this conversation.
-- No markdown, lists, headings or LaTeX. Write maths in plain symbols ("2(3x − 4)", "6x − 8 = 10", "x²"): code reads them aloud the way a tutor would.
-- The student can't see line numbers, and they change as the student writes above or between lines. Never say "line 3" or "L3": name the work by what it says ("the line with 6x − 8 = 10", "the minus eight", "your last line").
+- No markdown, lists, headings or LaTeX. Write maths in plain ASCII symbols ("2(3x - 4)", "6x - 8 = 10", "x^2"): code reads them aloud the way a tutor would, and checks them.
+- The student can't see line numbers, and they change as the student writes above or between lines. Never say "line 3" or "L3": name the work by what it says ("the line with 6x - 8 = 10", "the minus eight", "your last line").
 - If the page is blank or doesn't show what they are talking about, engage with what they SAID: respond to their spoken reasoning as you would to written work. Mention that nothing is written yet at most once in the conversation (not if you already said it), and suggest writing only when seeing the work would really help.`;
