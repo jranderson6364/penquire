@@ -1,4 +1,4 @@
-import { SPOKEN_RULES, TUTOR_RULES, contextBlock, intentBlock, lastCheckBlock, levelBlock } from './prompts';
+import { SPOKEN_RULES, TUTOR_RULES, TYPED_REPLY_RULES, contextBlock, intentBlock, lastCheckBlock, levelBlock } from './prompts';
 import { StreamAssembler, partialStringField } from './stream';
 import { PARSE_RULES, parseTask, repairTask } from './parsePrompt';
 import { HttpError, TimeoutError, parseRetryAfter, withRetry } from './retry';
@@ -7,7 +7,7 @@ import { sanitizeParsed } from '../problems/sanitize';
 import { hasErrors, validateGroups } from '../problems/validate';
 import { sanitizeCheck } from './sanitize';
 import { cleanReply } from './replyText';
-import { effortParam } from './models';
+import { effortParam, replyEffort } from './models';
 import { sanitizeMarks } from '../tutor/marks';
 import type {
   CheckInput,
@@ -148,8 +148,6 @@ const CHECK_TOOL: Tool = {
   },
 };
 
-/** A reply that looks at the page has to do the maths itself: 'low' effort told a student with a correct answer it was wrong. */
-const REPLY_EFFORT_WITH_PAGE = 'medium';
 
 const REPLY_TOOL: Tool = {
   name: 'reply_to_student',
@@ -165,7 +163,7 @@ const REPLY_TOOL: Tool = {
       marks: {
         type: 'array',
         description:
-          "0 to 4 drawings on the student's page that point at where to look. Be SPECIFIC: mark the smallest stretch that holds the issue (one term, one sign, one number), not a whole line, and use different lines or different stretches for different points. Only POINT: never write the fix, an answer or a corrected expression. If the student asks you to show, point at, highlight, circle or underline something, you MUST draw it. Otherwise use none when pointing would not help, and do not mark a correct line unless the student asked about it.",
+          "0 to 4 drawings on the student's page that point at where to look. Be SPECIFIC: mark the smallest stretch that holds the issue (one term, one sign, one number), not a whole line, and use different lines or different stretches for different points. Only POINT: never write the fix, an answer or a corrected expression. If the student asks you to show, point at, highlight, circle or underline something, you MUST draw it. Otherwise use none when pointing would not help, and do not mark a correct line unless the student asked about it (never for presentation: a parenthesis, neatness, the given not copied out).",
         items: {
           type: 'object',
           properties: {
@@ -554,7 +552,7 @@ Check my work. First verify each line yourself, including steps I did in my head
       }\n\nSTUDENT: ${input.message}\n\n(${
         input.spoken
           ? SPOKEN_RULES
-          : 'Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. One question max.'
+          : TYPED_REPLY_RULES
       })`,
     });
     messages.push({ role: 'user', content: finalContent });
@@ -565,7 +563,7 @@ Check my work. First verify each line yourself, including steps I did in my head
     if (input.image && known.size > 0) {
       try {
         const { out } = await this.callTool<{ message?: unknown; marks?: unknown }>(
-          { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, REPLY_EFFORT_WITH_PAGE), system: this.system(), messages },
+          { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, replyEffort(!!input.spoken)), system: this.system(), messages },
           REPLY_TOOL,
           `Respond only by calling the ${REPLY_TOOL.name} tool.`,
           'reply',
