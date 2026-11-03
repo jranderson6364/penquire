@@ -1,80 +1,102 @@
 import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { HelpMove, Phase } from '../learning/types';
-import { MOVE_TITLE, phaseLabel } from '../learning/workspaceFlow';
-import { C, R, S, T } from '../theme';
+import type { Assistance, HelpMove, Phase } from '../learning/types';
+import { MOVE_TITLE, phaseLabel, repairedAfter } from '../learning/workspaceFlow';
+import { C, LABEL, R, S, SHADOW, T } from '../theme';
 import { Button } from './Button';
+import { helpUsed } from './episodeCardFormat';
 
-// ---- the bar ------------------------------------------------------------------------------
+// The pivot flow's page chrome (T14C). There is no always-visible strip any more: the help moves are in the top bar's
+// Help menu, the status is in the ⓘ popover, and only two things float on the page when they matter: a denied move
+// (one notice) and the verified-repair hand-off (one card).
 
-type Props = {
-  phase: Phase;
-  repairedText?: string;
-  busy: boolean;
-  denied?: { reason: string; alt?: HelpMove };
-  onMove: (m: HelpMove) => void;
-  onDismissDenied: () => void;
-  onFresh: () => void;
-  insetLeft: number;
-  insetRight: number;
-};
-
-/** Pivot-flow strip under the top bar: phase, demo tag, direct help moves, and the hand-off to a fresh problem. */
-export function LearningBar({ phase, repairedText, busy, denied, onMove, onDismissDenied, onFresh, insetLeft, insetRight }: Props) {
-  const [later, setLater] = React.useState(false);
-  const verified = phase === 'repair_verified';
-  const working = phase === 'attempt' || phase === 'repair' || verified;
+/** Content of the ⓘ popover next to the title: phase, the feedback rule and the help record. */
+export function PracticeStatus({ phase, assistance }: { phase: Phase; assistance: Assistance[] }) {
+  const help = helpUsed(assistance);
   return (
-    <View style={[styles.bar, { paddingLeft: S.md + insetLeft, paddingRight: S.md + insetRight }]}>
-      <View style={styles.row}>
-        <Text style={styles.phase}>{phaseLabel(phase)}</Text>
-        <View style={styles.tag}>
-          <Text style={styles.tagText}>Original demo practice</Text>
-        </View>
-        <Text style={styles.note}>Feedback when you ask</Text>
-        {verified && repairedText ? <Text style={styles.repaired}>{repairedText}</Text> : null}
-        <View style={{ flex: 1 }} />
-        {working &&
-          (['pointer', 'explain', 'example', 'start'] as const).map((m) => <Button key={m} small title={MOVE_TITLE[m]} disabled={busy} onPress={() => onMove(m)} />)}
+    <View style={styles.status}>
+      <Text style={LABEL}>Original demo practice</Text>
+      <Text style={styles.phase}>{phaseLabel(phase)}</Text>
+      {phase === 'repair_verified' && <Text style={styles.repaired}>{repairedAfter(assistance)}</Text>}
+      <Text style={styles.line}>Feedback when you ask</Text>
+      <Text style={styles.line}>{help.length ? `Help used: ${help.join(', ')}` : 'No help recorded yet'}</Text>
+    </View>
+  );
+}
+
+/** A help move the policy does not allow, with the strongest allowed one instead. Shown in the page's notice slot. */
+export function DeniedNotice({ reason, alt, busy, onMove, onDismiss }: { reason: string; alt?: HelpMove; busy: boolean; onMove: (m: HelpMove) => void; onDismiss: () => void }) {
+  return (
+    <View style={styles.denied} accessibilityRole="alert">
+      <Text style={styles.deniedText}>{reason}</Text>
+      {alt && <Button small kind="primary" title={`${MOVE_TITLE[alt]} instead`} disabled={busy} onPress={() => onMove(alt)} />}
+      <Button small kind="ghost" title="OK" onPress={onDismiss} />
+    </View>
+  );
+}
+
+/**
+ * The repair was verified: one compact card with the honest label ("Repaired after …") and the hand-off.
+ * "Not now" folds it into a small "Try a fresh problem" pill.
+ */
+export function RepairCard({ repairedText, onFresh }: { repairedText: string; onFresh: () => void }) {
+  const [later, setLater] = React.useState(false);
+  if (later) {
+    return (
+      <View style={styles.pillWrap}>
+        <Button small kind="primary" title="Try a fresh problem" onPress={onFresh} />
       </View>
-      {denied && (
-        <View style={styles.row}>
-          <Text style={styles.denied}>{denied.reason}</Text>
-          {denied.alt && <Button small title={`${MOVE_TITLE[denied.alt]} instead`} disabled={busy} onPress={() => onMove(denied.alt!)} />}
-          <Button small kind="ghost" title="OK" onPress={onDismissDenied} />
-        </View>
-      )}
-      {verified &&
-        (later ? (
-          <View style={styles.row}>
-            <View style={{ flex: 1 }} />
-            <Button small title="Try a fresh problem" onPress={onFresh} />
-          </View>
-        ) : (
-          <View style={[styles.row, styles.fresh]}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.freshTitle}>Try a fresh problem</Text>
-              <Text style={styles.freshSub}>See whether the idea carries over</Text>
-            </View>
-            <Button small kind="primary" title="Try a fresh problem" onPress={onFresh} />
-            <Button small kind="ghost" title="Not now" onPress={() => setLater(true)} />
-          </View>
-        ))}
+    );
+  }
+  return (
+    <View style={styles.card} accessibilityLiveRegion="polite">
+      <View style={{ flexShrink: 1 }}>
+        <Text style={styles.cardTitle}>{repairedText}</Text>
+        <Text style={styles.cardSub}>See whether the idea carries over to a new problem</Text>
+      </View>
+      <Button small kind="primary" title="Try a fresh problem" onPress={onFresh} />
+      <Button small kind="ghost" title="Not now" onPress={() => setLater(true)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: { backgroundColor: C.card, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingVertical: S.sm, gap: S.sm },
-  row: { flexDirection: 'row', alignItems: 'center', gap: S.sm, flexWrap: 'wrap' },
-  phase: { fontSize: T.body, fontWeight: '800', color: C.ink },
-  tag: { backgroundColor: C.bg, borderRadius: R.pill, paddingHorizontal: S.sm, paddingVertical: 2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.line },
-  tagText: { fontSize: T.caption, fontWeight: '700', color: C.sub },
-  note: { fontSize: T.caption, color: C.sub },
+  status: { padding: S.sm, gap: 4 },
+  phase: { fontSize: T.lead, fontWeight: '700', color: C.ink, marginTop: 2 },
   repaired: { fontSize: T.small, fontWeight: '700', color: C.valid },
-  denied: { flexShrink: 1, fontSize: T.small, color: C.partial },
-  fresh: { backgroundColor: C.bg, borderRadius: R.md, padding: S.sm },
-  freshTitle: { fontSize: T.body, fontWeight: '700', color: C.ink },
-  freshSub: { fontSize: T.caption, color: C.sub },
+  line: { fontSize: T.small, color: C.sub },
+  denied: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.sm,
+    flexWrap: 'wrap',
+    maxWidth: 620,
+    backgroundColor: C.card,
+    borderRadius: R.lg,
+    paddingLeft: S.lg,
+    paddingRight: S.sm,
+    paddingVertical: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.lineStrong,
+    ...SHADOW,
+  },
+  deniedText: { flexShrink: 1, fontSize: T.small, color: C.partial, fontWeight: '600' },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.sm,
+    maxWidth: 640,
+    backgroundColor: C.card,
+    borderRadius: R.lg,
+    paddingLeft: S.lg,
+    paddingRight: S.sm,
+    paddingVertical: S.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: C.lineStrong,
+    ...SHADOW,
+  },
+  cardTitle: { fontSize: T.body, fontWeight: '700', color: C.valid },
+  cardSub: { fontSize: T.caption, color: C.sub },
+  pillWrap: { borderRadius: R.sm, ...SHADOW },
 });

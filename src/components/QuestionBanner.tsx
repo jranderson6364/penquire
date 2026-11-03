@@ -129,9 +129,9 @@ export function QuestionBanner({ assignment, activePart, onChange, onPlacePart, 
 }
 
 /** What remains of the question strip when it is tucked away: one small pill on the page. */
-export function QuestionPill({ label, onPress, insetLeft }: { label?: string; onPress: () => void; insetLeft: number }) {
+export function QuestionPill({ label, onPress, insetLeft, top }: { label?: string; onPress: () => void; insetLeft: number; top?: number }) {
   return (
-    <Pressable onPress={onPress} style={[styles.pill, { left: Math.max(8, insetLeft) }]} accessibilityRole="button" accessibilityLabel="Show the question">
+    <Pressable onPress={onPress} style={[styles.pill, { left: Math.max(8, insetLeft) }, top !== undefined && { top }]} accessibilityRole="button" accessibilityLabel="Show the question">
       <Icon name="question" size={16} color={C.primary} />
       <Text style={styles.pillText}>{label ?? 'Question'}</Text>
       <Icon name="chevron-down" size={14} color={C.sub} />

@@ -3,14 +3,21 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { COLORS, ERASER_SIZES, HIGHLIGHT_COLORS, WIDTHS, isInk, selectTool, setColor, setWidth, type ToolKind, type ToolState } from '../tools';
 import { C, R, T } from '../theme';
+import { popoverPosition, type Anchor, type Placement } from '../ui/toolbarDock';
 import { Icon } from './Icon';
 
-export type Anchor = { x: number; y: number; w: number; h: number };
+export type { Anchor };
 
 type Props = {
   tool: ToolState;
   anchor: Anchor;
   windowWidth: number;
+  /** needed for 'above', 'left' and 'right' (the card is kept on screen vertically) */
+  windowHeight?: number;
+  /** which side of the anchor the card opens on: away from the edge the toolbar is docked on (default below) */
+  placement?: Placement;
+  /** false where the ruler isn't wired to the canvas (the independent attempt) */
+  showRuler?: boolean;
   onChange: (s: ToolState) => void;
   onClose: () => void;
 };
@@ -24,18 +31,34 @@ const PEN_KINDS: { kind: ToolKind; label: string }[] = [
 const POP_W = 300;
 
 /** The selected tool's options, opened by tapping the tool again: pen type, color, thickness / eraser mode and size. */
-export function ToolPopover({ tool, anchor, windowWidth, onChange, onClose }: Props) {
+export function ToolPopover({ tool, anchor, windowWidth, windowHeight = 10000, placement = 'below', showRuler = true, onChange, onClose }: Props) {
   const ink = isInk(tool.tool);
   const isPen = tool.tool === 'pen' || tool.tool === 'fountain' || tool.tool === 'pencil';
   const palette = tool.tool === 'marker' ? HIGHLIGHT_COLORS : COLORS;
   const current = ink ? tool.colors[tool.tool as 'pen'] : undefined;
-  const left = Math.max(8, Math.min(windowWidth - POP_W - 8, anchor.x + anchor.w / 2 - POP_W / 2));
+  // the card's height depends on the tool; measured on first layout (hidden until then, so it never jumps)
+  const [cardH, setCardH] = React.useState(0);
+  const pos = popoverPosition(anchor, placement, { w: POP_W, h: cardH || 300 }, { w: windowWidth, h: windowHeight });
+  const arrowStyle =
+    placement === 'below'
+      ? { top: -7, left: pos.arrow - 7, borderLeftWidth: 1, borderTopWidth: 1 }
+      : placement === 'above'
+        ? { bottom: -7, left: pos.arrow - 7, borderRightWidth: 1, borderBottomWidth: 1 }
+        : placement === 'right'
+          ? { left: -7, top: pos.arrow - 7, borderLeftWidth: 1, borderBottomWidth: 1 }
+          : { right: -7, top: pos.arrow - 7, borderRightWidth: 1, borderTopWidth: 1 };
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose} supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right', 'portrait-upside-down']}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close tool options" />
-      <View style={[styles.card, { left, top: anchor.y + anchor.h + 6, width: POP_W }]}>
-        <View style={[styles.arrow, { left: Math.max(14, Math.min(POP_W - 30, anchor.x + anchor.w / 2 - left - 8)) }]} />
+      <View
+        style={[styles.card, { left: pos.left, top: pos.top, width: POP_W, opacity: cardH ? 1 : 0 }]}
+        onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height);
+          if (Math.abs(h - cardH) > 1) setCardH(h);
+        }}
+      >
+        <View style={[styles.arrow, arrowStyle]} />
 
         {isPen && (
           <View style={styles.seg}>
@@ -77,10 +100,10 @@ export function ToolPopover({ tool, anchor, windowWidth, onChange, onClose }: Pr
               })}
             </View>
             {/* the ruler only matters while inking, so it lives with the ink options, not in the toolbar */}
-            <Pressable onPress={() => onChange({ ...tool, ruler: !tool.ruler })} style={[styles.rulerRow, tool.ruler && styles.segOn]} accessibilityRole="switch" accessibilityLabel="Ruler" accessibilityState={{ checked: tool.ruler }}>
+            {showRuler && <Pressable onPress={() => onChange({ ...tool, ruler: !tool.ruler })} style={[styles.rulerRow, tool.ruler && styles.segOn]} accessibilityRole="switch" accessibilityLabel="Ruler" accessibilityState={{ checked: tool.ruler }}>
               <Icon name="ruler" size={18} color={tool.ruler ? C.primary : C.sub} />
               <Text style={[styles.segText, tool.ruler && { color: C.primary }]}>{tool.ruler ? 'Ruler on' : 'Ruler'}</Text>
-            </Pressable>
+            </Pressable>}
           </>
         )}
 
@@ -131,7 +154,7 @@ const styles = StyleSheet.create({
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 10 },
   },
-  arrow: { position: 'absolute', top: -7, width: 14, height: 14, backgroundColor: C.card, borderLeftWidth: 1, borderTopWidth: 1, borderColor: C.line, transform: [{ rotate: '45deg' }] },
+  arrow: { position: 'absolute', width: 14, height: 14, backgroundColor: C.card, borderWidth: 0, borderColor: C.line, transform: [{ rotate: '45deg' }] },
   seg: { flexDirection: 'row', backgroundColor: C.bg, borderRadius: R.md, padding: 3, gap: 2 },
   segItem: { flex: 1, minHeight: 36, borderRadius: R.sm + 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, paddingHorizontal: 6 },
   segOn: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line },

@@ -102,6 +102,8 @@ export type Settings = {
   appearance?: 'system' | 'light' | 'dark';
   /** the tutor's voice (an expo-speech identifier); absent or no longer installed = the best installed voice */
   voiceId?: string;
+  /** where the floating toolbar is docked ({ edge, t }, src/ui/toolbarDock.ts); validated on load, absent = top centre */
+  toolbarDock?: unknown;
 };
 
 export type DB = {

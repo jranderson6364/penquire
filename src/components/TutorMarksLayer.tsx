@@ -47,9 +47,9 @@ export function TutorMarksLayer({ marks, k, focusTurn, focusTag, onDismiss }: Pr
 }
 
 /** "Clear marks", in screen space (top-right of the page view), outside the moving layer. */
-export function ClearMarksButton({ onClear }: { onClear: () => void }) {
+export function ClearMarksButton({ onClear, top }: { onClear: () => void; top?: number }) {
   return (
-    <Pressable onPress={onClear} style={styles.clear} accessibilityRole="button" accessibilityLabel="Clear the tutor's marks from the page">
+    <Pressable onPress={onClear} style={[styles.clear, top !== undefined && { top }]} accessibilityRole="button" accessibilityLabel="Clear the tutor's marks from the page">
       <Icon name="close" size={12} color={C.sub} />
       <Text style={styles.clearText}>Clear marks</Text>
     </Pressable>
