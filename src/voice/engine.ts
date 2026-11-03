@@ -8,6 +8,7 @@
  */
 import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { cloudTtsConfig, createCloudTts, expoPlayer } from './cloudTts';
+import { contextualStrings, createRecognizerChoice } from './recognizer';
 import { chooseVoice, createSpeaker, rankVoices, sentenceBackend, voiceTier, voiceTuning, type SpeechBackend, type Utterance, type VoiceInfo } from './session';
 
 export type { Utterance, VoiceInfo } from './session';
@@ -254,6 +255,10 @@ export function stopAllVoice() {
 /** removes the current listen()'s event listeners, so a stopAllVoice() leaves no callback behind */
 let activeListen: (() => void) | null = null;
 
+/** Apple's server recognizer first (more accurate), on-device after it fails once (src/voice/recognizer.ts). */
+const recognizerChoice = createRecognizerChoice();
+let loggedRecognizer = '';
+
 export type Listening = {
   /** stop listening; resolves with the final transcript ("" if nothing was heard) */
   finish: () => Promise<string>;
@@ -263,7 +268,8 @@ export type Listening = {
 
 /**
  * Start listening (push-to-talk). Partial text streams to onPartial while the student talks. Hints the recognizer
- * with the assignment's own vocabulary (part labels, symbols) so "three point ten c" and "theta" come out right.
+ * with the assignment's own vocabulary (part labels, symbols) so "three point ten c" and "theta" come out right, plus
+ * spoken-math words ("subtract eight", "six x"; src/voice/recognizer.ts).
  */
 export async function listen(
   onPartial: (text: string) => void,
@@ -281,6 +287,17 @@ export async function listen(
   if (!perm.granted) throw new Error('Microphone or speech recognition is not allowed. Turn it on in Settings › Penquire.');
   if (epoch !== speaker.epoch()) return null; // stopAllVoice() while asking for permission: do not start
 
+  let onDeviceSupported = false;
+  try {
+    onDeviceSupported = M.supportsOnDeviceRecognition();
+  } catch {}
+  const onDevice = recognizerChoice.requiresOnDevice(onDeviceSupported);
+  const mode = onDevice ? 'on-device' : 'Apple server';
+  if (mode !== loggedRecognizer) {
+    loggedRecognizer = mode;
+    console.warn(`[penquire:voice] recognizer: ${mode}${onDevice ? '' : onDeviceSupported ? ' (on-device is the fallback)' : ' (no on-device recognizer)'}`);
+  }
+
   let latest = '';
   let settle: ((t: string) => void) | null = null;
   const subs = [
@@ -290,7 +307,11 @@ export async function listen(
     }),
     ...(onVolume ? [M.addListener('volumechange', (e) => onVolume(e.value))] : []),
     M.addListener('end', () => (settle ? settle(latest) : onEnded?.())),
-    M.addListener('error', () => (settle ? settle(latest) : onEnded?.())),
+    M.addListener('error', (e) => {
+      if (!onDevice && recognizerChoice.serverError(e.error, onDeviceSupported))
+        console.warn(`[penquire:voice] recognizer: Apple server failed (${e.error}); on-device from now on`);
+      settle ? settle(latest) : onEnded?.();
+    }),
   ];
   const cleanup = () => {
     subs.forEach((s) => s.remove());
@@ -303,8 +324,8 @@ export async function listen(
     interimResults: true,
     addsPunctuation: true,
     continuous: true,
-    requiresOnDeviceRecognition: M.supportsOnDeviceRecognition(),
-    contextualStrings: vocabulary.slice(0, 100),
+    requiresOnDeviceRecognition: onDevice,
+    contextualStrings: contextualStrings(vocabulary),
     iosTaskHint: 'dictation',
     ...(onVolume ? { volumeChangeEventOptions: { enabled: true, intervalMillis: 100 } } : {}),
   });
