@@ -1672,6 +1672,8 @@ const styles = StyleSheet.create({
   dock: { backgroundColor: C.bg, borderLeftWidth: StyleSheet.hairlineWidth, borderColor: C.line },
   drawer: {
     position: 'absolute',
+    // above the floating toolbar (30) and the notice stack (20)
+    zIndex: 50,
     top: 0,
     right: 0,
     bottom: 0,
