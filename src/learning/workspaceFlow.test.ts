@@ -180,6 +180,9 @@ test('a check that is all valid and complete says plainly that the work is done,
   assert.ok(!t!.includes('?'));
   // the same check found again (nothing changed since) gives the same answer
   assert.equal(doneVerdict({ kind: 'unchanged', result: done([vd('L1', 'valid', 'x=3')]).result }), t);
+  // a verified repair names the next step, which the Try a fresh problem card now offers
+  const v = doneVerdict(done([vd('L1', 'valid', 'x=3')]), true);
+  assert.ok(v!.startsWith("That's correct. You're done with this one.") && v!.includes('Try a fresh problem'));
 });
 
 test('otherwise the verdict points at the earliest open line by what it says, never by its number', () => {

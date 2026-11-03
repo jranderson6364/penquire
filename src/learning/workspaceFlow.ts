@@ -198,7 +198,7 @@ export function checkSaysDone(r: CheckVerdicts): boolean {
  * The short verdict said (or written) after a done question's check. Plain words and the student's own lines only
  * (the check's marks and feedback carry the rest), so nothing here goes past a location reveal. undefined: say nothing.
  */
-export function doneVerdict(o: CheckOutcome): string | undefined {
+export function doneVerdict(o: CheckOutcome, repairVerified = false): string | undefined {
   switch (o.kind) {
     case 'dropped':
       return undefined;
@@ -208,7 +208,7 @@ export function doneVerdict(o: CheckOutcome): string | undefined {
       return "There's nothing on the page to check yet.";
   }
   const r = o.result;
-  if (checkSaysDone(r)) return "That's correct. You're done with this one.";
+  if (checkSaysDone(r)) return repairVerified ? "That's correct. You're done with this one. When you're ready, tap Try a fresh problem." : "That's correct. You're done with this one.";
   const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
   const flagged = ordered.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
   if (flagged) return flagged.reading.trim() ? `Not yet. Take another look at the line with ${flagged.reading.trim()}.` : 'Not yet. Take another look at the marked line.';

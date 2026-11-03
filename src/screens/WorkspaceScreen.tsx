@@ -32,7 +32,7 @@ import { pointedLine, speakable, unspoken } from '../voice/text';
 import { createVoiceActivity, listenState, turnDecision, type TurnState } from '../voice/turns';
 import { withSpeechExposure, type SpokenReply } from '../voice/session';
 import { done as hapticDone, tick } from '../ui/haptics';
-import { getAssignment, getEpisodes, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, updateEpisode, writePage } from '../store/db';
+import { getAssignment, getEpisode, getEpisodes, getSettings, newId, readPage, recordUsage, saveSettings, subscribe, updateAssignment, updateEpisode, writePage } from '../store/db';
 import { loadEvals, recordFeedback, saveCheckImage, saveCheckStrokes, subscribeEvals } from '../store/evals';
 import { feedbackFor, type MarkFeedback } from '../store/evalRecords';
 import { applyParse } from '../store/parseApply';
@@ -1266,7 +1266,9 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     onChecking();
     const outcome = await runMove('check');
     if (!outcome) return null; // the policy refused a check: the tutor answers instead
-    const verdict = gate.isCurrent(stamp) ? doneVerdict(outcome) : undefined;
+    // a verified repair now shows the Try a fresh problem card: name it, so "done" has a next step
+    const verified = getEpisode(epRef.current.id)?.phase === 'repair_verified';
+    const verdict = gate.isCurrent(stamp) ? doneVerdict(outcome, verified) : undefined;
     if (verdict) updateAssignment(assignmentId, (x) => ({ ...x, chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: verdict }] }));
     return { verdict, outcome };
   };
