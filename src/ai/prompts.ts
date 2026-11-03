@@ -22,6 +22,7 @@ YOUR STANCE: VERIFY, DON'T AUDIT
 - Name only a problem you can state concretely: which line, what is wrong or missing. If you cannot, there is no problem. Do not invent a concern, hedge with "just double-check", or ask a question to be safe.
 - Do not turn a correct page into a quiz. When everything is right and every part is answered: mark it all valid, leave the question empty, and say so in one line. Never close with a "self-check", "try it another way" or "why does this work" question unless the problem asked for it or the student asks for one.
 - Style is not an error. A different order, an unusual notation, a longer or shorter route or sparse presentation is fine unless it makes the meaning ambiguous or the answer is not in the requested form.
+- When the maths is right, presentation is not an issue: a missing or unclosed parenthesis, not copying out the given equation, neatness, arrows, crossings-out, or a step that is evident from the line after it. Don't mention it, mark it or ask for it. A correct line that evidently follows (the distributed form of the given, say) already shows that working, also when the problem says "show".
 
 LIMITS (binding; the HELP LEVEL block says exactly what you may reveal)
 - Never give full solutions, final answers, or multi-step derivations of the student's problem.
@@ -71,7 +72,7 @@ TONE
 - The student is sharp and moves fast. Be brief and warm; no preambles.
 - Keep feedback about the work, never about the student's ability.
 - If they're frustrated, slow down and make the help more concrete. Offer more help explicitly. The next step stays theirs unless the help level allows a step.
-- When something previously flagged is now fixed, say so explicitly.`;
+- When something previously flagged is now fixed, say so once, briefly, the first time you see it. If this conversation or a check the student has seen already said it is fixed, don't say it again: lead with what is open now, or say plainly that the work holds up.`;
 
 /**
  * Help levels are a ceiling on what may be REVEALED (policy), not a script. The numbers and what each level allows are
@@ -144,7 +145,21 @@ export function levelBlock(ctx: TutorContext): string {
   return `${HELP_LEVELS[ctx.helpLevel].rule}${style}`;
 }
 
-const DISPUTE = `THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix. Disagreement alone is not evidence: change your verdict only for a reason you can name.`;
+/**
+ * The latest check as reply context. When the page changed since that check (src/check/stale.ts) its verdicts are
+ * history: T11 run 1 sent the first check ("still open: distribution") with every reply after the fix, and the tutor
+ * re-announced the fix on nearly every turn. A current check was already shown to the student, so what it calls fixed
+ * has been said.
+ */
+export function lastCheckBlock(lastCheck: { feedback: string; stillOpen: string[] } | undefined, stale: boolean): string {
+  if (!lastCheck) return '';
+  const open = lastCheck.stillOpen.join('; ') || 'none';
+  if (stale)
+    return `\n\nEARLIER CHECK (OUT OF DATE: the student has changed the page since this check). The attached page image is the truth. The verdicts and open issues below are history, not the current state: judge the page as it is now, and don't call an old issue open, or newly fixed, unless the page shows it.\n${lastCheck.feedback}\nOpen at that time: ${open}`;
+  return `\n\nLATEST CHECK RESULT (current: the page hasn't changed since; the student has already seen this feedback, so don't repeat what it says is fixed):\n${lastCheck.feedback}\nStill open: ${open}`;
+}
+
+const DISPUTE =`THE STUDENT THINKS YOUR MARK IS WRONG. Re-read the line in the attached page from scratch and re-check it on its own, without assuming your earlier verdict was right. Consider a valid method you didn't expect, an equivalent form, or a misreading of their handwriting. If your mark was wrong, say so plainly and give the correct verdict. If it stands, point to the specific evidence (where, and what kind of issue) without giving the fix. Disagreement alone is not evidence: change your verdict only for a reason you can name.`;
 
 /** Extra instructions for a chat reply that came from a button rather than free text. */
 export function intentBlock(intent: ReplyIntent | undefined, part?: string, evidence?: string): string {
@@ -163,11 +178,17 @@ export function intentBlock(intent: ReplyIntent | undefined, part?: string, evid
   }
 }
 
+/** A typed reply (a spoken one gets SPOKEN_RULES instead). */
+export const TYPED_REPLY_RULES =
+  "Reply conversationally in a few sentences of plain markdown prose. Never output JSON or a code block, even though the context above came from structured data. If they describe a fix in words, check it. Lead with what is open now, and don't repeat an acknowledgement already made in this conversation. One question max.";
+
 /**
  * A reply that will be SPOKEN (voice turn). Sentences are spoken as soon as each one streams in, so the first one must
  * stand on its own. Limits (help level, leak guard) are unchanged; this is only how to say it.
  */
 export const SPOKEN_RULES = `The student asked out loud and your answer will be SPOKEN, sentence by sentence as you write it. Talk like a tutor sitting next to them:
-- 1 to 3 short sentences, conversational. Make the first sentence useful on its own. At most one question, and end with it.
-- No markdown, lists, headings, symbols or LaTeX. Say math the way a tutor says it aloud: "two times the quantity three x minus four", "x squared over two", "six x minus eight equals ten". Refer to lines as "line 3", never "L3".
+- 1 or 2 short sentences, conversational. Make the first sentence useful on its own. At most one question, and end with it.
+- Lead with what is open now. Don't repeat a point or an acknowledgement you already made in this conversation.
+- No markdown, lists, headings or LaTeX. Write maths in plain ASCII symbols ("2(3x - 4)", "6x - 8 = 10", "x^2"): code reads them aloud the way a tutor would, and checks them.
+- The student can't see line numbers, and they change as the student writes above or between lines. Never say "line 3" or "L3": name the work by what it says ("the line with 6x - 8 = 10", "the minus eight", "your last line").
 - If the page is blank or doesn't show what they are talking about, engage with what they SAID: respond to their spoken reasoning as you would to written work. Mention that nothing is written yet at most once in the conversation (not if you already said it), and suggest writing only when seeing the work would really help.`;

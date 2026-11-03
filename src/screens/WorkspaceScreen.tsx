@@ -19,6 +19,7 @@ import { BLOCK_MARGIN_X, BLOCK_WIDTH, clampBlock, estimateHeight, nextBlockY, pa
 import { SidePanel, type Tab } from '../components/SidePanel';
 import { mergeParts, mergeVerdicts, planCarry, signatures } from '../check/carry';
 import { guardMerged } from '../check/finalize';
+import { checkOutOfDate } from '../check/stale';
 import { AUTO_IDLE_MS, autoCheckAllowed, recentAuto } from '../check/auto';
 import { confirmReading, confirmedFor } from '../check/confirmed';
 import { groupLines, type Line } from '../ink/lines';
@@ -39,13 +40,13 @@ import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveG
 import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
 import { chunkLine } from '../tutor/chunks';
-import { pruneMarks, resolveMarks } from '../tutor/marks';
+import { marksAfterCheck, marksAfterReply } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
 import { LearningBar } from '../components/LearningBar';
 import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
-import { fallbackMove, flagFrom, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, withSnapshot, workAttemptId, type Flag } from '../learning/workspaceFlow';
+import { fallbackMove, flagFrom, givenEquation, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { takeSnapshot } from '../learning/snapshot';
@@ -608,10 +609,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   };
 
   /** quiet: a check-as-you-write check. Marks appear on the page; no panel, no notices; the panel button's dot says if something needs a look. */
-  const runCheck = async (quiet = false, pivotMove?: { move: HelpMove; level: HelpLevel }) => {
+  const runCheck = async (quiet = false, pivotMove?: { move: HelpMove; level: HelpLevel }): Promise<CheckOutcome> => {
     if (!hasKey) {
       say('Add your Anthropic API key in Settings to check your work.', 'warn');
-      return;
+      return { kind: 'error' };
     }
     setChecking(true);
     try {
@@ -619,7 +620,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       const { lines, image, strokes, strokeList, points } = await capture();
       if (strokes === 0 || !image) {
         if (!quiet) say('Nothing to check yet. Write something on this page first.');
-        return;
+        return { kind: 'empty' };
       }
       const e0 = pivotMove ? epRef.current : undefined;
       const level = pivotMove?.level ?? tutorContext(a).helpLevel;
@@ -636,7 +637,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           setPanelOpen(true);
           const f = prev.result.lines.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
           await send(`Point me to the issue${f ? ` on ${f.id}` : ''} without giving the answer.`, true, pivotMove.level, undefined, undefined, undefined, 'pointer');
-          return;
+          return { kind: 'unchanged', result: prev.result };
         }
         setShowMarks(true);
         setTab('feedback');
@@ -644,7 +645,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           setPanelOpen(true);
           say('Nothing new since your last check.');
         }
-        return;
+        return { kind: 'unchanged', result: prev.result };
       }
       const settled = [...plan.settled.entries()].map(([id, l]) => ({ id, part: l.part, reading: l.reading }));
       // Readings the student confirmed for ink that hasn't changed (src/check/confirmed.ts).
@@ -667,7 +668,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         }),
         stamp
       );
-      if (!checked.ok) return; // a boundary passed while checking: show nothing
+      if (!checked.ok) return { kind: 'dropped' }; // a boundary passed while checking: show nothing
       const fresh = checked.value;
       const mergedLines = mergeVerdicts(current, plan, fresh.lines);
       // Re-run the guards on the whole merged page: the provider's guards only saw the freshly graded lines (src/check/finalize.ts).
@@ -701,6 +702,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           issues,
           confirmedReadings: { ...(x.confirmedReadings ?? {}), [pageId]: conf.kept },
           checks: { ...x.checks, [pageId]: { id: newId('c_'), at: now, result, lines, strokeCount: strokes, costUSD: spend.total, space: modern ? 'page-v2' : undefined } },
+          // the new check is the page's verdict now: reply marks drawn on older ink go
+          tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: marksAfterCheck() },
           events: [
             ...x.events,
             ...resolved.map((r) => ({
@@ -725,6 +728,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           ],
         };
       });
+      let assistanceId: string | undefined;
       if (e0 && pivotMove) {
         // record the check as delivered help; a requested check is also where a repair is verified (never by erasing)
         const now = Date.now();
@@ -732,9 +736,11 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         const ev = flag && (e0.phase === 'attempt' || e0.phase === 'repair') ? repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: lines, nowValid: replacementValid(flag, lines, result.lines) }) : undefined;
         const repairSnap = ev?.verified ? takeSnapshot(pageId, lines, strokes, now) : undefined;
         const revealed = result.revealed ? [...new Set(result.revealed.map((r) => r.kind))] : ('unknown' as const);
+        assistanceId = newId('h_');
+        const hid = assistanceId;
         const next = updateEpisode(e0.id, (e) => {
           let n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
-          n = recordAssistance(n, { attemptId: workAttemptId(n), move: pivotMove.move, level, channels: ['marks', 'text'], revealed, text: result.feedback, at: now }, newId('h_'));
+          n = recordAssistance(n, { attemptId: workAttemptId(n), move: pivotMove.move, level, channels: ['marks', 'text'], revealed, text: result.feedback, at: now }, hid);
           if (ev?.verified) n = withSnapshot(markRepairVerified(n, now), n.repairAttemptId ?? '', repairSnap);
           return n;
         });
@@ -751,8 +757,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         setTab('feedback');
         setPanelOpen(true);
       }
+      return { kind: 'checked', result, assistanceId };
     } catch (e) {
       if (!quiet) say(`Check didn't finish: ${String(e instanceof Error ? e.message : e)}. Tap Check to try again.`, 'error');
+      return { kind: 'error' };
     } finally {
       setChecking(false);
     }
@@ -773,14 +781,23 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     /** voice: speak guarded sentences as they stream, and record speech exposure only once speech really started */
     speech?: SpokenReply
   ): Promise<string | undefined> => {
+    // pivot flow: a typed "is this right?" / "am I done?" runs the real check (buttons and voice come with an intent, a move or speech)
+    if (!intent && !move && !spoken && !speech) {
+      const d = await doneTurn(message, () => setDraft(''));
+      if (d) return d.verdict;
+    }
     const e0 = pivotRef.current ? epRef.current : undefined;
     const stamp = gate.stamp();
     setSending(true);
     setDraft('');
     try {
+      // The store at call time, not this render's copy: a hands-free turn can run on a closure from many turns ago,
+      // which sent every reply of T11 run 1 with no history and the first check (uncached input stayed flat at ~1760 tokens).
+      const ax = getAssignment(assignmentId) ?? a;
+      const check = ax.checks[pageId];
       const cap = attachPage ? await capture() : null;
       const image = cap?.image ?? null;
-      const level = levelOverride ?? tutorContext(a).helpLevel;
+      const level = levelOverride ?? tutorContext(ax).helpLevel;
       let initialSnap = presnap;
       if (e0 && !initialSnap && needsInitialSnap(e0)) {
         // flush the canvas first: the snapshot copies the saved page file
@@ -790,16 +807,26 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       }
       const strokeBox = new Map((cap?.strokeList ?? []).map((st) => [st.i, st]));
       const chunksByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, chunkLine(l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b))]));
+      // Has the ink changed since the latest check? Then the reply is told the check is history (src/check/stale.ts).
+      const checkStale = cap
+        ? checkOutOfDate(
+            check && { strokeCount: check.strokeCount, sigs: check.result.lines.map((l) => l.sig) },
+            { strokes: cap.strokes, sigs: [...signatures(cap.lines, cap.strokeList).values()] },
+            pixelErased.current.has(pageId) || toolIsPixelEraser
+          )
+        : stale;
       const spend = { total: 0 };
       const replied = await gate.guard(
         providerFromSettings(spend).reply({
-        ...tutorContext(a),
+        ...tutorContext(ax),
         helpLevel: level,
-        lines: check?.result.lines.map((l) => ({ id: l.id, reading: l.reading, verdict: l.verdict })),
-        history: a.chat,
+        // the guard keeps judging against the check's lines even when they are out of date (no lines: no guard)
+        lines: replyGuardLines(check?.result.lines, e0 ? givenEquation(e0) : undefined, checkStale),
+        history: ax.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
         lastCheck: check ? { feedback: check.result.feedback, stillOpen: check.result.stillOpen } : undefined,
+        checkStale,
         intent,
         evidence,
         // "is this right?" means the line the Pencil last wrote on (src/voice/text.ts)
@@ -820,15 +847,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       updateAssignment(a.id, (x) => ({
         ...x,
         chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply.text, costUSD: spend.total }],
-        tutorMarks: reply.marks.length
-          ? {
-              ...(x.tutorMarks ?? {}),
-              [pageId]: pruneMarks(
-                [...((x.tutorMarks ?? {})[pageId] ?? []), ...resolveMarks(reply.marks, cap?.lines ?? [], chunksByLine, x.chat.length + 1, () => newId('t_'))],
-                x.chat.length + 1
-              ),
-            }
-          : x.tutorMarks,
+        // this reply's marks replace the earlier ones (none drawn: none left), on this capture's lines only
+        tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine } : null, x.chat.length + 1, () => newId('t_')) },
         events: [
           ...x.events,
           { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : spoken ? 'voice' : undefined, costUSD: spend.total },
@@ -943,6 +963,25 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     };
     setVoice('thinking');
     setTab('chat');
+    // pivot flow: "am I done?" is answered by the real check, with a line now and a verdict when it lands
+    const d = await doneTurn(text, () => {
+      if (live()) u.push(CHECKING_LINE);
+    });
+    if (d) {
+      if (d.verdict && live()) {
+        u.push(speakable(d.verdict));
+        const e1 = epRef.current;
+        if (d.outcome.kind === 'checked' && d.outcome.assistanceId && e1) {
+          // the spoken verdict is part of the check's delivered help: add speech once it really started
+          const x = { episodeId: e1.id, id: d.outcome.assistanceId };
+          if (u.started()) updateEpisode(x.episodeId, (e) => withSpeechExposure(e, x.id, Date.now()));
+          else exposure = x;
+        }
+      }
+      u.end();
+      await u.finished;
+      return;
+    }
     const reply = await send(text, true, undefined, undefined, undefined, true, undefined, undefined, {
       onPartial: (t) => sayNew(t, false),
       started: u.started,
@@ -954,6 +993,9 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     u.end();
     await u.finished;
   };
+  /** the latest render's voiceTurn (and through it send, runMove and the current check): the hands-free loop below keeps running on the closure that started it */
+  const voiceTurnRef = React.useRef(voiceTurn);
+  voiceTurnRef.current = voiceTurn;
 
   // ---- hands-free conversation: the mic stays open; a pause ends your turn; the tutor answers aloud; repeat ----
   const [conversation, setConversation] = React.useState(false);
@@ -1022,7 +1064,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         setHeard('');
         setPausing(false);
         if (!convo.current) return;
-        await voiceTurn(text);
+        await voiceTurnRef.current(text);
         if (convo.current) void listenForTurn();
       })();
     }, 200);
@@ -1200,6 +1242,26 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     if (m === 'start') await send(`I don't know how to start${activePart ? ` ${activePart}` : ' this problem'}.`, true, c.level, 'start', undefined, undefined, 'start');
     else if (m === 'explain') await send(`Explain the idea I need${on}. Teach the idea; don't solve my problem for me.`, true, c.level, undefined, undefined, undefined, 'explain');
     else if (m === 'step') await send(`Show me one step${on}.`, true, c.level, undefined, undefined, undefined, 'step');
+  };
+
+  /**
+   * pivot flow: a turn asking whether the work is right or done ("am I done?", "is this right?", spoken or typed;
+   * src/learning/workspaceFlow.ts isDoneQuestion) runs the real check through the Check button's path, so repair
+   * verification, "Repaired after …" and Try a fresh problem follow from it. The question and a short verdict from
+   * that check go into the chat. null: not such a turn (the tutor answers it as usual), including on a blank page.
+   * `verdict` is undefined when a boundary dropped the check: say nothing.
+   */
+  const doneTurn = async (message: string, onChecking: () => void): Promise<{ verdict: string | undefined; outcome: CheckOutcome } | null> => {
+    if (!pivotRef.current || !epRef.current || !isDoneQuestion(message)) return null;
+    const strokes = await canvasRef.current?.getStrokes().catch(() => []);
+    if (!strokes?.length) return null;
+    const stamp = gate.stamp();
+    onChecking();
+    const outcome = await runMove('check');
+    if (!outcome) return null; // the policy refused a check: the tutor answers instead
+    const verdict = gate.isCurrent(stamp) ? doneVerdict(outcome) : undefined;
+    if (verdict) updateAssignment(assignmentId, (x) => ({ ...x, chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: verdict }] }));
+    return { verdict, outcome };
   };
 
   /** The pack's worked example (a different task), rendered directly but still through the reply leak guard. */

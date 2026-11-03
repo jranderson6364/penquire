@@ -121,6 +121,23 @@ export function resolveMarks(
   return out;
 }
 
+/**
+ * The page's tutor marks after a reply: the reply's own marks, placed on the lines of the capture the reply was given,
+ * REPLACE every earlier reply's marks, also when the reply drew none (an old underline otherwise outlives the issue it
+ * pointed at; T11 run 1). A mark on a line the capture doesn't have is dropped. No capture, no marks.
+ */
+export function marksAfterReply(
+  raw: readonly RawMark[],
+  capture: { lines: readonly Line[]; chunksByLine: Readonly<Record<string, readonly Box[]>> } | null,
+  turn: number,
+  newId: () => string
+): TutorMark[] {
+  return capture ? resolveMarks(raw, capture.lines, capture.chunksByLine, turn, newId) : [];
+}
+
+/** A new check is the page's current verdict: reply marks drawn before it are cleared (they point at old ink). */
+export const marksAfterCheck = (): TutorMark[] => [];
+
 /** Keep the marks of the latest `keepTurns` tutor turns; older ones are noise on the page. */
 export function pruneMarks(marks: readonly TutorMark[], currentTurn: number, keepTurns = 2): TutorMark[] {
   return marks.filter((m) => m.turn > currentTurn - keepTurns);
