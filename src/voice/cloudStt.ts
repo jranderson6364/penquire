@@ -41,6 +41,8 @@ export function scribeFields(): Record<string, string> {
 
 export type SttFallbackReason =
   | 'no_key'
+  | 'no_recording'
+  | 'no_end'
   | 'no_file'
   | 'multiple_files'
   | 'no_time'
@@ -115,9 +117,8 @@ export function createCloudStt(deps: CloudSttDeps): CloudStt {
       } catch {
         return fail(timedOut || opts.signal?.aborted ? why() : 'bad_response');
       }
-      const text = json && typeof json === 'object' && typeof (json as { text?: unknown }).text === 'string' ? (json as { text: string }).text : null;
-      if (text === null) return fail('bad_response');
-      const clean = cleanTranscript(text);
+      const clean = scribeText(json);
+      if (clean === null) return fail('bad_response');
       if (!clean) return fail('empty_text');
       return { ok: true, text: clean, ms: now() - t0 };
     } finally {
@@ -129,12 +130,22 @@ export function createCloudStt(deps: CloudSttDeps): CloudStt {
   return { transcribe };
 }
 
-/** Scribe can tag non-speech ("(laughs)", "[music]") even with tag_audio_events off; keep only the words. */
-export function cleanTranscript(text: string): string {
-  return text
-    .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * The transcript from Scribe's response, or null if it has none. When `words` is present, entries of type
+ * 'audio_event' ("(laughter)") are left out; the words themselves are kept exactly, so "2(x + 3)" survives.
+ */
+export function scribeText(json: unknown): string | null {
+  if (!json || typeof json !== 'object') return null;
+  const { text, words } = json as { text?: unknown; words?: unknown };
+  if (typeof text !== 'string') return null;
+  let out = text;
+  if (Array.isArray(words) && words.some((w) => w && (w as { type?: unknown }).type === 'audio_event')) {
+    out = words
+      .filter((w) => w && typeof (w as { text?: unknown }).text === 'string' && (w as { type?: unknown }).type !== 'audio_event')
+      .map((w) => (w as { text: string }).text)
+      .join('');
+  }
+  return out.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -185,7 +196,7 @@ export function recordingSuspect(o: { persisted: boolean; error: string | undefi
  */
 export async function finalTranscript(
   stt: CloudStt | null,
-  o: { apple: string; file: { uri: string } | { reason: 'no_file' | 'multiple_files' }; remainingMs: number; signal?: AbortSignal }
+  o: { apple: string; file: { uri: string } | { reason: 'no_file' | 'multiple_files' | 'no_end' }; remainingMs: number; signal?: AbortSignal }
 ): Promise<{ text: string; source: 'scribe' | 'apple'; outcome: SttOutcome }> {
   const apple = o.apple.trim();
   if (!stt) return { text: apple, source: 'apple', outcome: { ok: false, reason: 'no_key', ms: 0 } };

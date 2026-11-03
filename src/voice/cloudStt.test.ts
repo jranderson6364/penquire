@@ -4,7 +4,7 @@ import {
   MIN_UPLOAD_MS,
   SCRIBE_MODEL,
   SCRIBE_URL,
-  cleanTranscript,
+  scribeText,
   createCloudStt,
   createRecording,
   finalTranscript,
@@ -36,8 +36,9 @@ function fakeFetch(mode: Mode, text = 'subtract eight from both sides', delay = 
         if (mode === 'http') return resolve(new Response('{"detail":{"status":"invalid_api_key"}}', { status: 401 }));
         if (mode === 'badjson') return resolve(new Response('not json', { status: 200 }));
         if (mode === 'notext') return resolve(new Response('{"words":[]}', { status: 200 }));
-        const t = mode === 'empty' ? '' : mode === 'blank' ? '  (silence)  ' : text;
-        resolve(new Response(JSON.stringify({ language_code: 'en', text: t, words: [] }), { status: 200 }));
+        if (mode === 'blank')
+          return resolve(new Response(JSON.stringify({ text: ' (silence) ', words: [{ text: '(silence)', type: 'audio_event' }] }), { status: 200 }));
+        resolve(new Response(JSON.stringify({ language_code: 'en', text: mode === 'empty' ? '' : text, words: [] }), { status: 200 }));
       }, delay);
     });
   }) as unknown as typeof fetch;
@@ -216,6 +217,22 @@ test('log lines: one per turn, in the documented form', () => {
   assert.equal(sttLogLine({ ok: false, reason: 'no_file', ms: 0 }, ' (0 KB audio)'), '[penquire:voice] stt fell back to Apple: no_file (0 KB audio)');
 });
 
-test('non-speech tags are removed from the transcript', () => {
-  assert.equal(cleanTranscript('(laughs) so six x [noise] equals twelve '), 'so six x equals twelve');
+test('math in the transcript is kept exactly; only audio_event entries are dropped', () => {
+  assert.equal(scribeText({ text: 'so 2(x + 3) = 12 [and] done', words: [] }), 'so 2(x + 3) = 12 [and] done');
+  assert.equal(scribeText({ text: '2(x + 3)' }), '2(x + 3)');
+  const words = [
+    { text: '(laughter)', type: 'audio_event' },
+    { text: ' ', type: 'spacing' },
+    { text: 'six', type: 'word' },
+    { text: ' ', type: 'spacing' },
+    { text: 'x', type: 'word' },
+  ];
+  assert.equal(scribeText({ text: '(laughter) six x', words }), 'six x');
+  assert.equal(scribeText({ words: [] }), null);
+  assert.equal(scribeText(null), null);
+});
+
+test('log lines name each failure cause separately', () => {
+  assert.equal(sttLogLine({ ok: false, reason: 'no_recording', ms: 0 }), '[penquire:voice] stt fell back to Apple: no_recording');
+  assert.equal(sttLogLine({ ok: false, reason: 'no_end', ms: 2500 }), '[penquire:voice] stt fell back to Apple: no_end after 2500 ms');
 });

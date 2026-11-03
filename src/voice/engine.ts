@@ -366,14 +366,24 @@ export async function listen(
     finish: () =>
       new Promise<string>((resolve) => {
         const endedAt = Date.now(); // the turn's STT_BUDGET_MS starts now
-        const timer = setTimeout(() => settle?.(latest), 1500); // never hang if 'end' doesn't come
+        // never hang if 'end' doesn't come. The recording is closed only when the recognizer ends, and Apple's server
+        // recognizer takes longer to end than on-device, so wait longer for it when Scribe needs that file.
+        let endTimedOut = false;
+        const timer = setTimeout(() => {
+          endTimedOut = true;
+          settle?.(latest);
+        }, persist ? END_WAIT_SCRIBE_MS : END_WAIT_MS);
         settle = (t) => {
           clearTimeout(timer);
           settle = null;
           handedOff = true;
           cleanup();
-          if (!persist) return resolve(t.trim());
-          void scribeTurn(stt, rec, t, STT_BUDGET_MS - (Date.now() - endedAt)).then(resolve);
+          if (!persist) {
+            if (stt) console.warn(sttLogLine({ ok: false, reason: 'no_recording', ms: 0 }));
+            return resolve(t.trim());
+          }
+          const waited = Date.now() - endedAt;
+          void scribeTurn(stt, rec, t, STT_BUDGET_MS - waited, endTimedOut ? waited : null).then(resolve);
         };
         M.stop();
       }),
@@ -412,6 +422,10 @@ function flushRecordings() {
   for (const uri of staleRecordings.splice(0)) files?.remove(uri);
 }
 
+/** how long finish() waits for the recognizer to end: without Scribe, and when Scribe needs the closed recording */
+const END_WAIT_MS = 1500;
+const END_WAIT_SCRIBE_MS = 2500;
+
 /** aborts the Scribe upload of the turn being finished (stopAllVoice) */
 let activeStt: (() => void) | null = null;
 
@@ -419,7 +433,14 @@ let activeStt: (() => void) | null = null;
  * The turn's message: Scribe's transcript of the recording, or Apple's on any failure. Resolves "" when Stop was
  * pressed during the upload, so a stopped turn is not sent. One log line per turn.
  */
-async function scribeTurn(stt: CloudStt | null, rec: ReturnType<typeof createRecording>, apple: string, remainingMs: number): Promise<string> {
+async function scribeTurn(
+  stt: CloudStt | null,
+  rec: ReturnType<typeof createRecording>,
+  apple: string,
+  remainingMs: number,
+  /** the recognizer did not end within the wait (ms waited): the recording was never closed */
+  noEndAfter: number | null
+): Promise<string> {
   const controller = new AbortController();
   let stopped = false;
   const stop = () => {
@@ -427,8 +448,14 @@ async function scribeTurn(stt: CloudStt | null, rec: ReturnType<typeof createRec
     controller.abort();
   };
   activeStt = stop;
-  const file = rec.file();
   const files = sttFiles();
+  if (noEndAfter !== null) {
+    activeStt = null;
+    staleRecordings.push(...rec.uris());
+    console.warn(sttLogLine({ ok: false, reason: 'no_end', ms: noEndAfter }));
+    return apple.trim();
+  }
+  const file = rec.file();
   const bytes = 'uri' in file ? files?.size(file.uri) ?? null : null;
   const r = await finalTranscript(stt, { apple, file, remainingMs, signal: controller.signal });
   if (activeStt === stop) activeStt = null;
