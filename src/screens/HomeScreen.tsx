@@ -4,11 +4,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
 import { EpisodeCard } from '../components/EpisodeCard';
+import { Icon } from '../components/Icon';
 import { latestEpisode, resumeTarget } from '../components/episodeCardFormat';
 import { DEMO_ASSIGNMENT_ID, ensureDemo, resetDemo } from '../learning/seed';
 import { deleteAssignment, getAssignments, getEpisodes, getSettings, subscribe } from '../store/db';
 import { ENV } from '../config';
 import { completedParts } from '../store/progress';
+import type { Assignment } from '../store/types';
 import { C, F, LABEL, R, T } from '../theme';
 
 type Props = {
@@ -21,6 +23,12 @@ type Props = {
 
 // The demo assignment lives in the Demo practice section, not the library list.
 const library = () => getAssignments().filter((a) => a.id !== DEMO_ASSIGNMENT_ID);
+
+const confirmDelete = (a: Assignment) =>
+  Alert.alert('Delete assignment?', `"${a.title}" and its pages will be removed from this iPad. This can't be undone.`, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete', style: 'destructive', onPress: () => deleteAssignment(a.id) },
+  ]);
 
 export function HomeScreen({ onOpen, onNew, onSettings, onOpenIndependent }: Props) {
   const insets = useSafeAreaInsets();
@@ -56,14 +64,19 @@ export function HomeScreen({ onOpen, onNew, onSettings, onOpenIndependent }: Pro
         renderItem={({ item }) => (
           <Pressable
             onPress={() => onOpen(item.id)}
-            onLongPress={() =>
-              Alert.alert('Delete assignment?', `"${item.title}" and its pages will be removed from this iPad.`, [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete', style: 'destructive', onPress: () => deleteAssignment(item.id) },
-              ])
-            }
+            onLongPress={() => confirmDelete(item)}
             style={({ pressed }) => [styles.card, pressed && { opacity: 0.8 }]}
           >
+            {/* visible delete (long press alone was undiscoverable, November 4, 2026) */}
+            <Pressable
+              onPress={() => confirmDelete(item)}
+              hitSlop={10}
+              style={styles.delete}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${item.title}`}
+            >
+              <Icon name="trash" size={18} color={C.sub} />
+            </Pressable>
             <Text style={styles.cardCourse}>{item.course || 'No course'}</Text>
             <Text style={styles.cardTitle}>{item.title}</Text>
             <Progress assignment={item} />
@@ -147,7 +160,8 @@ const styles = StyleSheet.create({
   warn: { margin: 20, marginBottom: 0, padding: 12, borderRadius: R.md, backgroundColor: C.partialSoft },
   warnText: { color: C.partial, fontWeight: '600' },
   empty: { color: C.sub, fontSize: T.lead, textAlign: 'center', marginTop: 60 },
-  card: { backgroundColor: C.card, borderRadius: R.lg, padding: 18, gap: 6, borderWidth: 1, borderColor: C.line },
+  card: { backgroundColor: C.card, borderRadius: R.lg, padding: 18, paddingRight: 52, gap: 6, borderWidth: 1, borderColor: C.line },
+  delete: { position: 'absolute', top: 14, right: 14, padding: 6, borderRadius: R.sm, zIndex: 1 },
   cardCourse: { ...LABEL },
   cardTitle: { fontSize: T.lead + 1, fontWeight: '600', color: C.ink, letterSpacing: -0.2 },
   cardMeta: { fontSize: T.caption, color: C.faint, fontFamily: F.mono },
