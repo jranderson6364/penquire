@@ -107,7 +107,9 @@ export function createCloudStt(deps: CloudSttDeps): CloudStt {
           body: deps.body(uri, scribeFields()),
           signal: controller.signal,
         });
-      } catch {
+      } catch (e) {
+        // the transport's own message (never the key: it is only in a header) says why a "network" failure happened
+        if (why() === 'network') console.warn(`[penquire:voice] stt transport error: ${e instanceof Error ? e.message : String(e)}`);
         return fail(why());
       }
       if (!res.ok) return fail('http_error', res.status);
@@ -251,6 +253,40 @@ export function nativeMultipart(uri: string, fields: Record<string, string>): Bo
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   const name = uri.split('/').pop() || 'turn.wav';
-  form.append('file', { uri, name, type: 'audio/wav' } as unknown as Blob);
+  form.append('file', { uri: fileUri(uri), name, type: 'audio/wav' } as unknown as Blob);
   return form;
+}
+
+/** RN's native multipart reader needs a file:// uri; the recognizer may report a bare path. */
+export function fileUri(uri: string): string {
+  return /^[a-z]+:\/\//i.test(uri) ? uri : `file://${uri.startsWith('/') ? '' : '/'}${uri}`;
+}
+
+/**
+ * fetch over React Native's XMLHttpRequest. On device, the global fetch rejected the `{ uri }` file part at once
+ * (every Scribe upload failed as "network" within 1–9 ms, November 4, 2026); RN's XHR is the transport that reads
+ * file parts natively. Only what transcribe() uses: method, headers, body, signal -> status and a JSON body.
+ */
+export function xhrFetch(url: string, init: { method?: string; headers?: Record<string, string>; body?: BodyInit; signal?: AbortSignal }): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(init.method ?? 'GET', url);
+    for (const [k, v] of Object.entries(init.headers ?? {})) xhr.setRequestHeader(k, v);
+    const onAbort = () => xhr.abort();
+    init.signal?.addEventListener('abort', onAbort);
+    const done = () => init.signal?.removeEventListener('abort', onAbort);
+    xhr.onload = () => {
+      done();
+      resolve(new Response(xhr.responseText, { status: xhr.status }));
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new Error(`xhr error (status ${xhr.status})`));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(new Error('aborted'));
+    };
+    xhr.send(init.body as never);
+  });
 }

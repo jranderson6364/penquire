@@ -10,7 +10,7 @@
  */
 import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { cloudTtsConfig, createCloudTts, expoPlayer } from './cloudTts';
-import { SCRIBE_MODEL, STT_BUDGET_MS, createCloudStt, createRecording, expoSttFiles, finalTranscript, nativeMultipart, recordingSuspect, sttLogLine, type CloudStt, type SttFiles } from './cloudStt';
+import { SCRIBE_MODEL, STT_BUDGET_MS, createCloudStt, createRecording, expoSttFiles, finalTranscript, nativeMultipart, recordingSuspect, sttLogLine, xhrFetch, type CloudStt, type SttFiles } from './cloudStt';
 import { contextualStrings, createRecognizerChoice } from './recognizer';
 import { chooseVoice, createSpeaker, rankVoices, sentenceBackend, voiceTier, voiceTuning, type SpeechBackend, type Utterance, type VoiceInfo } from './session';
 
@@ -401,7 +401,7 @@ let cloudSttInst: CloudStt | null | undefined;
 function scribe(): CloudStt | null {
   if (cloudSttInst !== undefined) return cloudSttInst;
   const { apiKey } = cloudTtsConfig();
-  cloudSttInst = apiKey ? createCloudStt({ apiKey, fetch, body: nativeMultipart }) : null;
+  cloudSttInst = apiKey ? createCloudStt({ apiKey, fetch: xhrFetch as unknown as typeof fetch, body: nativeMultipart }) : null;
   console.warn(
     cloudSttInst
       ? `[penquire:voice] stt: ElevenLabs ${SCRIBE_MODEL} for the final transcript (Apple's live transcript is the fallback)`

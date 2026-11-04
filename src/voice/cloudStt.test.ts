@@ -236,3 +236,10 @@ test('log lines name each failure cause separately', () => {
   assert.equal(sttLogLine({ ok: false, reason: 'no_recording', ms: 0 }), '[penquire:voice] stt fell back to Apple: no_recording');
   assert.equal(sttLogLine({ ok: false, reason: 'no_end', ms: 2500 }), '[penquire:voice] stt fell back to Apple: no_end after 2500 ms');
 });
+
+test('the upload names the audio by a file:// uri, whatever form the recognizer reported', async () => {
+  const { fileUri } = await import('./cloudStt.ts');
+  assert.equal(fileUri('/var/mobile/Containers/Data/tmp/rec.wav'), 'file:///var/mobile/Containers/Data/tmp/rec.wav');
+  assert.equal(fileUri('file:///var/mobile/tmp/rec.wav'), 'file:///var/mobile/tmp/rec.wav');
+  assert.equal(fileUri('tmp/rec.wav'), 'file:///tmp/rec.wav');
+});

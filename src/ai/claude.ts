@@ -382,7 +382,9 @@ export class ClaudeProvider implements TutorProvider {
     instruction: string,
     kind: UsageKind,
     /** stream, and report the tool's input JSON as it grows (only when a streaming fetch was provided) */
-    onToolJson?: (json: string) => void
+    onToolJson?: (json: string) => void,
+    /** false: never ask again (what streamed was already shown or spoken, so a second answer would repeat it) */
+    mayRetry: () => boolean = () => true
   ): Promise<{ res: ApiResponse; out: T }> {
     const messages = (body.messages as Message[]).map((m, i, all) => {
       if (i !== all.length - 1 || typeof m.content === 'string') return m;
@@ -400,6 +402,7 @@ export class ClaudeProvider implements TutorProvider {
       if (last.stop_reason === 'refusal') throw new Error(`The model declined this request${last.stop_details?.category ? ` (${last.stop_details.category})` : ''}.`);
       const block = last.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
       if (block?.input) return { res: last, out: block.input as T };
+      if (!mayRetry()) break;
     }
     throw new Error(`Model did not return ${tool.name} (stop_reason: ${last?.stop_reason})`);
   }
@@ -561,6 +564,9 @@ Check my work. First verify each line yourself, including steps I did in my head
     const known = new Set((input.markLineIds ?? []).map((id) => id.toUpperCase()));
     if (!(input.image && known.size > 0)) console.warn(`[penquire] reply without marks: image=${!!input.image}, labelled lines=${known.size}`);
     if (input.image && known.size > 0) {
+      // what has streamed to the student (and the voice) so far: once something has, a retry or the prose fallback
+      // would say it all again (device, November 4: "it double said things"), so keep what was said instead
+      let streamed = '';
       try {
         const { out } = await this.callTool<{ message?: unknown; marks?: unknown }>(
           { model: this.opts.checkModel, max_tokens: MAX_TOKENS, ...effortParam(this.opts.checkModel, replyEffort(!!input.spoken)), system: this.system(), messages },
@@ -571,9 +577,10 @@ Check my work. First verify each line yourself, including steps I did in my head
           input.onPartial
             ? (json) => {
                 const m = partialStringField(json, 'message');
-                if (m) input.onPartial!(m.replace(/\bL(\d+)\b/g, 'line $1'));
+                if (m) input.onPartial!((streamed = m.replace(/\bL(\d+)\b/g, 'line $1')));
               }
-            : undefined
+            : undefined,
+          () => !streamed
         );
         // the student cannot see gutter labels; reading order makes "line 3" mean something to them
         const message = cleanReply(typeof out.message === 'string' ? out.message : '').text.replace(/\bL(\d+)\b/g, 'line $1');
@@ -581,6 +588,12 @@ Check my work. First verify each line yourself, including steps I did in my head
         console.warn(`[penquire] reply with marks: ${known.size} labelled lines, tutor drew ${marks.length}`);
         if (message) return { text: message, marks };
       } catch (e) {
+        // the message streamed but its final JSON did not parse: what was said is the answer, without marks
+        const said = cleanReply(streamed).text;
+        if (said) {
+          console.warn('[penquire] reply kept from the stream (no second answer)', e instanceof Error ? e.message : e);
+          return { text: said, marks: [] };
+        }
         console.warn('reply with marks failed; answering in prose', e);
       }
     }
