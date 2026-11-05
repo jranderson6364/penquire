@@ -46,12 +46,70 @@ const hOverlap = (a: Box, b: Box) => {
 
 type Group = Box & { strokes: number[]; core: Box };
 
-export function groupLines(strokes: StrokeLike[]): Line[] {
-  if (strokes.length === 0) return [];
-
+const charHeight = (strokes: StrokeLike[]) => {
   // Typical character height, ignoring dots and long flat strokes (bars, underlines).
   const charHeights = strokes.filter((s) => s.h > 4 && s.h < s.w * 6).map((s) => s.h);
-  const hMed = Math.max(12, median(charHeights.length ? charHeights : strokes.map((s) => s.h)));
+  return Math.max(12, median(charHeights.length ? charHeights : strokes.map((s) => s.h)));
+};
+
+/**
+ * A sketch (a cliff, a ball's path, a force diagram) is ONE object, not a dozen "lines". Seeds are strokes far bigger
+ * than handwriting in both directions (an outline, an arc); thin tall strokes (integral signs, brackets) are not seeds.
+ * Seeds near each other form one figure, and every stroke whose centre sits inside it (labels like "20 m", arrows,
+ * the ball) joins it. The figure box does not grow from what it absorbs, so work written beside it stays separate.
+ * (Device run, November 4, 2026: the cliff sketch came back as 10+ labelled lines.)
+ */
+function splitFigures(strokes: StrokeLike[], hMed: number): { figures: Group[]; rest: StrokeLike[] } {
+  const isSeed = (s: Box) => s.h > hMed * 2.6 && s.w > hMed * 1.5;
+  const near = (a: Box, b: Box, pad: number) =>
+    a.x - pad <= b.x + b.w && b.x - pad <= a.x + a.w && a.y - pad <= b.y + b.h && b.y - pad <= a.y + a.h;
+  const regions: Box[] = [];
+  for (const s of strokes.filter(isSeed)) {
+    let box: Box = s;
+    for (let k = regions.length - 1; k >= 0; k--) {
+      if (near(regions[k], box, hMed * 1.5)) {
+        box = union(box, regions[k]);
+        regions.splice(k, 1);
+      }
+    }
+    regions.push(box);
+  }
+  // a second sweep: two regions that only touch after both grew
+  for (let a = 0; a < regions.length; a++)
+    for (let b = regions.length - 1; b > a; b--)
+      if (near(regions[a], regions[b], hMed * 1.5)) {
+        regions[a] = union(regions[a], regions[b]);
+        regions.splice(b, 1);
+      }
+  if (regions.length === 0) return { figures: [], rest: strokes };
+  const figures: Group[] = regions.map((r) => ({ ...r, strokes: [], core: r }));
+  const rest: StrokeLike[] = [];
+  for (const s of strokes) {
+    const cx = s.x + s.w / 2;
+    const cy = s.y + s.h / 2;
+    const pad = hMed * 0.75;
+    // a long flat stroke just under or over the sketch (the ground, a table top) belongs to it
+    const ground = (g: Group) => s.h < hMed * 0.5 && s.w > hMed * 3 && hOverlap(g.core, s) > s.w * 0.3 && near(g.core, s, hMed * 1.5);
+    const f = isSeed(s)
+      ? figures.find((g) => near(g.core, s, 0))
+      : figures.find((g) => ground(g) || (cx >= g.core.x - pad && cx <= g.core.x + g.core.w + pad && cy >= g.core.y - pad && cy <= g.core.y + g.core.h + pad));
+    if (f) {
+      f.strokes.push(s.i);
+      Object.assign(f, union(f, s));
+    } else rest.push(s);
+  }
+  return { figures: figures.filter((f) => f.strokes.length > 0), rest };
+}
+
+export function groupLines(strokes: StrokeLike[]): Line[] {
+  if (strokes.length === 0) return [];
+  const { figures, rest } = splitFigures(strokes, charHeight(strokes));
+  return order([...figures, ...groupText(rest)], rest.length ? charHeight(rest) : charHeight(strokes));
+}
+
+function groupText(strokes: StrokeLike[]): Group[] {
+  if (strokes.length === 0) return [];
+  const hMed = charHeight(strokes);
   const isFlat = (s: Box) => s.h < hMed * 0.35 && s.w > hMed * 0.8;
   const isTall = (s: Box) => s.h > hMed * 2.6; // integral signs, big brackets, arrows
   const isSmall = (s: Box) => s.h < hMed * 0.6 && s.w < hMed * 0.8; // sub/superscripts, dots, primes
@@ -209,10 +267,11 @@ export function groupLines(strokes: StrokeLike[]): Line[] {
     }
     flush();
   }
-  groups.length = 0;
-  groups.push(...split);
+  return split;
+}
 
-  // Order: top to bottom; within a run at (nearly) the same height, left to right.
+/** Order: top to bottom; within a run at (nearly) the same height, left to right. */
+function order(groups: Group[], hMed: number): Line[] {
   groups.sort((a, b) => a.y - b.y);
   const ordered: Group[] = [];
   for (let k = 0; k < groups.length; ) {

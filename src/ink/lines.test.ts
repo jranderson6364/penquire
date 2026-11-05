@@ -71,6 +71,24 @@ test('a bracket without a partner does not merge unrelated lines', () => {
   assert.equal(groupLines(strokes).length, 2);
 });
 
+test('a sketch (cliff outline, arc, labels inside) is ONE line; equations below and beside it stay separate', () => {
+  i = 0;
+  const sketch = [
+    glyph(40, 60, 60, 160), // cliff outline
+    glyph(70, 30, 200, 90), // the ball's arc, overlapping the cliff
+    glyph(20, 240, 300, 4), // the ground
+    glyph(50, 120), glyph(66, 120), // "20 m" next to the cliff
+    glyph(110, 40, 8, 40), // an up arrow
+    glyph(90, 50, 10, 10), // the ball
+  ];
+  const beside = row(100, 6, 480); // work to the right, far from the sketch
+  const below = [...row(300, 8), ...row(340, 5)];
+  const lines = groupLines([...sketch, ...beside, ...below]);
+  assert.equal(lines.length, 4, JSON.stringify(lines.map((l) => [l.x, l.y, l.w, l.h, l.strokes.length])));
+  const fig = lines.find((l) => l.strokes.includes(0))!;
+  assert.deepEqual([...fig.strokes].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6]);
+});
+
 test('tightly spaced lines (ruled paper) with a subscript between them stay separate', () => {
   i = 0;
   const strokes = [...row(100, 6), glyph(130, 116, 8, 10), ...row(132, 6), ...row(164, 4)];

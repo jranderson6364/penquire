@@ -193,7 +193,12 @@ function CheckCard(p: Props & { check: StoredCheck }) {
           <Text style={styles.question}>{r.question}</Text>
         </View>
       )}
-      {open && (
+      {/* demo: no per-line reasons or part status here (they gave the fix away, November 4, 2026); the marks stay on
+          the page and a tap on one shows its note */}
+      {p.compact && r.lines.some((l) => l.verdict === 'incorrect' || l.verdict === 'partial' || l.verdict === 'unreadable') && (
+        <Text style={styles.meta}>Tap a mark on your page to see more.</Text>
+      )}
+      {open && !p.compact && (
         <>
           {r.parts.length > 0 && (
             <View style={styles.cards}>
