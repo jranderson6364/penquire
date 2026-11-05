@@ -89,6 +89,32 @@ test('a sketch (cliff outline, arc, labels inside) is ONE line; equations below 
   assert.deepEqual([...fig.strokes].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6]);
 });
 
+test('the device cliff: straight-line cliff, dashed path up and down beside it, "v" label, equations to the right', () => {
+  i = 0;
+  const sketch = [
+    glyph(20, 282, 66, 4), // cliff top (flat)
+    glyph(24, 284, 6, 125), // cliff face (very tall)
+    glyph(20, 405, 76, 4), // the ground
+    ...[295, 311, 323, 340, 359, 372, 389, 399].map((y) => glyph(91, y, 4, 9)), // dashes down beside the cliff
+    ...[270, 258, 246, 234].map((y) => glyph(84, y, 4, 9)), // dashes going up from the edge
+    glyph(100, 236, 12, 16), // "v" label by the arrow
+    glyph(96, 228, 4, 40), // up arrow shaft
+  ];
+  const equations = [...row(230, 8, 400), ...row(268, 3, 409)];
+  const heading = row(160, 6, 40);
+  const lines = groupLines([...heading, ...sketch, ...equations]);
+  assert.equal(lines.length, 4, JSON.stringify(lines.map((l) => [l.x, l.y, l.w, l.h, l.strokes.length])));
+  const fig = lines.find((l) => l.strokes.includes(sketch[1].i))!;
+  assert.deepEqual([...fig.strokes].sort((a, b) => a - b), sketch.map((s) => s.i));
+});
+
+test('a 3-row column vector is not mistaken for a sketch', () => {
+  i = 0;
+  const bracket = (x: number) => glyph(x, 95, 8, 100);
+  const strokes = [bracket(70), glyph(88, 100), glyph(88, 130), glyph(88, 160), bracket(112), glyph(140, 128), ...row(300, 5)];
+  assert.equal(groupLines(strokes).length, 2);
+});
+
 test('tightly spaced lines (ruled paper) with a subscript between them stay separate', () => {
   i = 0;
   const strokes = [...row(100, 6), glyph(130, 116, 8, 10), ...row(132, 6), ...row(164, 4)];

@@ -60,7 +60,9 @@ const charHeight = (strokes: StrokeLike[]) => {
  * (Device run, November 4, 2026: the cliff sketch came back as 10+ labelled lines.)
  */
 function splitFigures(strokes: StrokeLike[], hMed: number): { figures: Group[]; rest: StrokeLike[] } {
-  const isSeed = (s: Box) => s.h > hMed * 2.6 && s.w > hMed * 1.5;
+  // an outline or an arc (big both ways), or a very tall straight stroke (a cliff face, an axis): taller than any
+  // bracket around a few rows of maths
+  const isSeed = (s: Box) => (s.h > hMed * 2.6 && s.w > hMed * 1.5) || s.h > hMed * 5;
   const near = (a: Box, b: Box, pad: number) =>
     a.x - pad <= b.x + b.w && b.x - pad <= a.x + a.w && a.y - pad <= b.y + b.h && b.y - pad <= a.y + a.h;
   const regions: Box[] = [];
@@ -83,22 +85,41 @@ function splitFigures(strokes: StrokeLike[], hMed: number): { figures: Group[]; 
       }
   if (regions.length === 0) return { figures: [], rest: strokes };
   const figures: Group[] = regions.map((r) => ({ ...r, strokes: [], core: r }));
-  const rest: StrokeLike[] = [];
-  for (const s of strokes) {
+  const pad = hMed * 0.75;
+  // a dash of a dashed path, a tick, the ball: tiny next to handwriting. A chain of these grows the figure (a dashed
+  // path leaving the cliff), so they extend the core; labels and arrows join without extending it.
+  const isDash = (s: Box) => Math.max(s.w, s.h) < hMed * 0.7;
+  // a long stroke drawn onto the outline (the cliff top, the ground, a path leaving the edge) is part of the drawing
+  const isLong = (s: Box) => Math.max(s.w, s.h) > hMed * 2;
+  const grows = (s: Box) => isSeed(s) || isDash(s) || isLong(s);
+  const joins = (g: Group, s: StrokeLike) => {
+    if (isSeed(s)) return near(g.core, s, 0);
+    if (isDash(s)) return near(g.core, s, hMed);
+    if (isLong(s) && near(g.core, s, hMed * 0.5)) return true;
+    // a long flat stroke just under or over the sketch (the ground, a table top) belongs to it
+    if (s.h < hMed * 0.5 && s.w > hMed * 3 && hOverlap(g.core, s) > s.w * 0.3 && near(g.core, s, hMed * 1.5)) return true;
     const cx = s.x + s.w / 2;
     const cy = s.y + s.h / 2;
-    const pad = hMed * 0.75;
-    // a long flat stroke just under or over the sketch (the ground, a table top) belongs to it
-    const ground = (g: Group) => s.h < hMed * 0.5 && s.w > hMed * 3 && hOverlap(g.core, s) > s.w * 0.3 && near(g.core, s, hMed * 1.5);
-    const f = isSeed(s)
-      ? figures.find((g) => near(g.core, s, 0))
-      : figures.find((g) => ground(g) || (cx >= g.core.x - pad && cx <= g.core.x + g.core.w + pad && cy >= g.core.y - pad && cy <= g.core.y + g.core.h + pad));
-    if (f) {
+    return cx >= g.core.x - pad && cx <= g.core.x + g.core.w + pad && cy >= g.core.y - pad && cy <= g.core.y + g.core.h + pad;
+  };
+  let left = [...strokes];
+  for (let changed = true; changed; ) {
+    changed = false;
+    const next: StrokeLike[] = [];
+    for (const s of left) {
+      const f = figures.find((g) => joins(g, s));
+      if (!f) {
+        next.push(s);
+        continue;
+      }
       f.strokes.push(s.i);
       Object.assign(f, union(f, s));
-    } else rest.push(s);
+      if (grows(s)) f.core = union(f.core, s);
+      changed = true;
+    }
+    left = next;
   }
-  return { figures: figures.filter((f) => f.strokes.length > 0), rest };
+  return { figures: figures.filter((f) => f.strokes.length > 0), rest: left };
 }
 
 export function groupLines(strokes: StrokeLike[]): Line[] {
