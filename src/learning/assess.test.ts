@@ -199,5 +199,11 @@ test('finalMisfits: the last value of t must solve the task setup and not be the
   // a two-stage route with an intermediate time is judged on its last value only
   assert.equal(finalMisfits([line('L1', 't = 1.5 s'), line('L2', '31.25 = 5t^2'), line('L3', 't = 1.5 + 2.5 = 4 s')], rec), false);
   assert.equal(finalMisfits([line('L1', '20 + 15t - 5t^2 = 0')], rec), false, 'no value yet');
+  // the rejected root written last, but thrown out on its line: the final value is still t = 4
+  const solvedThen = (last: string) => [line('L1', '20 + 15t - 5t^2 = 0'), line('L2', 't = 4 s'), line('L3', last)];
+  for (const last of ['t = −1 s (before the throw)', 't = −1 s → reject', 't = −1 s ✗', String.raw`t = -1\,\mathrm{s} \text{ is not possible}`]) {
+    assert.equal(finalMisfits(solvedThen(last), rec), false, last);
+  }
+  assert.equal(finalMisfits(solvedThen('t = −1 s'), rec), true, 'a bare trailing −1 is kept as the answer');
   assert.equal(finalMisfits([line('L1', 't = 3')], undefined), false, 'outside the pack');
 });

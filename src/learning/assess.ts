@@ -81,7 +81,7 @@ export function equationsOf(src: string): WrittenEquation[] {
 const isProse = (src: string) => (src.replace(/\\[A-Za-z]+/g, ' ').match(/[A-Za-z]{2,}/g) ?? []).length >= 3;
 
 /** Words that say a value is being thrown out ("t = -1 is before the throw, reject it"), not given as an answer. */
-const REJECTS = /\b(?:reject\w*|discard\w*|ignor\w*|not|no|never|cannot|can'?t|isn'?t|doesn'?t|impossible|invalid|extraneous|unphysical|physical\w*|negative|positive|before|earlier|past|sense|only|keep\w*)\b|≠|\\neq|✗|✘/i;
+const REJECTS = /\b(?:reject\w*|discard\w*|ignor\w*|not|no|never|cannot|can'?t|isn'?t|doesn'?t|impossible|invalid|extraneous|unphysical|physical\w*|negative|positive|before|earlier|past|sense)\b|≠|\\neq|✗|✘/i;
 
 /** The number a "t = -1" answer key states, as a pattern that finds "-1" / "−1" written on a line (not "-10" or "2-1"). */
 function valuePattern(answer: string): RegExp | null {
@@ -196,7 +196,8 @@ export function finalMisfits(lines: readonly Pick<LineVerdict, 'id' | 'reading' 
   const solved = [...lines]
     .filter((l) => l.verdict !== 'context' && typeof l.reading === 'string')
     .sort((a, b) => lineNo(a.id) - lineNo(b.id))
-    .flatMap((l) => equationsOf(l.reading).filter((w) => solvedVar(w.eq) === answerVar));
+    // a rejected root on a line that throws it out ("t = -1 s (before the throw)") is not the final value, as in assessSubmission
+    .flatMap((l) => equationsOf(l.reading).filter((w) => solvedVar(w.eq) === answerVar && !(REJECTS.test(l.reading) && (given.rejected ?? []).some((r) => checkStep(r, w.eq).kind === 'equivalent'))));
   const last = solved[solved.length - 1];
   if (!last) return false;
   if (checkStep(given.equation, last.eq).kind === 'inconsistent') return true;
