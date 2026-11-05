@@ -131,7 +131,7 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
           {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
         </EpisodeCard>
       ) : (
-        <Button title="Start demo: Distribute and solve" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
+        <Button title="Start demo: A ball off a cliff" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
       )}
       <Text style={styles.sectionLabel}>Assignments</Text>
     </View>
