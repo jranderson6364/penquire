@@ -163,6 +163,29 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const [pageIndex, setPageIndex] = React.useState(0);
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   const [strokeCount, setStrokeCount] = React.useState<number | null>(null);
+  /**
+   * Signatures of the lines on the page now, refreshed shortly after the ink changes. A check's mark whose line is no
+   * longer on the page (edited, rewritten, erased) is hidden at once instead of waiting for the next check
+   * (device run, November 4, 2026: two fixed lines kept their ✗ marks).
+   */
+  const [liveSigs, setLiveSigs] = React.useState<Set<string> | null>(null);
+  React.useEffect(() => {
+    if (strokeCount === null) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const strokes = await canvasRef.current?.getStrokes();
+        if (cancelled || !strokes) return;
+        setLiveSigs(new Set(signatures(groupLines(strokes), strokes).values()));
+      } catch {
+        // keep the last known set; marks fall back to showing as before
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [strokeCount]);
   const [checking, setChecking] = React.useState(false);
   const autoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoRun = React.useRef<() => void>(() => undefined);
@@ -499,7 +522,10 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
   const oldCheck = !!check && modern && check.space !== 'page-v2';
   // Build 6+: margin marks are laid out in page units and scaled with the page (see the overlay below)
   const markK = NATIVE_OVERLAY ? 1 : viewport.scale;
-  const markLines = check && marksUsable ? (modern ? check.lines.map((l) => ({ ...l, ...boxToLayer(l, markK) })) : check.lines) : [];
+  // a line the student has since changed or erased loses its mark (its signature is gone from the page). Plain
+  // computation, not a hook: this runs after the early returns above.
+  const markVerdicts = check ? check.result.lines.filter((v) => !(stale && liveSigs && v.sig && !liveSigs.has(v.sig))) : [];
+  const markLines = check && marksUsable ?(modern ? check.lines.map((l) => ({ ...l, ...boxToLayer(l, markK) })) : check.lines) : [];
 
   // ---- question blocks on the page ---------------------------------------
   const pageBlocks: PageBlock[] = (a?.blocks && a.blocks[pageId]) || [];
@@ -1429,7 +1455,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
             height={PAGE_HEIGHT * markK}
             visible={markVisible}
             lines={markLines}
-            verdicts={check.result.lines}
+            verdicts={markVerdicts}
             parts={check.result.parts}
             stale={stale}
             onAsk={askAbout}
