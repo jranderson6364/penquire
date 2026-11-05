@@ -157,3 +157,70 @@ test('help reply input: independent prompt only, no answer key, no other task, n
   for (const step of task.expected.acceptedSteps) assert.equal(s.includes(step), false);
   for (const other of DEMO_PACK.tasks.filter((t) => t.id !== task.id)) assert.equal(s.includes(other.prompt), false);
 });
+
+// ---- naming the fall and "Test me further" ----------------------------------------------------------------
+
+test('the fall is kept once, from the initial attempt, and never overwritten by later checks', async () => {
+  const { recordFall } = await import('./session.ts');
+  let ep = startEpisode({
+    id: 'e1', assignmentId: 'a1', skillId: DEMO_PACK.skillId, packVersion: DEMO_PACK.version, policy: DEMO_PACK.policy,
+    taskId: DEMO_TASK_IDS.recovery, pageId: 'p1', rehearsal: false, now: T0,
+  });
+  assert.equal(recordFall(ep, [], T0), ep, 'nothing flagged: nothing kept');
+  ep = recordFall(ep, ['15t - 5t^2 = 0', 't = 3'], T0 + 1);
+  assert.deepEqual(ep.fall, { taskId: DEMO_TASK_IDS.recovery, readings: ['15t - 5t^2 = 0', 't = 3'], at: T0 + 1 });
+  assert.equal(recordFall(ep, ['something else'], T0 + 2).fall?.readings[0], '15t - 5t^2 = 0');
+  assert.equal(recordFall(repairEpisode(), ['x = 1'], T0 + 5).fall, undefined, 'not after the repair is verified');
+});
+
+const outcomeEp = (result: Assessment['result']) => {
+  let ep = { ...begun(), fall: { taskId: DEMO_TASK_IDS.recovery, readings: ['15t - \\frac{10}{2}t^2 = 0'], at: T0 } };
+  ep = submitIndependent(ep, snap('s1', T0 + 20), [], T0 + 20);
+  return applyAssessment(ep, independentAttemptId('e1'), assessment('s1', result, T0 + 30));
+};
+
+test('the outcome names the fall only after the assessment, and says whether it came back', async () => {
+  const { outcomeFall } = await import('./independentFlow.ts');
+  let ep = { ...begun(), fall: { taskId: DEMO_TASK_IDS.recovery, readings: ['15t - 5t^2 = 0'], at: T0 } };
+  assert.equal(outcomeFall(ep, [line({})]), undefined, 'not during the attempt');
+  ep = submitIndependent(ep, snap('s1', T0 + 20), [], T0 + 20);
+  assert.equal(outcomeFall(ep, [line({})]), undefined, 'not before the assessment');
+  const done = outcomeEp('pass');
+  const f = outcomeFall(done, [line({ id: 'L1' }), line({ id: 'L2', reading: 't = 3' })])!;
+  assert.match(f.first, /instead of 20 m up/);
+  assert.equal(f.now, 'This time your equation started from 15 m up.');
+});
+
+test('follow-up: a twist after a pass, another of the same kind otherwise; one per outcome, none from a follow-up', async () => {
+  const { followUpChoice } = await import('./independentFlow.ts');
+  const { linkFollowUp, startFollowUp } = await import('./session.ts');
+  assert.equal(followUpChoice(begun()), undefined);
+  assert.deepEqual(followUpChoice(outcomeEp('pass')), { taskId: DEMO_TASK_IDS.twist, title: 'Test me further' });
+  assert.deepEqual(followUpChoice(outcomeEp('needs_practice')), { taskId: DEMO_TASK_IDS.again, title: 'Try another one' });
+
+  const prev = { ...outcomeEp('pass'), reviewDueAt: T0 + 99, reviewTaskId: DEMO_TASK_IDS.review };
+  assert.equal(startFollowUp(begun(), { id: 'f1', taskId: DEMO_TASK_IDS.twist, pageId: 'p3', now: T0 + 40 }), undefined, 'needs an outcome');
+  const f = startFollowUp(prev, { id: 'f1', taskId: DEMO_TASK_IDS.twist, pageId: 'p3', now: T0 + 40 })!;
+  assert.equal(f.phase, 'independent');
+  assert.equal(independentView(f), 'working');
+  assert.deepEqual(Object.keys(f.attempts), ['f1:independent']);
+  assert.equal(f.attempts['f1:independent'].taskId, DEMO_TASK_IDS.twist);
+  assert.equal(f.initialAttemptId, undefined);
+  assert.equal(f.repairAttemptId, undefined);
+  assert.deepEqual(f.assistance, [], 'no help carries over');
+  assert.equal(f.followUpOf, 'e1');
+  assert.deepEqual(f.fall, prev.fall);
+  assert.equal(f.reviewDueAt, T0 + 99, 'the original review, not a new one');
+  assert.equal(followUpChoice({ ...f, phase: 'outcome', outcome: { label: 'passed_independent', at: 1 } }), undefined);
+
+  const linked = linkFollowUp(prev, 'f1', T0 + 41);
+  assert.equal(linked.followUpId, 'f1');
+  assert.equal(startFollowUp(linked, { id: 'f2', taskId: DEMO_TASK_IDS.twist, pageId: 'p4', now: T0 + 42 }), undefined, 'only one');
+  assert.equal(linkFollowUp(linked, 'f2', T0 + 43).followUpId, 'f1');
+
+  // a follow-up pass is an independent pass of its own task; it has no repair row
+  let g = submitIndependent(f, snap('s9', T0 + 50), [], T0 + 50);
+  g = applyAssessment(g, 'f1:independent', assessment('s9', 'pass', T0 + 60));
+  assert.equal(g.outcome?.label, 'passed_independent');
+  assert.equal(outcomeRows(g).repair.verified, false);
+});

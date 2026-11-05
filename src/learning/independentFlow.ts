@@ -1,7 +1,8 @@
 // Pure helpers for the independent-attempt screen (T08). No React, no store: the screen owns side effects.
 import type { ChatTurn, CheckResult, HelpLevel, LineVerdict, PageImage, ReplyInput } from '../ai/types';
 import { outcomeLabels } from './session.ts';
-import { DEMO_PACK, TASK_GIVENS } from './demoPack.ts';
+import { DEMO_PACK, DEMO_TASK_IDS, TASK_GIVENS } from './demoPack.ts';
+import { fallSummary, stripLineId, type FallSummary } from './pitfalls.ts';
 import { replyGuardLines } from './workspaceFlow.ts';
 import type { Attempt, DemoTask, Episode, HelpMove, OutcomeLabel, Snapshot } from './types';
 
@@ -168,4 +169,27 @@ export function helpReplyInput(task: DemoTask, message: string, level: HelpLevel
  */
 export function helpGuardLines(task: DemoTask): NonNullable<ReplyInput['lines']> {
   return replyGuardLines(undefined, TASK_GIVENS[task.id]);
+}
+
+/**
+ * The follow-up an assessed outcome offers: after a pass, a twist on the same idea ("Test me further"); otherwise
+ * another problem of the same kind. None on a follow-up itself, or before the outcome.
+ */
+export function followUpChoice(ep: Episode): { taskId: string; title: string } | undefined {
+  if (ep.phase !== 'outcome' || ep.followUpOf || !ep.outcome) return undefined;
+  return outcomeLabels(ep).includes('passed_independent')
+    ? { taskId: DEMO_TASK_IDS.twist, title: 'Test me further' }
+    : { taskId: DEMO_TASK_IDS.again, title: 'Try another one' };
+}
+
+/**
+ * What tripped the student up first and how it went on the submitted problem, for the outcome card. Only once the
+ * submission is assessed (resultVisible): naming it earlier would be a cue inside the independent attempt.
+ * `findings` are the check's lines on the submitted page; stored confirmed readings are the fallback after a relaunch.
+ */
+export function outcomeFall(ep: Episode, findings?: readonly Pick<LineVerdict, 'reading' | 'verdict'>[]): FallSummary | undefined {
+  const at = attemptOf(ep);
+  if (!at?.assessment || !resultVisible(ep)) return undefined;
+  const readings = findings?.length ? findings.filter((l) => l.verdict !== 'context').map((l) => l.reading) : (at.readings ?? []).map(stripLineId);
+  return fallSummary(ep.fall, at.taskId, readings, at.assessment.result);
 }

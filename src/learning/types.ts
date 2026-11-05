@@ -63,12 +63,21 @@ export type Episode = {
   delayedOutcome?: Assessment;
   /** fixture/rehearsal episodes are labeled everywhere and excluded from evidence */
   rehearsal: boolean;
+  /** what the first check flagged on the initial attempt (readings only), kept so the outcome can name the fall */
+  fall?: Fall;
+  /** a follow-up independent problem opened from this episode's outcome ("Test me further") */
+  followUpId?: string;
+  /** this episode is a follow-up of that one: an independent attempt only, no initial or repair attempt */
+  followUpOf?: string;
   createdAt: number; updatedAt: number;
 };
 
 export type RequestScope = { episodeId: string; attemptId: string; phase: Phase };
 
-export type DemoTaskRole = 'recovery' | 'example' | 'independent' | 'review';
+export type DemoTaskRole = 'recovery' | 'example' | 'independent' | 'review' | 'follow_up';
+
+/** The flagged readings of the first check, with the task they were written for. */
+export type Fall = { taskId: string; readings: string[]; at: number };
 export type DemoTask = {
   id: string; role: DemoTaskRole;
   /** learner-facing statement only */

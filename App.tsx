@@ -46,7 +46,7 @@ export default function App() {
       {route.name === 'new' && <NewAssignmentScreen onCancel={home} onCreated={(id) => setRoute({ name: 'workspace', id })} />}
       {route.name === 'settings' && <SettingsScreen onDone={home} />}
       {route.name === 'workspace' && <WorkspaceScreen key={route.id} assignmentId={route.id} onBack={home} onStartIndependent={toIndependent} />}
-      {route.name === 'independent' && <IndependentScreen key={route.episodeId} episodeId={route.episodeId} onDone={home} />}
+      {route.name === 'independent' && <IndependentScreen key={route.episodeId} episodeId={route.episodeId} onDone={home} onOpenEpisode={toIndependent} />}
     </SafeAreaProvider>
   );
 }

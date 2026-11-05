@@ -16,16 +16,16 @@ import { independentCheckInput } from '../learning/context';
 import { DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
 import { createGate } from '../learning/gate';
 import {
-  canSubmit, changedSinceSubmission, editInvalidates, helpGuardLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
+  canSubmit, changedSinceSubmission, editInvalidates, followUpChoice, helpGuardLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
   withConfirmedReadings,
 } from '../learning/independentFlow';
 import {
-  applyAssessment, beginIndependent, clampMove, exitIndependentForHelp, invalidateOnEdit, recordAssistance, scheduleReview, submitIndependent,
+  applyAssessment, beginIndependent, clampMove, exitIndependentForHelp, invalidateOnEdit, linkFollowUp, recordAssistance, scheduleReview, startFollowUp, submitIndependent,
 } from '../learning/session';
 import { takeSnapshot } from '../learning/snapshot';
 import type { Episode } from '../learning/types';
 import { PAGE_HEIGHT, PAGE_WIDTH } from '../page';
-import { getEpisode, getSettings, newId, readPage, recordUsage, updateEpisode, writePage } from '../store/db';
+import { getEpisode, getSettings, newId, readPage, recordUsage, saveEpisode, updateEpisode, writePage } from '../store/db';
 import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveGuard';
 import { normalizeToolState, toNativeSpec, toggleEraser, type ToolKind, type ToolState } from '../tools';
 import { C, LABEL, PALETTE, R, T } from '../theme';
@@ -36,7 +36,7 @@ import { stopAllVoice } from '../voice/engine';
  * workspace's chat, marks, check state or voice is mounted here. Nothing calls the provider before Submit, except an
  * explicit, confirmed exit for help (which makes the attempt supported practice).
  */
-type Props = { episodeId: string; onDone: () => void };
+type Props = { episodeId: string; onDone: () => void; onOpenEpisode?: (episodeId: string) => void };
 
 const COULDNT_ASSESS = "Couldn't assess right now. Your work is saved.";
 const HELP_CONFIRM = "Getting help turns this into supported practice. That's fine. It just won't count as an independent attempt.";
@@ -48,7 +48,7 @@ const provider = () => {
   return getProvider({ apiKey: s.apiKey, checkModel: s.checkModel, parseModel: s.parseModel, onUsage: recordUsage });
 };
 
-export function IndependentScreen({ episodeId, onDone }: Props) {
+export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const settings = getSettings();
@@ -252,7 +252,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
     const snapshot = at?.snapshot;
     if (!cur || !at || !snapshot || cur.phase !== 'independent_submitted') return;
     const s = gate.stamp();
-    const task = demoTask(DEMO_TASK_IDS.independent);
+    const task = demoTask(at.taskId);
     let check: CheckResult;
     try {
       // After a relaunch there is no cached image: export the live page again only if it is provably the submitted ink.
@@ -368,7 +368,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
         const at = attemptOf(cur);
         if (!cur || !at?.snapshot || cur.phase !== 'independent_submitted' || at.snapshot.id !== c.snapshotId) return;
         const snapId = at.snapshot.id;
-        const task = demoTask(DEMO_TASK_IDS.independent);
+        const task = demoTask(at.taskId);
         setFindings(c.check.lines);
         const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, c.check, snapId, Date.now(), at.snapshot!.lines.map((l) => l.id))));
         if (next?.phase === 'outcome') commit((x) => scheduleReview(x, DEMO_TASK_IDS.review, Date.now()));
@@ -425,6 +425,26 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
     }
   };
 
+  /** "Test me further" / "Try another one": a new episode with one independent attempt, on its own page. */
+  const openFollowUp = async () => {
+    const cur = epRef.current;
+    if (!cur || !onOpenEpisode) return;
+    try {
+      await savePage();
+    } catch (e) {
+      console.warn('save failed', e);
+    }
+    if (cur.followUpId) return onOpenEpisode(cur.followUpId);
+    const choice = followUpChoice(cur);
+    if (!choice) return;
+    const now = Date.now();
+    const next = startFollowUp(cur, { id: newId('e_'), taskId: choice.taskId, pageId: newId('p_'), now });
+    if (!next) return;
+    saveEpisode(next);
+    commit((x) => linkFollowUp(x, next.id, now));
+    onOpenEpisode(next.id);
+  };
+
   const leave = async () => {
     let ok = false;
     try {
@@ -466,6 +486,8 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
   }
 
   const prompt = learnerText(attempt.taskId);
+  // an outcome that already opened its follow-up goes back to it; otherwise it offers one
+  const followUp = ep.followUpId ? { title: 'Open the next problem' } : followUpChoice(ep);
   const showResult = resultVisible(ep);
   const changed = changedSinceSubmission(ep);
   const submitOk = canSubmit({ phase: ep.phase, busy, strokeCount, loaded });
@@ -568,7 +590,8 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
           {showResult && (
             <>
               <OutcomeCard ep={ep} findings={findings} />
-              <Button title="Done" kind="primary" onPress={() => void leave()} />
+              {followUp && onOpenEpisode && <Button title={followUp.title} kind="primary" onPress={() => void openFollowUp()} />}
+              <Button title="Done" kind={followUp && onOpenEpisode ? 'ghost' : 'primary'} onPress={() => void leave()} />
             </>
           )}
 

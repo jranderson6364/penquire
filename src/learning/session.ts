@@ -4,6 +4,8 @@ import type { HelpLevel } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Assessment, Assistance, Attempt, Episode, EpisodePolicy, HelpMove, OutcomeLabel, Snapshot } from './types';
 
+const MAX_FALL_LINES = 6;
+
 export const REVIEW_DELAY_MS = 7 * 24 * 3600 * 1000;
 const MAX_TEXT = 2000;
 
@@ -195,4 +197,49 @@ export function outcomeLabels(ep: Episode): OutcomeLabel[] {
   const label = at && independentLabel(ep, at);
   if (label) labels.push(label);
   return labels;
+}
+
+/**
+ * Keeps what the first check flagged on the initial attempt, so the outcome can name the fall after the fresh problem
+ * is submitted. Only the first time, and only before a repair is verified; later checks never overwrite it.
+ */
+export function recordFall(ep: Episode, readings: readonly string[], now: number): Episode {
+  if (ep.fall || readings.length === 0 || (ep.phase !== 'attempt' && ep.phase !== 'repair')) return ep;
+  const initial = ep.initialAttemptId ? ep.attempts[ep.initialAttemptId] : undefined;
+  if (!initial) return ep;
+  return { ...ep, fall: { taskId: initial.taskId, readings: readings.slice(0, MAX_FALL_LINES).map((r) => r.slice(0, 300)), at: now }, updatedAt: now };
+}
+
+/**
+ * "Test me further": a new episode holding one independent attempt on `taskId`, opened from an assessed outcome. It has
+ * no initial or repair attempt and copies no assistance; it keeps the original fall (to say whether it came back) and
+ * the original review date (a follow-up is extra practice, not the delayed review). Undefined when not allowed: the
+ * episode has no outcome yet, is itself a follow-up, or already has one.
+ */
+export function startFollowUp(prev: Episode, a: { id: string; taskId: string; pageId: string; now: number }): Episode | undefined {
+  if (prev.phase !== 'outcome' || prev.followUpOf || prev.followUpId) return undefined;
+  const at: Attempt = {
+    id: `${a.id}:independent`, episodeId: a.id, kind: 'independent', taskId: a.taskId, pageId: a.pageId,
+    startedAt: a.now, assistanceIds: [], allowedResources: [],
+  };
+  return {
+    id: a.id, assignmentId: prev.assignmentId, ...(prev.part !== undefined ? { part: prev.part } : {}),
+    skillId: prev.skillId, packVersion: prev.packVersion, policy: { ...prev.policy },
+    phase: 'independent',
+    attempts: { [at.id]: at },
+    independentAttemptId: at.id,
+    assistance: [],
+    ...(prev.fall ? { fall: { ...prev.fall, readings: [...prev.fall.readings] } } : {}),
+    ...(prev.reviewDueAt !== undefined ? { reviewDueAt: prev.reviewDueAt } : {}),
+    ...(prev.reviewTaskId ? { reviewTaskId: prev.reviewTaskId } : {}),
+    followUpOf: prev.id,
+    rehearsal: prev.rehearsal,
+    createdAt: a.now, updatedAt: a.now,
+  };
+}
+
+/** Links the original episode to its follow-up (once). */
+export function linkFollowUp(prev: Episode, followUpId: string, now: number): Episode {
+  if (prev.followUpId) return prev;
+  return { ...prev, followUpId, updatedAt: now };
 }

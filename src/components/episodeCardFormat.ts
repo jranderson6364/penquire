@@ -69,6 +69,6 @@ export function resumeTarget(ep: Pick<Episode, 'independentAttemptId'>): 'indepe
 /** Newest episode of the given assignment, or undefined. */
 export function latestEpisode(episodes: readonly Episode[], assignmentId: string): Episode | undefined {
   let best: Episode | undefined;
-  for (const e of episodes) if (e.assignmentId === assignmentId && (!best || e.createdAt > best.createdAt)) best = e;
+  for (const e of episodes) if (e.assignmentId === assignmentId && !e.followUpOf && (!best || e.createdAt > best.createdAt)) best = e;
   return best;
 }

@@ -48,7 +48,7 @@ import { DeniedNotice, PracticeStatus, RepairCard } from '../components/Learning
 import { FloatingToolbar, useToolbarDock } from '../components/FloatingToolbar';
 import { MenuItem, MenuSection } from '../components/MenuPopover';
 import { pageSlots, pickNotice, type NoticeKind } from '../ui/toolbarDock';
-import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
+import { clampMove, markRepairVerified, recordAssistance, recordFall, repairEvidence } from '../learning/session';
 import { MOVE_TITLE, fallbackMove, flagFrom, givenFor, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, workTaskId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
@@ -74,7 +74,7 @@ type Props = {
 /** The newest episode on this assignment, if any. */
 const episodeFor = (assignmentId: string): Episode | undefined =>
   getEpisodes()
-    .filter((e) => e.assignmentId === assignmentId)
+    .filter((e) => e.assignmentId === assignmentId && !e.followUpOf)
     .sort((x, y) => y.updatedAt - x.updatedAt)[0];
 
 const tutorContext = (a: Assignment): TutorContext => ({
@@ -774,7 +774,9 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         assistanceId = newId('h_');
         const hid = assistanceId;
         const next = updateEpisode(e0.id, (e) => {
-          let n = withSnapshot(e, e.initialAttemptId ?? '', initialSnap);
+          // the first flags on the initial attempt, kept so the outcome can name the fall after the fresh problem
+          let n = recordFall(e, result.lines.filter((v) => v.verdict === 'incorrect' || v.verdict === 'partial').map((v) => v.reading), now);
+          n = withSnapshot(n, n.initialAttemptId ?? '', initialSnap);
           n = recordAssistance(n, { attemptId: workAttemptId(n), move: pivotMove.move, level, channels: ['marks', 'text'], revealed, text: result.feedback, at: now }, hid);
           if (ev?.verified) n = withSnapshot(markRepairVerified(n, now), n.repairAttemptId ?? '', repairSnap);
           return n;

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { LineVerdict } from '../ai/types';
-import { outcomeRows, reviewDateText } from '../learning/independentFlow';
+import { outcomeFall, outcomeRows, reviewDateText } from '../learning/independentFlow';
 import type { Episode } from '../learning/types';
 import { C, LABEL, R, T, VERDICT_STYLE } from '../theme';
 
@@ -20,6 +20,8 @@ export function OutcomeCard({ ep, findings }: Props) {
   const rows = outcomeRows(ep);
   const tone = rows.fresh.label === 'passed_independent' ? C.valid : rows.fresh.label === 'needs_practice' ? C.partial : C.unknown;
   const shown = (findings ?? []).filter((l) => l.verdict !== 'context');
+  const fall = outcomeFall(ep, findings);
+  const followUp = !!ep.followUpOf;
 
   return (
     <View style={styles.card} accessibilityLabel="Outcome">
@@ -29,13 +31,15 @@ export function OutcomeCard({ ep, findings }: Props) {
         </View>
       )}
 
-      <View style={styles.row}>
-        <Text style={styles.label}>Supported repair</Text>
-        <Text style={[styles.value, { color: rows.repair.verified ? C.ink : C.sub }]}>{rows.repair.text}</Text>
-      </View>
+      {!followUp && (
+        <View style={styles.row}>
+          <Text style={styles.label}>Supported repair</Text>
+          <Text style={[styles.value, { color: rows.repair.verified ? C.ink : C.sub }]}>{rows.repair.text}</Text>
+        </View>
+      )}
 
-      <View style={[styles.row, styles.divider]}>
-        <Text style={styles.label}>Fresh problem</Text>
+      <View style={[styles.row, !followUp && styles.divider]}>
+        <Text style={styles.label}>{followUp ? 'Follow-up problem' : 'Fresh problem'}</Text>
         <Text style={[styles.value, { color: tone }]}>{rows.fresh.text}</Text>
         {rows.fresh.reasons.map((r, i) => (
           <Text key={i} style={styles.reason}>
@@ -43,6 +47,14 @@ export function OutcomeCard({ ep, findings }: Props) {
           </Text>
         ))}
       </View>
+
+      {fall && (
+        <View style={[styles.row, styles.divider]}>
+          <Text style={styles.label}>What tripped you up</Text>
+          <Text style={styles.fallText}>{fall.first}</Text>
+          {!!fall.now && <Text style={styles.fallText}>{fall.now}</Text>}
+        </View>
+      )}
 
       {shown.length > 0 && (
         <View style={[styles.row, styles.divider]}>
@@ -82,6 +94,7 @@ const styles = StyleSheet.create({
   label: LABEL,
   value: { fontSize: T.lead, fontWeight: '700', color: C.ink },
   reason: { fontSize: T.body, color: C.sub, lineHeight: 21 },
+  fallText: { fontSize: T.body, color: C.ink, lineHeight: 21 },
   finding: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   symbol: { fontSize: T.body, fontWeight: '800', width: 16 },
   reading: { fontSize: T.body, color: C.ink },

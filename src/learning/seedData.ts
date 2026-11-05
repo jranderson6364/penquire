@@ -79,7 +79,7 @@ export function ensureDemoIn(
     a = buildDemoAssignment(c, newId('p_'), now);
     store.saveAssignment(a);
   }
-  const existing = store.getEpisodes().filter((e) => e.assignmentId === DEMO_ASSIGNMENT_ID).sort((x, y) => y.createdAt - x.createdAt)[0];
+  const existing = store.getEpisodes().filter((e) => e.assignmentId === DEMO_ASSIGNMENT_ID && !e.followUpOf).sort((x, y) => y.createdAt - x.createdAt)[0];
   if (existing) return { assignmentId: a.id, episodeId: existing.id };
   const ep = makeEpisode(c, { id: newId('e_'), pageId: a.pageIds[0], now });
   store.saveEpisode(ep);

@@ -11,6 +11,10 @@ export const DEMO_TASK_IDS = {
   example: 'proj-cliff-example',
   independent: 'proj-cliff-independent',
   review: 'proj-cliff-review',
+  /** "Test me further" after a pass: the same idea with a twist (thrown downward, so the starting velocity is negative) */
+  twist: 'proj-cliff-twist',
+  /** "Try another one" after anything but a pass: another problem of the same kind */
+  again: 'proj-cliff-again',
 } as const;
 
 /**
@@ -29,6 +33,8 @@ export const TASK_GIVENS: Record<string, TaskGiven> = {
   [DEMO_TASK_IDS.example]: { equation: '10 + 5t - 5t^2 = 0', stated: false, forms: ['y = 10 + 5t - 5t^2'], rejected: ['t = -1'] },
   [DEMO_TASK_IDS.independent]: { equation: '15 + 10t - 5t^2 = 0', stated: false, forms: ['y = 15 + 10t - 5t^2'], rejected: ['t = -1'] },
   [DEMO_TASK_IDS.review]: { equation: '25 + 20t - 5t^2 = 0', stated: false, forms: ['y = 25 + 20t - 5t^2'], rejected: ['t = -1'] },
+  [DEMO_TASK_IDS.twist]: { equation: '30 - 5t - 5t^2 = 0', stated: false, forms: ['y = 30 - 5t - 5t^2'], rejected: ['t = -3'] },
+  [DEMO_TASK_IDS.again]: { equation: '30 + 5t - 5t^2 = 0', stated: false, forms: ['y = 30 + 5t - 5t^2'], rejected: ['t = -2'] },
 };
 
 /** Each task's model equation, for step checks. */
@@ -126,6 +132,53 @@ const tasks: DemoTask[] = [
   },
 ];
 
+/**
+ * Follow-up independent problems, opened only from an outcome card ("Test me further" / "Try another one"). Kept out of
+ * DEMO_PACK.tasks: their rejected root is not the pack's shared −1, and the twist is thrown downward.
+ */
+export const FOLLOW_UP_TASKS: DemoTask[] = [
+  {
+    id: DEMO_TASK_IDS.twist,
+    role: 'follow_up',
+    prompt:
+      'A stone is thrown straight down at 5 m/s from the top of a cliff 30 m above the ground. Taking g = 10 m/s², how long until it hits the ground? Show your working and say which solution you keep, and why.',
+    asksFor: ['the time until the stone hits the ground', 'working that gets there', 'which solution is kept, and why'],
+    asksForExplanation: true,
+    expected: {
+      finalAnswer: 't = 2 s',
+      acceptedSteps: ['30 - 5t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 30 m up, moving down at the start, with gravity pulling down) set equal to zero',
+      keyIdea: 'Height above the ground with up positive: +30 m, −5 m/s because it is thrown down, −5t²; t² + t − 6 = 0 gives 2 or −3, and −3 is before the throw.',
+      rubric: [
+        'The 30 m starting height is included and, with up positive, the starting velocity is −5 m/s (thrown down) and the t² term is −5t².',
+        'The quadratic is solved correctly, by factoring or by the quadratic formula.',
+        'The final answer is t = 2 s and the negative root is rejected with a reason.',
+        'A sketch, if drawn, is supporting context, not graded work.',
+      ],
+    },
+  },
+  {
+    id: DEMO_TASK_IDS.again,
+    role: 'follow_up',
+    prompt:
+      'A ball is thrown straight up at 5 m/s from a tower 30 m above the ground. Taking g = 10 m/s², how long until it hits the ground? Show your working and say which solution you keep, and why.',
+    asksFor: ['the time until the ball hits the ground', 'working that gets there', 'which solution is kept, and why'],
+    asksForExplanation: true,
+    expected: {
+      finalAnswer: 't = 3 s',
+      acceptedSteps: ['30 + 5t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 30 m up, with gravity pulling down) set equal to zero',
+      keyIdea: 'Height above the ground with up positive: +30 m, +5 m/s, −5t²; t² − t − 6 = 0 gives 3 or −2, and −2 is before the throw.',
+      rubric: [
+        'The 30 m starting height is included and, with up positive, the t² term is −5t².',
+        'The quadratic is solved correctly, by factoring or by the quadratic formula.',
+        'The final answer is t = 3 s and the negative root is rejected with a reason.',
+        'A sketch, if drawn, is supporting context, not graded work.',
+      ],
+    },
+  },
+];
+
 /** tasks, worked example, independent item, review item, policy, version */
 export const DEMO_PACK: DemoPack = {
   version: 'projectile-cliff-v1',
@@ -136,7 +189,7 @@ export const DEMO_PACK: DemoPack = {
 };
 
 export function demoTask(taskId: string): DemoTask {
-  const t = DEMO_PACK.tasks.find((x) => x.id === taskId);
+  const t = DEMO_PACK.tasks.find((x) => x.id === taskId) ?? FOLLOW_UP_TASKS.find((x) => x.id === taskId);
   if (!t) throw new Error(`unknown demo task: ${taskId}`);
   return t;
 }
