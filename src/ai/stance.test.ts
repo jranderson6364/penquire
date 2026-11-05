@@ -26,5 +26,10 @@ test('a drawing is context, never graded or unreadable, and never holds back com
 test('"just tell me the answer" gets a short reason and a pointer, never the answer', () => {
   assert.match(TUTOR_RULES, /"Just tell me the answer": never state it/);
   assert.match(TUTOR_RULES, /one-clause reason/);
-  assert.match(TUTOR_RULES, /precise pointer/);
+  assert.match(TUTOR_RULES, /circled spot where their work goes wrong and a question about what it means/);
+});
+
+test('ask before you tell: the first move on an issue is a question about what the piece means, not the verdict', () => {
+  assert.match(TUTOR_RULES, /ASK BEFORE YOU TELL/);
+  assert.match(TUTOR_RULES, /never the diagnosis/);
 });

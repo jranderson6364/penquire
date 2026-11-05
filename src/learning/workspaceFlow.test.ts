@@ -199,6 +199,13 @@ test('otherwise the verdict points at the earliest open line by what it says, ne
   const t = doneVerdict(done([vd('L2', 'incorrect', 't = 3 s'), vd('L1', 'incorrect', '15t - 5t^2 = 0')], [{ status: 'in_progress' }], ['starting height']));
   assert.equal(t, 'Not yet. Take another look at the line with 15t - 5t^2 = 0.');
   assert.doesNotMatch(t!, /\bL\d|line \d/);
+  // the check's guiding question is said too, unless it names a line number
+  const withQ = (question: string) => {
+    const o = done([vd('L1', 'incorrect', '15t - 5t^2 = 0')], [{ status: 'in_progress' }]);
+    return doneVerdict({ ...o, result: { ...o.result, question } } as typeof o);
+  };
+  assert.equal(withQ('What does the 0 on the right say about where the ball is?'), 'Not yet. Take another look at the line with 15t - 5t^2 = 0. What does the 0 on the right say about where the ball is?');
+  assert.equal(withQ('Look again at L3: what does the 0 mean?'), 'Not yet. Take another look at the line with 15t - 5t^2 = 0.');
   assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10'), vd('L2', 'unreadable')]))!, /couldn't read/);
   // correct so far but not finished, or a part not complete: not done
   assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10')], [{ status: 'in_progress' }]))!, /isn't finished/);

@@ -193,7 +193,7 @@ export type CheckOutcome =
   | { kind: 'dropped' }
   | { kind: 'error' };
 
-type CheckVerdicts = Pick<CheckResult, 'lines' | 'parts' | 'stillOpen'>;
+type CheckVerdicts = Pick<CheckResult, 'lines' | 'parts' | 'stillOpen'> & { question?: string };
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
 
@@ -228,7 +228,13 @@ export function doneVerdict(o: CheckOutcome, repairVerified = false, taskId?: st
   if (checkSaysDone(r)) return repairVerified ? "That's correct. You're done with this one. When you're ready, tap Try a fresh problem." : "That's correct. You're done with this one.";
   const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
   const flagged = ordered.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
-  if (flagged) return flagged.reading.trim() ? `Not yet. Take another look at the line with ${flagged.reading.trim()}.` : 'Not yet. Take another look at the marked line.';
+  if (flagged) {
+    const where = flagged.reading.trim() ? `Not yet. Take another look at the line with ${flagged.reading.trim()}.` : 'Not yet. Take another look at the marked line.';
+    // the check's own guiding question ("what does the 0 mean for the ball?"), when it can be said aloud as written:
+    // no line numbers (the student can't see them) and no LaTeX
+    const q = (r.question ?? '').trim();
+    return q && q.endsWith('?') && !/\bL\d|line \d|\\|\$/.test(q) && q.length <= 160 ? `${where} ${q}` : where;
+  }
   if (ordered.some((l) => l.verdict === 'unreadable')) return "I couldn't read all of it. Could you rewrite the marked line more clearly?";
   return "What you have so far is right, but it isn't finished yet.";
 }
