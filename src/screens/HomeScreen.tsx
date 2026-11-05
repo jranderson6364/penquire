@@ -6,7 +6,7 @@ import { Button } from '../components/Button';
 import { EpisodeCard } from '../components/EpisodeCard';
 import { Icon } from '../components/Icon';
 import { latestEpisode, resumeTarget } from '../components/episodeCardFormat';
-import { DEMO_ASSIGNMENT_ID, ensureDemo, resetDemo } from '../learning/seed';
+import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { isDemoAssignmentId } from '../learning/seedData';
 import { deleteAssignment, getAssignments, getEpisodes, getSettings, subscribe } from '../store/db';
 import { ENV } from '../config';
@@ -93,7 +93,7 @@ export function HomeScreen({ onOpen, onNew, onSettings, onOpenIndependent }: Pro
 }
 
 /**
- * Start, resume or reset the demo. Home is only mounted while no workspace/independent screen is open (App.tsx routes
+ * Start or resume the demo (Reset lives in Settings). Home is only mounted while no workspace/independent screen is open (App.tsx routes
  * one screen at a time), so reset never deletes a page that an open screen could autosave over.
  */
 function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onOpenIndependent'>) {
@@ -113,11 +113,6 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
     if (independent) onOpenIndependent!(episode.id);
     else onOpen(episode.assignmentId);
   };
-  const reset = () =>
-    Alert.alert('Reset demo?', 'Deletes demo practice only. Your other assignments are untouched.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset demo', style: 'destructive', onPress: () => resetDemo(Date.now()) },
-    ]);
 
   return (
     <View style={styles.demo}>
@@ -126,7 +121,6 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
         <EpisodeCard episode={episode}>
           <View style={styles.demoActions}>
             <Button title={episode.phase === 'outcome' ? 'Open' : 'Resume'} kind="primary" small disabled={blocked} onPress={resume} />
-            <Button title="Reset demo" kind="ghost" small onPress={reset} />
           </View>
           {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
         </EpisodeCard>

@@ -44,9 +44,9 @@ import { marksAfterCheck, marksAfterReply, marksOnCurrentInk } from '../tutor/ma
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
-import { DeniedNotice, PracticeStatus, RepairCard } from '../components/LearningBar';
+import { DeniedNotice, RepairCard } from '../components/LearningBar';
 import { FloatingToolbar, useToolbarDock } from '../components/FloatingToolbar';
-import { MenuItem, MenuSection } from '../components/MenuPopover';
+import { MenuItem } from '../components/MenuPopover';
 import { pageSlots, pickNotice, type NoticeKind } from '../ui/toolbarDock';
 import { clampMove, markRepairVerified, recordAssistance, recordFall, repairEvidence } from '../learning/session';
 import { MOVE_TITLE, fallbackMove, flagFrom, givenFor, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, workTaskId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
@@ -1474,6 +1474,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
             onDispute={dispute}
             repeats={repeats}
             rungName={rungName}
+            minimal={pivot}
             feedbackFor={(lineId) => feedbackFor(evals, checkId, lineId)}
             onRate={rateMark}
             onConfirmReading={confirmLine}
@@ -1551,7 +1552,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         onTogglePanel={() => setPanelOpen((o) => !o)}
         counts={counts}
         stale={stale}
-        info={pivot && ep ? <PracticeStatus phase={ep.phase} assistance={ep.assistance} /> : undefined}
+        minimal={pivot}
         help={
           pivot && ep && working
             ? { items: HELP_MOVES.map((m) => ({ key: m, title: MOVE_TITLE[m] })), disabled: checking || sending, onPick: (k) => void runMove(k as HelpMove) }
@@ -1568,20 +1569,6 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
                       setShowMarks((v) => !v);
                     }}
                   />
-                  <MenuSection title="Help level for typed and spoken questions" />
-                  {([0, 1, 2, 3, 4] as HelpLevel[]).map((l) => (
-                    <MenuItem
-                      key={l}
-                      title={`${l}. ${HELP_LEVELS[l].name}`}
-                      detail={l > a.policyMaxLevel ? 'Not allowed by this policy' : undefined}
-                      locked={l > a.policyMaxLevel}
-                      selected={tutorContext(a).helpLevel === l}
-                      onPress={() => {
-                        close();
-                        setLevel(l);
-                      }}
-                    />
-                  ))}
                 </>
               )
             : undefined
@@ -1649,6 +1636,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
                 onRate={rateMark}
                 onConfirmReading={confirmLine}
                 onInputBlur={() => canvasRef.current?.focus()}
+                minimal={pivot}
               />
             </MarkPopoverCard>
           </FloatingCard>

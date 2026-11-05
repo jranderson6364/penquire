@@ -4,11 +4,11 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { LineVerdict } from '../ai/types';
 import { outcomeFall, outcomeRows, reviewDateText } from '../learning/independentFlow';
 import type { Episode } from '../learning/types';
-import { C, LABEL, R, T, VERDICT_STYLE } from '../theme';
+import { C, LABEL, R, T } from '../theme';
 
 type Props = {
   ep: Episode;
-  /** findings on the submitted snapshot (shown only after submission) */
+  /** the check's lines on the submitted snapshot: used to say whether the fall came back, not listed */
   findings?: LineVerdict[];
 };
 
@@ -19,10 +19,11 @@ type Props = {
 export function OutcomeCard({ ep, findings }: Props) {
   const rows = outcomeRows(ep);
   const tone = rows.fresh.label === 'passed_independent' ? C.valid : rows.fresh.label === 'needs_practice' ? C.partial : C.unknown;
-  const shown = (findings ?? []).filter((l) => l.verdict !== 'context');
   const fall = outcomeFall(ep, findings);
   const followUp = !!ep.followUpOf;
+  const earlier = !followUp && rows.repair.verified ? `Earlier: ${rows.repair.text.charAt(0).toLowerCase()}${rows.repair.text.slice(1)}` : undefined;
 
+  // result first, then what tripped you up, then the earlier repair and the review date as quiet lines
   return (
     <View style={styles.card} accessibilityLabel="Outcome">
       {ep.rehearsal && (
@@ -31,19 +32,12 @@ export function OutcomeCard({ ep, findings }: Props) {
         </View>
       )}
 
-      {!followUp && (
-        <View style={styles.row}>
-          <Text style={styles.label}>Supported repair</Text>
-          <Text style={[styles.value, { color: rows.repair.verified ? C.ink : C.sub }]}>{rows.repair.text}</Text>
-        </View>
-      )}
-
-      <View style={[styles.row, !followUp && styles.divider]}>
+      <View style={styles.row}>
         <Text style={styles.label}>{followUp ? 'Follow-up problem' : 'Fresh problem'}</Text>
-        <Text style={[styles.value, { color: tone }]}>{rows.fresh.text}</Text>
+        <Text style={[styles.result, { color: tone }]}>{rows.fresh.text}</Text>
         {rows.fresh.reasons.map((r, i) => (
           <Text key={i} style={styles.reason}>
-            • {r}
+            {r}
           </Text>
         ))}
       </View>
@@ -56,29 +50,10 @@ export function OutcomeCard({ ep, findings }: Props) {
         </View>
       )}
 
-      {shown.length > 0 && (
+      {(earlier || ep.reviewDueAt !== undefined) && (
         <View style={[styles.row, styles.divider]}>
-          <Text style={styles.label}>What the check read on your submitted page</Text>
-          {shown.map((l) => {
-            const v = l.verdict === 'context' ? undefined : VERDICT_STYLE[l.verdict];
-            return (
-              <View key={l.id} style={styles.finding}>
-                <Text style={[styles.symbol, { color: v?.color ?? C.sub }]}>{v?.symbol ?? '·'}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.reading}>
-                    {l.id}: {l.reading}
-                  </Text>
-                  {!!l.note && <Text style={styles.note}>{l.note}</Text>}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {ep.reviewDueAt !== undefined && (
-        <View style={[styles.row, styles.divider]}>
-          <Text style={styles.value}>Review scheduled for {reviewDateText(ep.reviewDueAt)}</Text>
+          {!!earlier && <Text style={styles.quiet}>{earlier}</Text>}
+          {ep.reviewDueAt !== undefined && <Text style={styles.quiet}>Review scheduled for {reviewDateText(ep.reviewDueAt)}</Text>}
         </View>
       )}
     </View>
@@ -92,11 +67,8 @@ const styles = StyleSheet.create({
   row: { gap: 4 },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: C.line, paddingTop: 12 },
   label: LABEL,
-  value: { fontSize: T.lead, fontWeight: '700', color: C.ink },
+  result: { fontSize: T.title, fontWeight: '700', color: C.ink },
+  quiet: { fontSize: T.body, color: C.sub, lineHeight: 21 },
   reason: { fontSize: T.body, color: C.sub, lineHeight: 21 },
   fallText: { fontSize: T.body, color: C.ink, lineHeight: 21 },
-  finding: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  symbol: { fontSize: T.body, fontWeight: '800', width: 16 },
-  reading: { fontSize: T.body, color: C.ink },
-  note: { fontSize: T.small, color: C.sub },
 });

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ActivityIndicator, Alert, AppState, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PencilCanvas, nativeApiVersion, nativeCanvasAvailable, nativeHasNewFunctions, type PencilCanvasHandle } from '../../modules/pencil-canvas';
@@ -553,9 +553,19 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
 
           {ep.phase === 'independent_submitted' && !confirm && (
             <View style={styles.block}>
-              <Text style={styles.status}>{busy ? 'Checking your submitted work…' : 'Submitted. Not assessed yet.'}</Text>
-              {busy && <ActivityIndicator />}
-              {!busy && <Button title="Retry" kind="primary" onPress={() => void retry()} />}
+              {busy ? (
+                <View style={styles.checkingRow}>
+                  <ActivityIndicator />
+                  <Text style={styles.status}>Checking your work…</Text>
+                </View>
+              ) : (
+                !error && (
+                  <>
+                    <Text style={styles.status}>Submitted.</Text>
+                    <Button title="Check now" kind="primary" onPress={() => void retry()} />
+                  </>
+                )
+              )}
             </View>
           )}
 
@@ -568,8 +578,8 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
 
           {confirm && ep.phase === 'independent_submitted' && (
             <View style={styles.block}>
-              <Text style={LABEL}>Check how we read these lines</Text>
-              <Text style={styles.small}>Correct the text if it doesn't match what you wrote. This is only about the reading, not whether it is right.</Text>
+              <Text style={LABEL}>Did we read this right?</Text>
+              <Text style={styles.small}>Fix anything we misread. This is only about the reading, not whether it is right.</Text>
               {confirm.lines.map((l) => (
                 <View key={l.id} style={{ gap: 4 }}>
                   <Text style={styles.small}>{l.id}</Text>
@@ -582,20 +592,26 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
                   />
                 </View>
               ))}
-              <Button title="That's what I wrote" kind="primary" onPress={() => finishConfirm(true)} />
-              <Button title="Skip (can't be assessed)" kind="ghost" onPress={() => finishConfirm(false)} />
+              <Button title="Yes" kind="primary" onPress={() => finishConfirm(true)} />
+              <TextLink title="Skip (it can't be assessed then)" onPress={() => finishConfirm(false)} />
             </View>
           )}
 
           {showResult && (
             <>
               <OutcomeCard ep={ep} findings={findings} />
-              {followUp && onOpenEpisode && <Button title={followUp.title} kind="primary" onPress={() => void openFollowUp()} />}
-              <Button title="Done" kind={followUp && onOpenEpisode ? 'ghost' : 'primary'} onPress={() => void leave()} />
+              {followUp && onOpenEpisode ? (
+                <>
+                  <Button title={followUp.title} kind="primary" onPress={() => void openFollowUp()} />
+                  <TextLink title="Back to home" onPress={() => void leave()} />
+                </>
+              ) : (
+                <Button title="Back to home" kind="primary" onPress={() => void leave()} />
+              )}
             </>
           )}
 
-          {ep.phase === 'independent' && !supported && <Button title="Get help" kind="ghost" onPress={askLeaveForHelp} />}
+          {ep.phase === 'independent' && !supported && <TextLink title="Stuck? Get help" onPress={askLeaveForHelp} />}
 
           {supported && ep.phase === 'independent' && (
             <View style={styles.block}>
@@ -616,7 +632,19 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
   );
 }
 
+/** A quiet secondary action: text, not a second button. */
+function TextLink({ title, onPress }: { title: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" style={styles.link}>
+      <Text style={styles.linkText}>{title}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  link: { alignSelf: 'center', paddingVertical: 6 },
+  linkText: { color: C.primary, fontSize: T.body, fontWeight: '600' },
+  checkingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   root: { flex: 1, backgroundColor: C.surround },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: C.bg, padding: 24 },
   centerText: { color: C.ink, fontSize: T.lead, textAlign: 'center', maxWidth: 520 },

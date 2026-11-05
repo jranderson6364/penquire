@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../components/Button';
 import { ENV } from '../config';
+import { resetDemo } from '../learning/seed';
 import { getSettings, getUsage, saveSettings } from '../store/db';
 import { formatUSD, monthTotal } from '../store/usageRecords';
 import { feedbackStats } from '../store/evalRecords';
@@ -157,6 +158,21 @@ export function SettingsScreen({ onDone }: { onDone: () => void }) {
       <View style={styles.row}>
         <Text style={styles.label}>Allow finger drawing</Text>
         <Switch value={s.allowFingerDrawing} onValueChange={(v) => set('allowFingerDrawing', v)} />
+      </View>
+
+      <Text style={styles.section}>Demo</Text>
+      <View style={styles.row}>
+        <Text style={styles.label}>Start the demo practice over (other assignments are untouched)</Text>
+        <Button
+          title="Reset demo"
+          small
+          onPress={() =>
+            Alert.alert('Reset demo?', 'Deletes demo practice only. Your other assignments are untouched.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Reset demo', style: 'destructive', onPress: () => resetDemo(Date.now()) },
+            ])
+          }
+        />
       </View>
     </ScrollView>
   );

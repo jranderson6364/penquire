@@ -36,19 +36,8 @@ export function DeniedNotice({ reason, alt, busy, onMove, onDismiss }: { reason:
   );
 }
 
-/**
- * The repair was verified: one compact card with the honest label ("Repaired after …") and the hand-off.
- * "Not now" folds it into a small "Try a fresh problem" pill.
- */
+/** The repair was verified: one compact card with the honest label ("Repaired after …") and the one next step. */
 export function RepairCard({ repairedText, onFresh }: { repairedText: string; onFresh: () => void }) {
-  const [later, setLater] = React.useState(false);
-  if (later) {
-    return (
-      <View style={styles.pillWrap}>
-        <Button small kind="primary" title="Try a fresh problem" onPress={onFresh} />
-      </View>
-    );
-  }
   return (
     <View style={styles.card} accessibilityLiveRegion="polite">
       <View style={{ flexShrink: 1 }}>
@@ -56,7 +45,6 @@ export function RepairCard({ repairedText, onFresh }: { repairedText: string; on
         <Text style={styles.cardSub}>See whether the idea carries over to a new problem</Text>
       </View>
       <Button small kind="primary" title="Try a fresh problem" onPress={onFresh} />
-      <Button small kind="ghost" title="Not now" onPress={() => setLater(true)} />
     </View>
   );
 }

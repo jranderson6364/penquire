@@ -107,7 +107,7 @@ export function repairHelpPhrase(ep: Episode): string | undefined {
 }
 
 const FRESH_TEXT: Record<Exclude<OutcomeLabel, 'repair_verified'>, string> = {
-  passed_independent: 'Passed this independent item',
+  passed_independent: 'Passed',
   needs_practice: 'Needs more practice',
   could_not_assess: 'Could not assess',
   supported_practice: 'Supported practice',

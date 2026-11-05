@@ -50,6 +50,8 @@ type Props = {
   help?: { items: { key: string; title: string }[]; disabled: boolean; onPick: (key: string) => void };
   /** extra rows at the end of the ⋯ menu; call `close` after acting */
   menuExtra?: (close: () => void) => React.ReactNode;
+  /** demo: only back, title, Help, Check and the panel. No pager, save line (unless saving failed), hands-free mic or count dot */
+  minimal?: boolean;
   insetTop: number;
   insetLeft: number;
   insetRight: number;
@@ -81,9 +83,11 @@ export function TopBar(p: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {p.title}
         </Text>
-        <Text style={[styles.save, p.saveStatus === 'blocked' && styles.saveBad]} numberOfLines={1}>
-          {p.saveStatus === 'saved' ? 'Saved' : p.saveStatus === 'dirty' ? 'Saving…' : 'Not saved · tap to retry'}
-        </Text>
+        {(!p.minimal || p.saveStatus === 'blocked') && (
+          <Text style={[styles.save, p.saveStatus === 'blocked' && styles.saveBad]} numberOfLines={1}>
+            {p.saveStatus === 'saved' ? 'Saved' : p.saveStatus === 'dirty' ? 'Saving…' : 'Not saved · tap to retry'}
+          </Text>
+        )}
       </Pressable>
       {!!p.info && (
         <Pressable
@@ -99,6 +103,7 @@ export function TopBar(p: Props) {
           <Icon name="info" size={18} color={C.sub} />
         </Pressable>
       )}
+      {!p.minimal && (
       <View style={styles.pager}>
         <Pressable onPress={p.onPrevPage} disabled={atFirst} hitSlop={6} style={styles.pagerBtn} accessibilityLabel="Previous page">
           <Icon name="chevron-left" size={16} color={atFirst ? C.lineStrong : C.sub} />
@@ -113,11 +118,12 @@ export function TopBar(p: Props) {
           <Icon name="plus" size={16} color={C.sub} />
         </Pressable>
       </View>
+      )}
       {!p.modern && <Text style={styles.oldBuild}>Old app build: install the latest for zoom and the new tools</Text>}
     </View>
   );
 
-  const attention = !!p.counts && (['incorrect', 'partial', 'unreadable'] as const).some((v) => p.counts?.[v]);
+  const attention = !p.minimal && !!p.counts && (['incorrect', 'partial', 'unreadable'] as const).some((v) => p.counts?.[v]);
   const right = (
     <View style={styles.group}>
       {p.help && (
@@ -138,9 +144,9 @@ export function TopBar(p: Props) {
         </Pressable>
       )}
       <TutorButton {...p} />
-      <Pressable onPress={p.onToggleConversation} style={[styles.iconBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
+      {!p.minimal && <Pressable onPress={p.onToggleConversation} style={[styles.iconBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
         <Icon name="mic" size={19} color={p.conversation ? C.onPrimary : C.ink} />
-      </Pressable>
+      </Pressable>}
       <Pressable onPress={p.onTogglePanel} style={[styles.iconBtn, p.panelOpen && styles.on]} accessibilityRole="button" accessibilityLabel={p.panelOpen ? 'Hide the tutor chat' : 'Show the tutor chat'} accessibilityState={{ selected: p.panelOpen }}>
         <Icon name="sidebar" size={20} color={p.panelOpen ? C.primary : C.ink} />
         {attention && (

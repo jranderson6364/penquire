@@ -109,7 +109,7 @@ test('outcome rows: separate repair and fresh-problem rows with honest labels', 
   const sub = submitIndependent(begun(), snap('s1', T0 + 20), [], T0 + 20);
   const pass = outcomeRows(applyAssessment(sub, 'e1:independent', assessment('s1', 'pass', T0 + 30)));
   assert.deepEqual(pass.repair, { verified: true, text: 'Repaired after an explanation' });
-  assert.equal(pass.fresh.text, 'Passed this independent item');
+  assert.equal(pass.fresh.text, 'Passed');
   const np = outcomeRows(applyAssessment(sub, 'e1:independent', assessment('s1', 'needs_practice', T0 + 30)));
   assert.equal(np.fresh.text, 'Needs more practice');
   assert.deepEqual(np.fresh.reasons, ['The final value on L3 is not right yet.']);

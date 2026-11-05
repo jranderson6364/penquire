@@ -47,9 +47,11 @@ type Props = {
   open?: string | null;
   onOpenChange?: (id: string | null) => void;
   popoverOutside?: boolean;
+  /** demo: a pared-down popover (MarkPopover minimal) */
+  minimal?: boolean;
 };
 
-export type MarkPopoverProps = Pick<Props, 'onAsk' | 'onMoreHelp' | 'onDispute' | 'repeats' | 'feedbackFor' | 'onRate' | 'onConfirmReading' | 'onInputBlur'> & {
+export type MarkPopoverProps = Pick<Props, 'onAsk' | 'onMoreHelp' | 'onDispute' | 'repeats' | 'feedbackFor' | 'onRate' | 'onConfirmReading' | 'onInputBlur' | 'minimal'> & {
   v: LineVerdict;
   onClose: () => void;
 };
@@ -157,7 +159,7 @@ export function MarksOverlay(props: Props) {
 }
 
 /** What a mark means and what can be done about it. Used inside the overlay, or in screen space (FloatingCard). */
-export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur }: MarkPopoverProps) {
+export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats, feedbackFor, onRate, onConfirmReading, onInputBlur, minimal }: MarkPopoverProps) {
   const [correcting, setCorrecting] = React.useState<Correction | null>(null);
   const [reading, setReading] = React.useState('');
   const [offOpen, setOffOpen] = React.useState(false);
@@ -176,7 +178,7 @@ export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats,
       </View>
       <Text style={styles.note}>{latexToUnicode(v.note)}</Text>
       {v.verdict !== 'valid' && repeats(v) && (
-        <Text style={styles.repeat}>Still flagged after another check. Help me see it gives a different kind of hint.</Text>
+        <Text style={styles.repeat}>{minimal ? 'Still flagged after another check.' : 'Still flagged after another check. Help me see it gives a different kind of hint.'}</Text>
       )}
       <Evidence v={v} />
 
@@ -200,7 +202,7 @@ export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats,
         <View style={styles.popActions}>
           {(v.verdict === 'incorrect' || v.verdict === 'partial') && (
             <>
-              <Button
+              {!minimal && <Button
                 small
                 kind="primary"
                 title="Help me see it"
@@ -208,7 +210,7 @@ export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats,
                   onMoreHelp(v);
                   onClose();
                 }}
-              />
+              />}
               <Button
                 small
                 title="I think this is right"
@@ -253,7 +255,7 @@ export function MarkPopover({ v, onClose, onAsk, onMoreHelp, onDispute, repeats,
           )}
         </View>
       )}
-      {!offOpen && (
+      {!offOpen && !minimal && (
         <Pressable onPress={() => setOffOpen(true)} hitSlop={8} style={styles.offLink} accessibilityLabel="Something is off with this mark: it is wrong or I was misread">
           <Text style={styles.offLinkText}>{feedbackFor(v.id) ? 'Feedback saved · change' : "Something's off?"}</Text>
         </Pressable>
