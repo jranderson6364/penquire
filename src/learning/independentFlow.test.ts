@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canSubmit, changedSinceSubmission, editInvalidates, helpReplyInput, independentAttemptId, independentView, linesToConfirm,
+  canSubmit, changedSinceSubmission, editInvalidates, helpGuardLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm,
   outcomeRows, repairHelpPhrase, resultVisible, withConfirmedReadings,
 } from './independentFlow.ts';
 import {
@@ -29,7 +29,7 @@ const snap = (id: string, at: number): Snapshot => ({ id, pageFile: `snapshots/$
 const assessment = (snapshotId: string, result: Assessment['result'], at: number): Assessment => ({
   result, reasons: result === 'pass' ? [] : ['The final value on L3 is not right yet.'], source: 'provider+rubric', packVersion: DEMO_PACK.version, snapshotId, at,
 });
-const line = (over: Partial<LineVerdict>): LineVerdict => ({ id: 'L1', reading: '3(2y + 1) = 33', verdict: 'valid', note: '', ...over });
+const line = (over: Partial<LineVerdict>): LineVerdict => ({ id: 'L1', reading: '15 + 10t - 5t^2 = 0', verdict: 'valid', note: '', ...over });
 const check = (lines: LineVerdict[]): CheckResult => ({ lines, parts: [], feedback: '', question: '', fixedSinceLast: [], stillOpen: [], model: 'test' });
 
 test('view: begin only from a repair phase; otherwise unavailable until an attempt exists', () => {
@@ -90,13 +90,13 @@ test('linesToConfirm picks low-confidence, unreadable (even read as blank) and r
 });
 
 test('withConfirmedReadings sets the confirmed text with high confidence and keeps the verdict', () => {
-  const c = check([line({ id: 'L1', readConfidence: 'low', reading: '6y + 3 = 38', verdict: 'valid' }), line({ id: 'L2', verdict: 'unreadable', readConfidence: 'low' })]);
-  const out = withConfirmedReadings(c, [{ id: 'L1', reading: '6y + 3 = 33' }, { id: 'L2', reading: 'y = 5' }]);
-  assert.equal(out.lines[0].reading, '6y + 3 = 33');
+  const c = check([line({ id: 'L1', readConfidence: 'low', reading: 't^2 - 2t - 8 = 0', verdict: 'valid' }), line({ id: 'L2', verdict: 'unreadable', readConfidence: 'low' })]);
+  const out = withConfirmedReadings(c, [{ id: 'L1', reading: 't^2 - 2t - 3 = 0' }, { id: 'L2', reading: 't = 3 s' }]);
+  assert.equal(out.lines[0].reading, 't^2 - 2t - 3 = 0');
   assert.equal(out.lines[0].readConfidence, 'high');
   assert.equal(out.lines[0].verdict, 'valid');
   assert.equal(out.lines[1].verdict, 'unreadable'); // still unassessable: confirmation does not invent a verdict
-  assert.equal(c.lines[0].reading, '6y + 3 = 38'); // input untouched
+  assert.equal(c.lines[0].reading, 't^2 - 2t - 8 = 0'); // input untouched
 });
 
 test('repair help phrase is the strongest help on the repair attempt only', () => {
@@ -146,6 +146,10 @@ test('help reply input: independent prompt only, no answer key, no other task, n
   assert.equal(input.problems[0].text, task.prompt);
   assert.equal('lastCheck' in input, false);
   assert.equal('lines' in input, false);
+  // the guard's lines come separately (the screen adds them): the hidden setup and the sayable root, never the answer
+  const guard = helpGuardLines(task);
+  assert.deepEqual(guard.map((l) => l.role), ['hidden', 'hidden', 'sayable']);
+  assert.ok(guard.every((l) => !l.reading.includes('t = 3')));
   assert.deepEqual(input.history, [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }]);
   const s = JSON.stringify(input);
   assert.equal(s.includes(task.expected.finalAnswer), false);

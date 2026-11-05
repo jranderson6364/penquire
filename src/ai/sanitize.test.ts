@@ -69,3 +69,14 @@ test('read confidence is kept only when recognised; uncertain text is trimmed an
   assert.equal(b.readConfidence, undefined);
   assert.equal(b.uncertain, undefined);
 });
+
+test('a line the model described as a drawing is context, unless it was marked partial or incorrect (T15)', () => {
+  const lines = sanitizeLines([
+    { id: 'L1', reading: '[sketch: cliff 20 m high, ball thrown up at 15 m/s, up positive, g down]', verdict: 'valid', read_confidence: 'low' },
+    { id: 'L2', reading: '[diagram: arrows up and down]', verdict: 'unreadable' },
+    { id: 'L3', reading: '[sketch: axis drawn with down positive]', verdict: 'partial', note: 'disagrees with L4' },
+    { id: 'L4', reading: '[sketch: v = 15 m/s]', verdict: 'valid' }, // an "=" inside: not a pure description
+    { id: 'L5', reading: '20 + 15t - 5t^2 = 0', verdict: 'valid' },
+  ]);
+  assert.deepEqual(lines.map((l) => l.verdict), ['context', 'context', 'partial', 'valid', 'valid']);
+});

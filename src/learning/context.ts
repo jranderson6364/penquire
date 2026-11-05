@@ -9,11 +9,10 @@ const POLICY_TEXT =
 /**
  * No prior history, settled lines or lastCheck. `previous`, `settled`, `confirmed`, `groups` and `focusPart` are
  * left out entirely (not set to empty values). The answer key (`task.expected`) is never sent: `asksFor` is
- * derived from what the prompt asks, and the assessment against the key happens locally (assess.ts).
+ * the task's learner-facing list of what the prompt asks, and the assessment against the key happens locally (assess.ts).
  */
 export function independentCheckInput(task: DemoTask, snap: Snapshot, page: PageImage): CheckInput {
-  const asksFor = ['the value of the unknown, with the working that gets there'];
-  if (task.asksForExplanation) asksFor.push('a written explanation of how the multiplication applies to the parentheses');
+  const asksFor = [...task.asksFor];
   return {
     course: 'Original demo practice',
     assignmentTitle: 'Independent attempt',

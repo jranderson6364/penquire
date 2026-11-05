@@ -108,3 +108,53 @@ test('chat replies are guarded too: leaking sentence removed, clean reply untouc
   // no transcribed lines (no check yet): nothing to compare against, reply passes through
   assert.equal(applyReplyLeakGuard('x = 2.', [], 1), 'x = 2.');
 });
+
+// ---- T15: units, every "=", times without "=", hidden setups and sayable roots ---------------------------------
+
+const cliff: LeakContext = { level: 2, lines: [{ id: 'L1', reading: '20 + 15t - 5t^2 = 0', verdict: 'valid' }] };
+
+test('every "=" in a sentence is checked, not only the first', () => {
+  assert.equal(findLeak('Factor t^2 - 3t - 4 = 0 to get t = 4.', cliff)?.why, 'final-answer');
+  assert.deepEqual(extractMath('So a = b and then c = d.').length, 2);
+});
+
+test('an answer with units, or a time with no "=", is still the answer', () => {
+  for (const s of ['So t = 4 s.', String.raw`It lands at t = 4\,\mathrm{s}.`, 'It hits the ground after 4 seconds.', 'That takes 4 s.', String.raw`It lands at $t = 4 \text{ s}$.`]) {
+    assert.equal(findLeak(s, cliff)?.why, 'final-answer', s);
+  }
+  // other times and the prompt's own numbers are fine
+  for (const s of ['After 1 second, where is the ball?', 'It starts 20 m up at 15 m/s.', 'Use g = 10 m/s^2.']) assert.equal(findLeak(s, cliff), null, s);
+  // no time in the work: a number of seconds is not judged
+  assert.equal(findLeak('That takes 2 seconds.', ctxAt(1)), null);
+});
+
+test('the student\'s own value, written with units or among several, can be said back', () => {
+  const ctx: LeakContext = { level: 1, lines: [...cliff.lines, { id: 'L2', reading: '(t - 4)(t + 1) = 0', verdict: 'valid' }, { id: 'L3', reading: String.raw`t = 4\,\mathrm{s} \text{ or } t = -1\,\mathrm{s}`, verdict: 'partial' }] };
+  for (const s of ['You have t = 4 s and t = -1 s.', 'Your t = 4 is one of them.', 'Which of 4 seconds and -1 seconds fits the throw?']) assert.equal(findLeak(s, ctx), null, s);
+});
+
+test('a numeric identity says nothing about the unknown', () => {
+  assert.equal(findLeak('Check: 10 + 10 - 20 = 0.', { level: 1, lines: [...cliff.lines, { id: 'L2', reading: 't^2 - 3t + 4 = 0', verdict: 'incorrect' }] }), null);
+});
+
+test('a hidden setup is judged against but not quotable; a sayable root is never a leak', () => {
+  const hidden: LeakContext = { level: 2, lines: [{ id: 'g', reading: '20 + 15t - 5t^2 = 0', verdict: 'valid', role: 'hidden' }, { id: 'r', reading: 't = -1', verdict: 'valid', role: 'sayable' }] };
+  assert.equal(findLeak('Set 20 + 15t - 5t^2 = 0.', hidden)?.why, 'setup');
+  assert.equal(findLeak('So t^2 - 3t - 4 = 0.', hidden)?.why, 'setup');
+  assert.equal(findLeak('It lands at t = 4 s.', hidden)?.why, 'final-answer');
+  assert.equal(findLeak('What does t = -1 s mean here?', hidden), null);
+  assert.equal(findLeak('What does -1 = t mean?', hidden), null);
+  // level 4 may give one step, the setup included, but never the final answer
+  assert.equal(findLeak('Set 20 + 15t - 5t^2 = 0.', { ...hidden, level: 4 }), null);
+  assert.equal(findLeak('So t = 4.', { ...hidden, level: 4 })?.why, 'final-answer');
+  // the student wrote an equivalent line: talking about it is fine
+  const written: LeakContext = { ...hidden, lines: [...hidden.lines, { id: 'L1', reading: '5t^2 - 15t - 20 = 0', verdict: 'valid' }] };
+  assert.equal(findLeak('Dividing by 5 gives t^2 - 3t - 4 = 0.', written), null);
+});
+
+test('the reply fallback names only the student\'s own lines', () => {
+  const lines = [{ id: 'the task setup', reading: '20 + 15t - 5t^2 = 0', verdict: 'valid', role: 'hidden' as const }, { id: 'L1', reading: '20 + 15t + 5t^2 = 0', verdict: 'incorrect' }];
+  const out = applyReplyLeakGuard('t = 4.', lines, 1);
+  assert.match(out, /line L1/);
+  assert.doesNotMatch(out, /task setup/);
+});

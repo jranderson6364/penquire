@@ -49,7 +49,7 @@ import { FloatingToolbar, useToolbarDock } from '../components/FloatingToolbar';
 import { MenuItem, MenuSection } from '../components/MenuPopover';
 import { pageSlots, pickNotice, type NoticeKind } from '../ui/toolbarDock';
 import { clampMove, markRepairVerified, recordAssistance, repairEvidence } from '../learning/session';
-import { MOVE_TITLE, fallbackMove, flagFrom, givenEquation, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
+import { MOVE_TITLE, fallbackMove, flagFrom, givenFor, levelMove, needsInitialSnap, pivotPolicy, repairedAfter, replacementValid, replyGuardLines, withSnapshot, workAttemptId, workTaskId, CHECKING_LINE, doneVerdict, isDoneQuestion, type CheckOutcome, type Flag } from '../learning/workspaceFlow';
 import { createGate, guardPartial } from '../learning/gate';
 import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
 import { takeSnapshot } from '../learning/snapshot';
@@ -679,7 +679,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
       const fresh = checked.value;
       const mergedLines = mergeVerdicts(current, plan, fresh.lines);
       // Re-run the guards on the whole merged page: the provider's guards only saw the freshly graded lines (src/check/finalize.ts).
-      const result = guardMerged({ ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) }, level);
+      // a demo task's setup goes in too, so feedback stating the answer next to a wrong setup is withheld (src/learning/workspaceFlow.ts)
+      const result = guardMerged({ ...fresh, lines: mergedLines, parts: mergeParts(fresh.parts, prev?.result.parts, plan, mergedLines) }, level, replyGuardLines(undefined, e0 ? givenFor(e0) : undefined));
       if (!toolIsPixelEraser) pixelErased.current.delete(pageId);
       try {
         saveCheckImage(pageId, image.base64);
@@ -828,7 +829,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         ...tutorContext(ax),
         helpLevel: level,
         // the guard keeps judging against the check's lines even when they are out of date (no lines: no guard)
-        lines: replyGuardLines(check?.result.lines, e0 ? givenEquation(e0) : undefined, checkStale),
+        lines: replyGuardLines(check?.result.lines, e0 ? givenFor(e0) : undefined, checkStale),
         history: ax.chat,
         message,
         image: image ? { base64: image.base64, mediaType: 'image/png' } : undefined,
@@ -1268,7 +1269,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     if (!outcome) return null; // the policy refused a check: the tutor answers instead
     // a verified repair now shows the Try a fresh problem card: name it, so "done" has a next step
     const verified = getEpisode(epRef.current.id)?.phase === 'repair_verified';
-    const verdict = gate.isCurrent(stamp) ? doneVerdict(outcome, verified) : undefined;
+    const verdict = gate.isCurrent(stamp) ? doneVerdict(outcome, verified, workTaskId(epRef.current)) : undefined;
     if (verdict) updateAssignment(assignmentId, (x) => ({ ...x, chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: verdict }] }));
     return { verdict, outcome };
   };

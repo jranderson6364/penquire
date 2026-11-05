@@ -1,96 +1,126 @@
 // The one reviewed original demo pack (docs/12-demo-spec.md "One original reviewed pack"). Invented content,
-// not a course assignment. `expected` and `workedSolution` are answer keys: only `learnerText` reaches the learner.
+// not a course assignment. `expected`, `workedSolution` and TASK_GIVENS are answer keys or guard input: only
+// `learnerText` reaches the learner.
+//
+// Vertical projectile motion with g = 10 m/s², so every quadratic factors cleanly. Every task has the extraneous
+// root t = −1 s (each height is the launch speed plus 5): rejecting it is part of the skill.
 import type { DemoPack, DemoTask } from './types';
 
 export const DEMO_TASK_IDS = {
-  recovery: 'alg-dist-recovery',
-  example: 'alg-dist-example',
-  independent: 'alg-dist-independent',
-  review: 'alg-dist-review',
+  recovery: 'proj-cliff-recovery',
+  example: 'proj-cliff-example',
+  independent: 'proj-cliff-independent',
+  review: 'proj-cliff-review',
 } as const;
 
 /**
- * The equation each task starts from, for deterministic step checks (src/learning/assess.ts). It is already in
- * the learner-facing prompt, so it is not an answer key.
+ * What the deterministic checks know about where a task starts (src/learning/assess.ts, workspaceFlow.ts).
+ *
+ * `equation` is the model setup, "height above the ground = 0" with up positive. It is worked out from the numbers in
+ * the prompt but is NOT printed there (`stated: false`): setting it up is where the student can fall (the sign of g,
+ * the starting height), so the guards treat it as hidden, and a tutor restating it is a leak. `forms` are other ways
+ * of writing the same setup. `rejected` are roots of the equation that are not the answer; the tutor may name them
+ * when talking about rejecting them, and stating one as the answer fails the assessment.
  */
-export const TASK_EQUATIONS: Record<string, string> = {
-  [DEMO_TASK_IDS.recovery]: '2(3x - 4) = 10',
-  [DEMO_TASK_IDS.example]: '3(2z - 1) = 21',
-  [DEMO_TASK_IDS.independent]: '3(2y + 1) = 33',
-  [DEMO_TASK_IDS.review]: '5(2w - 3) = 25',
+export type TaskGiven = { equation: string; stated: boolean; forms?: string[]; rejected?: string[] };
+
+export const TASK_GIVENS: Record<string, TaskGiven> = {
+  [DEMO_TASK_IDS.recovery]: { equation: '20 + 15t - 5t^2 = 0', stated: false, forms: ['y = 20 + 15t - 5t^2'], rejected: ['t = -1'] },
+  [DEMO_TASK_IDS.example]: { equation: '10 + 5t - 5t^2 = 0', stated: false, forms: ['y = 10 + 5t - 5t^2'], rejected: ['t = -1'] },
+  [DEMO_TASK_IDS.independent]: { equation: '15 + 10t - 5t^2 = 0', stated: false, forms: ['y = 15 + 10t - 5t^2'], rejected: ['t = -1'] },
+  [DEMO_TASK_IDS.review]: { equation: '25 + 20t - 5t^2 = 0', stated: false, forms: ['y = 25 + 20t - 5t^2'], rejected: ['t = -1'] },
 };
+
+/** Each task's model equation, for step checks. */
+export const TASK_EQUATIONS: Record<string, string> = Object.fromEntries(Object.entries(TASK_GIVENS).map(([id, g]) => [id, g.equation]));
 
 const tasks: DemoTask[] = [
   {
     id: DEMO_TASK_IDS.recovery,
     role: 'recovery',
-    prompt: 'Solve 2(3x − 4) = 10. Show enough working to explain the distribution.',
+    prompt:
+      'A ball is thrown straight up at 15 m/s from the edge of a cliff 20 m above the ground. Taking g = 10 m/s², how long until it hits the ground? Sketch the situation and show your working.',
+    asksFor: ['the time until the ball hits the ground', 'working that gets there'],
     asksForExplanation: false,
     expected: {
-      finalAnswer: 'x = 3',
-      acceptedSteps: ['6x - 8 = 10'],
-      keyIdea: 'Both terms inside the parentheses are multiplied by 2.',
+      finalAnswer: 't = 4 s',
+      acceptedSteps: ['20 + 15t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 20 m up, with gravity pulling down) set equal to zero',
+      keyIdea:
+        'Measure height from the ground with up positive: the ball starts at +20 m with +15 m/s and gravity gives −5t². It lands when the height is 0, and only the root after the throw counts.',
       rubric: [
-        'The distribution step multiplies both 3x and -4 by 2.',
-        'Each later step does the same thing to both sides of the equation.',
-        'The final value of x is stated.',
+        'Height is measured from one origin with a consistent sign convention, and the 20 m starting height is included (15t − 5t² = 0 gives the time back at the cliff edge, not the ground).',
+        'Gravity acts downward: with up positive the t² term is −5t², not +5t².',
+        'The quadratic is solved correctly, by factoring or by the quadratic formula.',
+        'The negative root is rejected because it is a time before the throw; the answer is t = 4 s.',
+        'A sketch of the situation is supporting context, not graded work.',
       ],
     },
   },
   {
     id: DEMO_TASK_IDS.example,
     role: 'example',
-    prompt: 'Worked example: solve 3(2z − 1) = 21.',
+    prompt: 'Worked example: a rock is thrown straight up at 5 m/s from a bridge 10 m above the water. Taking g = 10 m/s², how long until it hits the water?',
+    asksFor: ['the time until the rock hits the water', 'working that gets there'],
     asksForExplanation: false,
     expected: {
-      finalAnswer: 'z = 4',
-      acceptedSteps: ['6z - 3 = 21'],
-      keyIdea: 'Multiplying a sum or difference multiplies every term inside the parentheses.',
-      rubric: [
-        'The distribution step multiplies both 2z and -1 by 3.',
-        'Each later step does the same thing to both sides of the equation.',
-      ],
+      finalAnswer: 't = 2 s',
+      acceptedSteps: ['10 + 5t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 10 m up, with gravity pulling down) set equal to zero',
+      keyIdea: 'Height above the water with up positive: +10 m start, +5 m/s, −5t² from gravity; keep only the root after the throw.',
+      rubric: ['The 10 m starting height is included.', 'With up positive the t² term is −5t².', 'The negative root is rejected.'],
     },
+    // Written so the reply leak guard keeps it whole next to the recovery work (demoPack.test.ts): the other root is
+    // described in words, never as an equation, because every task in the pack shares it.
     workedSolution: [
-      'Start with 3(2z − 1) = 21.',
-      'The 3 multiplies everything inside the parentheses, so it multiplies 2z and it also multiplies −1: 3(2z − 1) = 6z − 3.',
-      'That gives 6z − 3 = 21.',
-      'Add 3 to both sides. Doing the same thing to both sides keeps them equal: 6z = 24.',
-      'Divide both sides by 6: z = 4.',
-      'Check by putting it back in: 3(2·4 − 1) = 3·7 = 21, which matches.',
+      'Sketch: the bridge 10 m above the water, the rock leaving it with an arrow up labelled 5 m/s, an arrow down labelled g, and a height axis with 0 at the water and up as positive.',
+      'Sign convention: up is positive. So the rock starts at +10 m, its starting velocity is +5 m/s, and its acceleration is −10 m/s², because gravity pulls down.',
+      'Height above the water after t seconds: y = 10 + 5t − 5t² (the −5t² is ½ × (−10) × t²).',
+      'It hits the water when its height is zero, so solve 10 + 5t − 5t² = 0.',
+      'Divide both sides by −5 to get t² − t − 2 = 0.',
+      'Factor: (t − 2)(t + 1) = 0. One root is 2 and the other is negative.',
+      'A negative time is before the rock was thrown, so it does not describe this throw. Reject it.',
+      'The rock hits the water 2 seconds after it is thrown.',
+      'Check: 10 + 5·2 − 5·4 = 10 + 10 − 20 = 0, so the height really is zero then.',
     ].join('\n'),
   },
   {
     id: DEMO_TASK_IDS.independent,
     role: 'independent',
-    prompt: 'A length is modeled by 3(2y + 1). Its measured value is 33. Find y and explain how multiplication applies to the parentheses.',
+    prompt:
+      'A ball is thrown straight up at 10 m/s from a balcony 15 m above the ground. Taking g = 10 m/s², how long until it hits the ground? Show your working, and write one sentence saying which solution of your equation answers the question, and why.',
+    asksFor: ['the time until the ball hits the ground', 'working that gets there', 'one sentence saying which solution answers the question, and why'],
     asksForExplanation: true,
     expected: {
-      finalAnswer: 'y = 5',
-      // either distribute first, or divide both sides by 3 first
-      acceptedSteps: ['6y + 3 = 33', '2y + 1 = 11'],
-      keyIdea: 'The 3 multiplies both 2y and 1, or both sides can be divided by 3 first.',
+      finalAnswer: 't = 3 s',
+      acceptedSteps: ['15 + 10t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 15 m up, with gravity pulling down) set equal to zero',
+      keyIdea: 'Height above the ground with up positive: +15 m, +10 m/s, −5t²; t² − 2t − 3 = 0 gives 3 or −1, and −1 is before the throw.',
       rubric: [
-        'Either the distribution step multiplies both 2y and 1 by 3, or both sides are divided by 3 first.',
-        'Each later step does the same thing to both sides of the equation.',
-        'The final value of y is stated.',
-        'The explanation says the multiplication applies to every term inside the parentheses.',
+        'The 15 m starting height is included and, with up positive, the t² term is −5t².',
+        'The quadratic is solved correctly, by factoring or by the quadratic formula.',
+        'The final answer is t = 3 s and the negative root is not given as an answer.',
+        'The sentence says the negative solution is rejected because it is a time before the ball was thrown (or otherwise correctly justifies the choice of root).',
+        'A sketch, if drawn, is supporting context, not graded work.',
       ],
     },
   },
   {
     id: DEMO_TASK_IDS.review,
     role: 'review',
-    prompt: 'Solve 5(2w − 3) = 25 and explain or demonstrate the distribution.',
+    prompt:
+      'A ball is thrown straight up at 20 m/s from a rooftop 25 m above the ground. Taking g = 10 m/s², how long until it hits the ground? Show your working and say which solution you keep, and why.',
+    asksFor: ['the time until the ball hits the ground', 'working that gets there', 'which solution is kept, and why'],
     asksForExplanation: true,
     expected: {
-      finalAnswer: 'w = 4',
-      acceptedSteps: ['10w - 15 = 25'],
-      keyIdea: 'The 5 multiplies both 2w and -3.',
+      finalAnswer: 't = 5 s',
+      acceptedSteps: ['25 + 20t - 5t^2 = 0'],
+      keyStep: 'the height equation (starting 25 m up, with gravity pulling down) set equal to zero',
+      keyIdea: 'Height above the ground with up positive: +25 m, +20 m/s, −5t²; t² − 4t − 5 = 0 gives 5 or −1, and −1 is before the throw.',
       rubric: [
-        'The distribution step multiplies both 2w and -3 by 5.',
-        'Each later step does the same thing to both sides of the equation.',
-        'The final value of w is stated.',
+        'The 25 m starting height is included and, with up positive, the t² term is −5t².',
+        'The quadratic is solved correctly.',
+        'The final answer is t = 5 s and the negative root is rejected with a reason.',
       ],
     },
   },
@@ -98,9 +128,9 @@ const tasks: DemoTask[] = [
 
 /** tasks, worked example, independent item, review item, policy, version */
 export const DEMO_PACK: DemoPack = {
-  version: 'algebra-distribution-v1',
-  skillId: 'algebra.linear.distribution',
-  title: 'Original demo practice: distributing multiplication',
+  version: 'projectile-cliff-v1',
+  skillId: 'physics.kinematics.projectile_vertical',
+  title: 'Original demo practice: a ball thrown off a cliff',
   policy: { maxLevel: 3, allowExplain: true, allowExample: true },
   tasks,
 };

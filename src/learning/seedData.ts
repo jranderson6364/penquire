@@ -6,20 +6,27 @@ import type { PageBlock } from '../blocks';
 import { startEpisode } from './session.ts';
 import type { DemoPack, Episode, EpisodePolicy } from './types';
 
-export const DEMO_ASSIGNMENT_ID = 'demo-algebra-distribution-v1';
+/** One assignment id per pack version: a new pack is a new demo, never the old episode under a new prompt. */
+export const DEMO_ASSIGNMENT_ID = 'demo-projectile-cliff-v1';
+/**
+ * Demo assignments of earlier pack versions. Kept in the DB (historical work is not discarded silently), hidden from
+ * Home's library, and removed by Reset demo along with the current one.
+ */
+export const RETIRED_DEMO_ASSIGNMENT_IDS: readonly string[] = ['demo-algebra-distribution-v1'];
+export const isDemoAssignmentId = (id: string) => id === DEMO_ASSIGNMENT_ID || RETIRED_DEMO_ASSIGNMENT_IDS.includes(id);
 
 export const DEMO_POLICY_TEXT =
   'Original demo practice (not course work). Checking your work, general explanations, and worked examples on a different task are allowed.';
 
 const PART = '1';
 
-export type DemoContent = { taskId: string; prompt: string; version: string; skillId: string; policy: EpisodePolicy };
+export type DemoContent = { taskId: string; prompt: string; asksFor: string[]; version: string; skillId: string; policy: EpisodePolicy };
 
 /** The pack's recovery task. Only the learner prompt, never the key. */
 export function demoContent(pack: DemoPack, learnerText: (taskId: string) => string): DemoContent {
   const rec = pack.tasks.find((t) => t.role === 'recovery');
   if (!rec) throw new Error(`demo pack ${pack.version} has no recovery task`);
-  return { taskId: rec.id, prompt: learnerText(rec.id), version: pack.version, skillId: pack.skillId, policy: pack.policy };
+  return { taskId: rec.id, prompt: learnerText(rec.id), asksFor: [...rec.asksFor], version: pack.version, skillId: pack.skillId, policy: pack.policy };
 }
 
 export function buildDemoAssignment(c: DemoContent, pageId: string, now: number): Assignment {
@@ -32,7 +39,7 @@ export function buildDemoAssignment(c: DemoContent, pageId: string, now: number)
     policyMaxLevel: 3,
     helpLevel: 1,
     style: '',
-    problems: [{ label: PART, text: c.prompt, asksFor: ['value of x', 'working that shows the distribution'] }],
+    problems: [{ label: PART, text: c.prompt, asksFor: c.asksFor }],
     activePart: PART,
     pageIds: [pageId],
     blocks: { [pageId]: [block] },

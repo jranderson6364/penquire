@@ -25,6 +25,9 @@ export function normalizePart(part: unknown, known?: readonly string[]): string 
   return hit;
 }
 
+/** A reading that is only a bracketed description of a drawing, with no equation in it. */
+export const isDrawing = (reading: string) => /^\s*\[\s*(?:sketch|diagram|drawing|picture|figure)\b[^\]=]*\]\s*$/i.test(reading);
+
 export function sanitizeLines(raw: unknown, knownParts?: readonly string[]): LineVerdict[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
@@ -37,14 +40,17 @@ export function sanitizeLines(raw: unknown, knownParts?: readonly string[]): Lin
     seen.add(id);
     const claimed = str(r.verdict).trim().toLowerCase();
     const known = VERDICTS.has(claimed);
-    const verdict = (known ? claimed : 'unreadable') as Verdict;
+    const reading = str(r.reading);
+    // A line the model itself described as a drawing ("[sketch: …]", no "=") and still marked valid or unreadable is a
+    // drawing, not unread work: context, so it can't block "done" or the independent Submit. Partial/incorrect stay.
+    const verdict = (isDrawing(reading) && (claimed === 'valid' || claimed === 'unreadable') ? 'context' : known ? claimed : 'unreadable') as Verdict;
     const obstacle = str(r.obstacle).trim().toLowerCase();
     const conf = str(r.read_confidence).trim().toLowerCase();
     const uncertain = str(r.uncertain).trim();
     out.push({
       id,
       part: normalizePart(r.part, knownParts),
-      reading: str(r.reading),
+      reading,
       ...(READ_CONF.has(conf) ? { readConfidence: conf as NonNullable<LineVerdict['readConfidence']> } : {}),
       ...(uncertain ? { uncertain: uncertain.slice(0, 40) } : {}),
       verdict,

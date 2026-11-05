@@ -16,7 +16,7 @@
 
 /** SI exponents: m, kg, s, A, K, mol, cd */
 export type Dim = readonly [number, number, number, number, number, number, number];
-type Unit = { scale: number; dim: Dim };
+export type Unit = { scale: number; dim: Dim };
 
 const D = (m = 0, kg = 0, s = 0, A = 0, K = 0, mol = 0, cd = 0): Dim => [m, kg, s, A, K, mol, cd];
 
@@ -186,4 +186,48 @@ export function dimensionMismatch(sides: SideUnits[]): [number, number] | null {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------- plain quantities (T15)
+
+/** Unit words a transcription or a tutor may spell out. Only scale-1 SI units, so nothing is ever rescaled. */
+const UNIT_WORDS: Record<string, string> = { second: 's', seconds: 's', sec: 's', secs: 's', meter: 'm', meters: 'm', metre: 'm', metres: 'm' };
+
+/** A whole side that is "number unit": "4 s", "4\,\mathrm{s}", "4 \text{ s}", "4.0 seconds", "-10 m/s^2". */
+const QUANTITY = /^\s*([-−]?\s*(?:\d+\.?\d*|\.\d+))\s*(?:\\[,;! ]|~)*\s*(?:\\(?:mathrm|text|rm|operatorname)\s*\{\s*([^{}]+?)\s*\}|([A-Za-zΩμ][A-Za-zΩμ/^0-9\-{}]*))\s*$/;
+
+/**
+ * A side that is exactly a number followed by one unit (scale 1 only, e.g. s, m, m/s, m/s^2): the number as written
+ * (so its precision, and therefore the rounding tolerance, is unchanged) and the unit. null for anything else,
+ * including a scaled unit ("4 min", "4000 ms"), which is left for the checker to refuse rather than be rescaled.
+ */
+export function quantityOf(side: string): { num: string; unit: Unit } | null {
+  const m = QUANTITY.exec(side);
+  if (!m) return null;
+  const raw = (m[2] ?? m[3]).trim();
+  const unit = parseUnit(UNIT_WORDS[raw.toLowerCase()] ?? raw);
+  if (!unit || Math.abs(unit.scale - 1) > 1e-12) return null;
+  return { num: m[1].replace(/\s+/g, ''), unit };
+}
+
+/**
+ * "t = 4\,\mathrm{s}" -> "t = 4", "y(t) = 20 + 15t - 5t^2" -> "y = 20 + 15t - 5t^2". Drops a unit only where a whole
+ * side of an "=" is a number with one scale-1 unit, and reads function-of-time notation ("y(t)", not "2(t)") as the
+ * quantity itself. Returns the units it dropped so a caller can check their dimension. Anything else is unchanged.
+ */
+export function plainQuantities(src: string): { text: string; units: Unit[] } {
+  const units: Unit[] = [];
+  const text = src
+    .replace(/(?<![A-Za-z\\])([A-Za-z])\s*\(\s*t\s*\)/g, (m, v: string) => (v === 't' ? m : v))
+    .split(/(=|\\approx|≈)/)
+    .map((part, i) => {
+      if (i % 2 === 1) return part; // a separator
+      const q = quantityOf(part);
+      if (!q) return part;
+      units.push(q.unit);
+      return ` ${q.num} `;
+    })
+    .join('')
+    .trim();
+  return { text, units };
 }

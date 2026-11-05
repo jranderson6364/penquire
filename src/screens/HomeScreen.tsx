@@ -7,6 +7,7 @@ import { EpisodeCard } from '../components/EpisodeCard';
 import { Icon } from '../components/Icon';
 import { latestEpisode, resumeTarget } from '../components/episodeCardFormat';
 import { DEMO_ASSIGNMENT_ID, ensureDemo, resetDemo } from '../learning/seed';
+import { isDemoAssignmentId } from '../learning/seedData';
 import { deleteAssignment, getAssignments, getEpisodes, getSettings, subscribe } from '../store/db';
 import { ENV } from '../config';
 import { completedParts } from '../store/progress';
@@ -21,8 +22,8 @@ type Props = {
   onOpenIndependent?: (episodeId: string) => void;
 };
 
-// The demo assignment lives in the Demo practice section, not the library list.
-const library = () => getAssignments().filter((a) => a.id !== DEMO_ASSIGNMENT_ID);
+// The demo assignment lives in the Demo practice section, not the library list. A retired pack's demo stays hidden too.
+const library = () => getAssignments().filter((a) => !isDemoAssignmentId(a.id));
 
 const confirmDelete = (a: Assignment) =>
   Alert.alert('Delete assignment?', `"${a.title}" and its pages will be removed from this iPad. This can't be undone.`, [
@@ -130,7 +131,7 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
           {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
         </EpisodeCard>
       ) : (
-        <Button title="Start demo: Distribute and solve" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
+        <Button title="Start demo: A ball off a cliff" kind="primary" onPress={start} style={{ alignSelf: 'flex-start' }} />
       )}
       <Text style={styles.sectionLabel}>Assignments</Text>
     </View>

@@ -14,3 +14,17 @@ test('the tutor rules keep the verify-not-audit stance', () => {
 test('the stance still demands shown work when the problem asks for it', () => {
   assert.match(TUTOR_RULES, /the problem itself asks for it \("show", "derive", "justify"/);
 });
+
+// T15: the projectile demo asks for a sketch and must show that asking for the answer doesn't get it.
+test('a drawing is context, never graded or unreadable, and never holds back complete', () => {
+  assert.match(TUTOR_RULES, /Drawings: a sketch or diagram/);
+  assert.match(TUTOR_RULES, /verdict "context", read_confidence "high"/);
+  assert.match(TUTOR_RULES, /Never mark a drawing unreadable, partial or incorrect/);
+  assert.match(TUTOR_RULES, /never hold a part back from "complete" because of it/);
+});
+
+test('"just tell me the answer" gets a short reason and a pointer, never the answer', () => {
+  assert.match(TUTOR_RULES, /"Just tell me the answer": never state it/);
+  assert.match(TUTOR_RULES, /one-clause reason/);
+  assert.match(TUTOR_RULES, /precise pointer/);
+});

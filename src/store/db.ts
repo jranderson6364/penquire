@@ -4,8 +4,8 @@ import type { Assignment, DB, Settings } from './types';
 import { appendRecord, makeRecord, type UsageRecord } from './usageRecords';
 import type { Usage } from '../ai/types';
 import type { Episode } from '../learning/types';
-import { DEMO_ASSIGNMENT_ID } from '../learning/seedData';
-import { demoScope, normalizeDb, upsertEpisode } from './episodes';
+import { DEMO_ASSIGNMENT_ID, RETIRED_DEMO_ASSIGNMENT_IDS } from '../learning/seedData';
+import { demoScopes, normalizeDb, upsertEpisode } from './episodes';
 
 /**
  * Tiny local JSON store. Everything stays on the device for v0.
@@ -167,9 +167,12 @@ function deleteFile(dir: Directory, name: string) {
   if (f.exists) f.delete();
 }
 
-/** demo assignment + its episodes/pages/snapshots only; settings, usage and other assignments are untouched */
+/**
+ * demo assignments (the current pack's and any retired pack's) + their episodes/pages/snapshots only; settings, usage
+ * and other assignments are untouched
+ */
 export function deleteDemoData(): void {
-  const { next, pageIds, snapshotIds } = demoScope(load(), DEMO_ASSIGNMENT_ID);
+  const { next, pageIds, snapshotIds } = demoScopes(load(), [DEMO_ASSIGNMENT_ID, ...RETIRED_DEMO_ASSIGNMENT_IDS]);
   pageIds.forEach((pid) => deleteFile(pagesDir, `${pid}.pk`));
   snapshotIds.forEach((id) => deleteFile(snapshotsDir, `${id}.pk`));
   cache = next;

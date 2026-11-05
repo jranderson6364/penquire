@@ -29,7 +29,8 @@ test('independent check input has only the independent prompt and the submitted 
     { id: 'L1', x: 10, y: 20, w: 300, h: 40 },
     { id: 'L2', x: 10, y: 80, w: 280, h: 40 },
   ]);
-  assert.ok(input.problems[0].asksFor.some((a) => /explanation/.test(a)));
+  assert.deepEqual(input.problems[0].asksFor, task.asksFor);
+  assert.ok(input.problems[0].asksFor.some((a) => /one sentence/.test(a)));
 });
 
 test('no prior history, settled lines, last check or focus', () => {

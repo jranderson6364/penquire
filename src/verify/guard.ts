@@ -1,5 +1,5 @@
 import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
-import { fallbackQuestion, scrubText, type Leak, type LeakContext } from './leak.ts';
+import { fallbackQuestion, scrubText, type Leak, type LeakContext, type LeakLine } from './leak.ts';
 import { checkChain, checkContinuation, checkLineUnits, checkStep } from './expr.ts';
 
 const lineNo = (id: string) => Number(id.replace(/\D/g, '')) || 0;
@@ -81,9 +81,13 @@ export function applyReadingGuard(lines: LineVerdict[], confirmed: ReadonlySet<s
 /**
  * Withhold answer leaks from every piece of tutor text in a check result. A removed question is replaced
  * by a content-free one that mentions only line IDs. The result records what was blocked.
+ *
+ * `given` (T15): guard lines that are not the student's ink, e.g. a demo task's hidden setup and sayable roots
+ * (src/learning/workspaceFlow.ts replyGuardLines). Without it, feedback stating the answer next to a wrong setup
+ * ("it lands at 4 s" under a forgotten starting height) is not caught: nothing on the page advances to it.
  */
-export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
-  const ctx: LeakContext = { level, lines: r.lines.map((l) => ({ id: l.id, reading: rd(l), verdict: l.verdict })) };
+export function applyLeakGuard(r: CheckResult, level: HelpLevel, given: readonly LeakLine[] = []): CheckResult {
+  const ctx: LeakContext = { level, lines: [...given, ...r.lines.map((l) => ({ id: l.id, reading: rd(l), verdict: l.verdict }))] };
   const blocked: Leak[] = [];
   const clean = (t: string) => {
     const s = scrubText(t, ctx);
@@ -98,20 +102,27 @@ export function applyLeakGuard(r: CheckResult, level: HelpLevel): CheckResult {
   let question = clean(r.question);
   if (!question && r.question.trim()) {
     const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
-    const idx = ordered.findIndex((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
-    question = fallbackQuestion(level, idx >= 0 ? ordered[idx].id : undefined, idx > 0 ? ordered[idx - 1].id : undefined);
+    question = fallbackFor(level, ordered);
   }
   if (blocked.length === 0) return r;
   return { ...r, lines, feedback, question, leaksBlocked: blocked.map((b) => ({ fragment: b.fragment, why: b.why })) };
 }
 
+/**
+ * The fallback question names only the student's own lines (L1, L2 …): a guard-only line such as a demo task's hidden
+ * setup is not on the page, and "compare L1 with the given equation" would point at something the student never saw.
+ */
+function fallbackFor(level: HelpLevel, ordered: readonly { id: string; verdict: string }[]): string {
+  const own = ordered.filter((l) => /^L\d+$/.test(l.id));
+  const idx = own.findIndex((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
+  return fallbackQuestion(level, idx >= 0 ? own[idx].id : undefined, idx > 0 ? own[idx - 1].id : undefined);
+}
+
 /** Same protection for chat replies: withhold leaking sentences; if nothing is left, ask a content-free question. */
-export function applyReplyLeakGuard(reply: string, lines: { id: string; reading: string; verdict: string }[], level: HelpLevel): string {
+export function applyReplyLeakGuard(reply: string, lines: readonly LeakLine[], level: HelpLevel): string {
   if (lines.length === 0) return reply;
   const { text, leaks } = scrubText(reply, { level, lines: lines.map((l) => ({ ...l, reading: rd(l) })) });
   if (leaks.length === 0) return reply;
   if (text) return text;
-  const ordered = [...lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
-  const idx = ordered.findIndex((l) => l.verdict === 'incorrect' || l.verdict === 'partial');
-  return fallbackQuestion(level, idx >= 0 ? ordered[idx].id : undefined, idx > 0 ? ordered[idx - 1].id : undefined);
+  return fallbackFor(level, [...lines].sort((a, b) => lineNo(a.id) - lineNo(b.id)));
 }

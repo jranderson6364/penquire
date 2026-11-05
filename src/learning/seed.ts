@@ -10,7 +10,7 @@ export function ensureDemo(now: number): { assignmentId: string; episodeId: stri
   return ensureDemoIn({ getAssignment, saveAssignment, getEpisodes, saveEpisode }, demoContent(DEMO_PACK, learnerText), newId, now);
 }
 
-/** Removes only the demo assignment's data, then seeds it again. */
+/** Removes only demo data (this pack's and any retired pack's demo assignment), then seeds it again. */
 export function resetDemo(now: number): ReturnType<typeof ensureDemo> {
   deleteDemoData();
   return ensureDemo(now);

@@ -1,6 +1,8 @@
 // Pure helpers for the independent-attempt screen (T08). No React, no store: the screen owns side effects.
 import type { ChatTurn, CheckResult, HelpLevel, LineVerdict, PageImage, ReplyInput } from '../ai/types';
 import { outcomeLabels } from './session.ts';
+import { DEMO_PACK, TASK_GIVENS } from './demoPack.ts';
+import { replyGuardLines } from './workspaceFlow.ts';
 import type { Attempt, DemoTask, Episode, HelpMove, OutcomeLabel, Snapshot } from './types';
 
 export const independentAttemptId = (episodeId: string) => `${episodeId}:independent`;
@@ -12,9 +14,11 @@ const attemptOf = (ep: Episode): Attempt | undefined => (ep.independentAttemptId
  *  - 'begin': no independent attempt yet and the episode may start one (the screen calls beginIndependent);
  *  - 'unavailable': no attempt and the episode isn't at a repair phase;
  *  - 'working' / 'submitted' / 'outcome': resume the stored attempt.
+ * An episode from another pack version (a retired demo) is 'unavailable': its tasks are not this pack's.
  */
 export type IndependentView = 'begin' | 'unavailable' | 'working' | 'submitted' | 'outcome';
-export function independentView(ep: Episode): IndependentView {
+export function independentView(ep: Episode, packVersion: string = DEMO_PACK.version): IndependentView {
+  if (ep.packVersion !== packVersion) return 'unavailable';
   if (!attemptOf(ep)) return ep.phase === 'repair' || ep.phase === 'repair_verified' ? 'begin' : 'unavailable';
   if (ep.phase === 'independent_submitted') return 'submitted';
   if (ep.phase === 'outcome') return 'outcome';
@@ -141,7 +145,8 @@ export const INDEPENDENT_POLICY_TEXT =
 /**
  * A help reply after the student left the independent attempt. Independent-task context only: the task's
  * learner-facing prompt and this help conversation only (`history`): no workspace chat, no lastCheck, no other task,
- * never the answer key.
+ * never the answer key. The leak guard's lines are added by the caller (helpGuardLines), so this object stays free of
+ * answer-key material.
  */
 export function helpReplyInput(task: DemoTask, message: string, level: HelpLevel, history: ChatTurn[], image?: PageImage): ReplyInput {
   return {
@@ -154,4 +159,13 @@ export function helpReplyInput(task: DemoTask, message: string, level: HelpLevel
     message,
     ...(image ? { image } : {}),
   };
+}
+
+/**
+ * The reply leak guard's lines for a supported-practice help reply (ReplyInput.lines: guard input only, never sent to
+ * the model, src/ai/claude.ts): the task's hidden setup and its sayable rejected root, so a reply stating "t = 3" or
+ * "3 seconds" is withheld (src/verify/leak.ts) while "what does t = -1 mean?" is not. Empty outside the pack.
+ */
+export function helpGuardLines(task: DemoTask): NonNullable<ReplyInput['lines']> {
+  return replyGuardLines(undefined, TASK_GIVENS[task.id]);
 }
