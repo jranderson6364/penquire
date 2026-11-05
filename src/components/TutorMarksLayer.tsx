@@ -5,7 +5,7 @@ import Svg, { Defs, Mask, Path } from 'react-native-svg';
 import { nativeApiVersion } from '../../modules/pencil-canvas';
 import { boxToLayer, PAGE_WIDTH } from '../page';
 import { C, PAGE_TYPE, R, T } from '../theme';
-import { centerPath, outlinePath, ring, toSegments, underline, wash, type Stroke } from '../tutor/handdrawn';
+import { arrow, centerPath, outlinePath, ring, toSegments, underline, wash, type Stroke } from '../tutor/handdrawn';
 import { tagColor, type TutorMark } from '../tutor/marks';
 import { latexToUnicode } from '../ui/mathText';
 import { Icon } from './Icon';
@@ -85,6 +85,8 @@ function MarkView({ mark, delay, k, emphasised, onDismiss }: { mark: TutorMark; 
   const geometry = React.useMemo(() => {
     if (mark.kind === 'circle') return ring(b, mark.id, 7 * k);
     if (mark.kind === 'underline') return underline(b, mark.id);
+    // no room to the left of the line (it starts at the page edge): point up from below instead
+    if (mark.kind === 'arrow') return arrow(b, mark.id, k, b.x < 48 * k);
     return undefined;
   }, [mark.kind, mark.id, b.x, b.y, b.w, b.h, k]);
 
@@ -112,7 +114,7 @@ function MarkView({ mark, delay, k, emphasised, onDismiss }: { mark: TutorMark; 
     );
   }
 
-  if ((mark.kind === 'circle' || mark.kind === 'underline') && geometry) {
+  if ((mark.kind === 'circle' || mark.kind === 'underline' || mark.kind === 'arrow') && geometry) {
     return SVG ? (
       <InkStroke id={mark.id} stroke={geometry} color={col.pen} thickness={thick} progress={progress} />
     ) : (

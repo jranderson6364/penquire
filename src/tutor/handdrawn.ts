@@ -73,6 +73,40 @@ export function underline(box: Box, seed: string): Stroke {
   return { pts, th };
 }
 
+/**
+ * A pen arrow pointing at the left-middle of a box: a short, slightly curved shaft from the lower left, then the two
+ * barbs, drawn as one stroke (tail -> tip -> barb -> tip -> barb). `fromBelow` points up from under the box instead,
+ * for a line that starts at the page edge.
+ */
+export function arrow(box: Box, seed: string, k = 1, fromBelow = false): Stroke {
+  const r = rng(seed + ':arrow');
+  const tip: Pt = fromBelow ? { x: box.x + box.w / 2, y: box.y + box.h + 4 * k } : { x: box.x - 5 * k, y: box.y + box.h / 2 };
+  const len = (34 + r() * 8) * k;
+  const ang = fromBelow ? -Math.PI / 2 - 0.35 + r() * 0.2 : -0.45 + r() * 0.2; // direction of travel, tail to tip
+  const tail: Pt = { x: tip.x - Math.cos(ang) * len, y: tip.y - Math.sin(ang) * len };
+  const bend = (r() - 0.5) * 6 * k;
+  const pts: Pt[] = [];
+  const th: number[] = [];
+  const n = 12;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const nx = -Math.sin(ang);
+    const ny = Math.cos(ang);
+    const off = Math.sin(t * Math.PI) * bend;
+    pts.push({ x: tail.x + (tip.x - tail.x) * t + nx * off, y: tail.y + (tip.y - tail.y) * t + ny * off });
+    th.push(0.75 + 0.3 * t);
+  }
+  const barb = 9 * k;
+  for (const side of [1, -1]) {
+    const a = ang + Math.PI + side * 0.5;
+    pts.push({ x: tip.x + Math.cos(a) * barb, y: tip.y + Math.sin(a) * barb });
+    th.push(0.8);
+    pts.push({ ...tip });
+    th.push(1);
+  }
+  return { pts, th };
+}
+
 export type Wash = { x: number; y: number; w: number; h: number; rotateDeg: number; radius: number; radiusRight: number };
 
 /** A marker pass over the text: wider than the box by a few points, a hair off level, with uneven rounded ends. */

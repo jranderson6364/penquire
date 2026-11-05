@@ -60,3 +60,19 @@ export function snapSpan(line: Box, chunks: readonly Box[], from?: number, to?: 
   }
   return pick.slice(1).reduce(union, pick[0]);
 }
+
+/**
+ * A single symbol (a sign, a digit) inside a line: the strokes whose centres fall in the span, or the one nearest the
+ * span's centre, so "circle the 0" circles the 0 and not the whole "= 0" chunk. Falls back to snapSpan's whole line
+ * when there are no strokes.
+ */
+export function snapSymbol(line: Box, strokes: readonly Box[], from: number, to: number): Box {
+  if (strokes.length === 0) return { ...line };
+  const x0 = line.x + Math.max(0, Math.min(1, from)) * line.w;
+  const x1 = line.x + Math.max(0, Math.min(1, to)) * line.w;
+  const mid = (x0 + x1) / 2;
+  const cx = (s: Box) => s.x + s.w / 2;
+  const inside = strokes.filter((s) => cx(s) >= x0 && cx(s) <= x1);
+  const pick = inside.length > 0 && inside.length <= 3 ? inside : [[...strokes].sort((a, b) => Math.abs(cx(a) - mid) - Math.abs(cx(b) - mid))[0]];
+  return pick.slice(1).reduce(union, pick[0]);
+}

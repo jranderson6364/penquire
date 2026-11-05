@@ -8,10 +8,15 @@
  * reveal, allowed at every help level); any note text is leak-guarded by the caller like every other tutor sentence.
  */
 import type { Box, Line } from '../ink/lines';
-import { snapSpan } from './chunks.ts';
+import { latexToUnicode } from '../ui/mathText.ts';
+import { snapSpan, snapSymbol } from './chunks.ts';
 
-export type MarkKind = 'highlight' | 'circle' | 'underline' | 'note';
-export const MARK_KINDS: readonly MarkKind[] = ['highlight', 'circle', 'underline', 'note'];
+/** arrow = points at a spot (the start of a line, or just before a stretch) where something is missing or to look */
+export type MarkKind = 'highlight' | 'circle' | 'underline' | 'note' | 'arrow';
+export const MARK_KINDS: readonly MarkKind[] = ['highlight', 'circle', 'underline', 'note', 'arrow'];
+
+/** A circle wider than this many line-heights is drawn as an underline: a loop around a long stretch reads as "all wrong". */
+export const CIRCLE_MAX_ASPECT = 3;
 
 /** Marks of one reply get tags 1..MAX_TAG; a tag is a color and the name the message uses for the mark. */
 export const MAX_TAG = 4;
@@ -26,6 +31,10 @@ export type RawMark = {
   from?: number;
   to?: number;
   note?: string;
+  /** the quote is a single symbol (a sign, a digit, a letter): snap to its own strokes, not the surrounding chunk */
+  symbol?: boolean;
+  /** a quote was given but could not be found in the line: never fall back to marking the whole line */
+  unplaced?: boolean;
 };
 
 /** What is stored and drawn. */
@@ -49,21 +58,45 @@ export function marksOnCurrentInk<M extends { sig?: string }>(marks: readonly M[
   return liveSigs ? marks.filter((m) => !m.sig || liveSigs.has(m.sig)) : [...marks];
 }
 
-const MAX_MARKS = 4;
+/** One mark is the norm; two only to contrast two spots (device runs: four marks read as "everything is wrong"). */
+const MAX_MARKS = 2;
 const MAX_NOTE = 140;
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 const frac = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : undefined);
 
-const squash = (s: string) => s.replace(/\s+/g, '');
+/**
+ * Plain, compact form of a line for locating a quote: LaTeX turned into the symbols that are actually written
+ * (\frac{10}{2} -> 10⁄2, ^2 -> ²), so a position in the text is close to a position in the ink. Spaces are dropped.
+ */
+export function plainMath(s: string): string {
+  return latexToUnicode(s)
+    .replace(/\\[A-Za-z]+/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/[−–—]/g, '-')
+    .replace(/\s+/g, '');
+}
 
-/** Where `quote` sits inside `lineText`, as fractions of its length (spaces ignored, handwriting is not monospaced but is close). */
-export function quoteSpan(lineText: string, quote: string): { from: number; to: number } | undefined {
-  const t = squash(lineText);
-  const q = squash(quote);
+const ALNUM = /[0-9A-Za-z.]/;
+
+/**
+ * Where `quote` sits inside `lineText`, as fractions of its plain length (handwriting is not monospaced but is close).
+ * A quote that appears more than once prefers a whole token ("0" in "= 0", not the 0 of "20"), then the occurrence
+ * nearest `hint` (the model's rough position, a fraction of the line).
+ */
+export function quoteSpan(lineText: string, quote: string, hint?: number): { from: number; to: number } | undefined {
+  const t = plainMath(lineText);
+  const q = plainMath(quote);
   if (q.length === 0 || t.length === 0 || q.length >= t.length) return undefined;
-  const i = t.indexOf(q);
-  if (i < 0) return undefined;
+  const hits: number[] = [];
+  for (let i = t.indexOf(q); i >= 0; i = t.indexOf(q, i + 1)) hits.push(i);
+  if (hits.length === 0) return undefined;
+  const whole = (i: number) =>
+    !(ALNUM.test(q[0]) && i > 0 && ALNUM.test(t[i - 1])) && !(ALNUM.test(q[q.length - 1]) && i + q.length < t.length && ALNUM.test(t[i + q.length]));
+  const tokens = hits.filter(whole);
+  const pool = tokens.length > 0 ? tokens : hits;
+  const centre = (i: number) => (i + q.length / 2) / t.length;
+  const i = hint === undefined ? pool[0] : pool.reduce((best, x) => (Math.abs(centre(x) - hint) < Math.abs(centre(best) - hint) ? x : best));
   return { from: i / t.length, to: (i + q.length) / t.length };
 }
 
@@ -81,16 +114,21 @@ export function sanitizeMarks(raw: unknown, knownLineIds: ReadonlySet<string>): 
     if (!(MARK_KINDS as readonly string[]).includes(kind) || !knownLineIds.has(line)) continue;
     let from = frac(r.from);
     let to = frac(r.to);
+    const hint = from !== undefined && to !== undefined ? (from + to) / 2 : undefined;
     // Words beat coordinates: when the model quotes the expression it means, its place in the line's text gives the stretch.
-    const q = quoteSpan(str(r.line_text), str(r.quote));
+    const quote = str(r.quote);
+    const q = quoteSpan(str(r.line_text), quote, hint);
     if (q) {
       from = q.from;
       to = q.to;
     }
-    if (from === undefined || to === undefined || to - from < 0.03) {
+    const symbol = !!q && plainMath(quote).length <= 2;
+    if (from === undefined || to === undefined || to - from < (symbol ? 0.005 : 0.03)) {
       from = undefined;
       to = undefined;
     }
+    // it meant part of the line but we can't tell which part: point at the line instead of covering all of it
+    const unplaced = !!quote && from === undefined && kind !== 'note';
     const key = `${kind}:${line}:${from?.toFixed(2) ?? ''}:${to?.toFixed(2) ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -102,19 +140,27 @@ export function sanitizeMarks(raw: unknown, knownLineIds: ReadonlySet<string>): 
     if (!tag) for (let t = 1; t <= MAX_TAG; t++) if (!usedTags.has(t)) { tag = t; break; }
     if (!tag) break;
     usedTags.add(tag);
-    out.push({ kind, line, tag, ...(from !== undefined ? { from, to } : {}), ...(note ? { note } : {}) });
+    out.push({ kind, line, tag, ...(from !== undefined ? { from, to } : {}), ...(note ? { note } : {}), ...(symbol && from !== undefined ? { symbol } : {}), ...(unplaced ? { unplaced } : {}) });
     if (out.length >= MAX_MARKS) break;
   }
   return out;
 }
 
-/** Place marks from the line boxes (and, when a span is given, the line's chunks); all in page space. */
+/** Where an arrow points: a thin slice at the left edge of the box it points at. */
+const tipBox = (b: Box): Box => ({ x: b.x, y: b.y, w: Math.min(b.w, b.h * 0.6), h: b.h });
+
+/**
+ * Place marks from the line boxes (and, when a span is given, the line's chunks or, for a single symbol, its strokes);
+ * all in page space. A quote that couldn't be found becomes an arrow at the start of the line, never a mark over the
+ * whole line, and a circle around a long stretch is drawn as an underline.
+ */
 export function resolveMarks(
   raw: readonly RawMark[],
   lines: readonly Line[],
   chunksByLine: Readonly<Record<string, readonly Box[]>>,
   turn: number,
-  newId: () => string
+  newId: () => string,
+  strokesByLine: Readonly<Record<string, readonly Box[]>> = {}
 ): TutorMark[] {
   const byId = new Map(lines.map((l) => [l.id, l]));
   const out: TutorMark[] = [];
@@ -122,8 +168,20 @@ export function resolveMarks(
     const line = byId.get(m.line);
     if (!line) continue;
     const whole: Box = { x: line.x, y: line.y, w: line.w, h: line.h };
-    const box = m.from !== undefined && m.to !== undefined ? snapSpan(whole, chunksByLine[line.id] ?? [], m.from, m.to) : whole;
-    out.push({ id: newId(), turn, tag: m.tag ?? out.length + 1, kind: m.kind as MarkKind, lineId: line.id, box, ...(m.note ? { note: m.note } : {}) });
+    let kind = m.kind as MarkKind;
+    let box: Box;
+    if (m.unplaced) {
+      kind = 'arrow';
+      box = whole;
+    } else if (m.from !== undefined && m.to !== undefined) {
+      const strokes = strokesByLine[line.id] ?? [];
+      box = m.symbol && strokes.length > 0 ? snapSymbol(whole, strokes, m.from, m.to) : snapSpan(whole, chunksByLine[line.id] ?? [], m.from, m.to);
+    } else {
+      box = whole;
+    }
+    if (kind === 'arrow') box = tipBox(box);
+    if (kind === 'circle' && box.w > CIRCLE_MAX_ASPECT * Math.max(box.h, 1)) kind = 'underline';
+    out.push({ id: newId(), turn, tag: m.tag ?? out.length + 1, kind, lineId: line.id, box, ...(m.note ? { note: m.note } : {}) });
   }
   return out;
 }
@@ -135,11 +193,11 @@ export function resolveMarks(
  */
 export function marksAfterReply(
   raw: readonly RawMark[],
-  capture: { lines: readonly Line[]; chunksByLine: Readonly<Record<string, readonly Box[]>> } | null,
+  capture: { lines: readonly Line[]; chunksByLine: Readonly<Record<string, readonly Box[]>>; strokesByLine?: Readonly<Record<string, readonly Box[]>> } | null,
   turn: number,
   newId: () => string
 ): TutorMark[] {
-  return capture ? resolveMarks(raw, capture.lines, capture.chunksByLine, turn, newId) : [];
+  return capture ? resolveMarks(raw, capture.lines, capture.chunksByLine, turn, newId, capture.strokesByLine) : [];
 }
 
 /** A new check is the page's current verdict: reply marks drawn before it are cleared (they point at old ink). */

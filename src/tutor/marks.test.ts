@@ -27,23 +27,18 @@ test('tags stay unique: a clash or an invalid tag gets the lowest free one', () 
     [
       { kind: 'circle', line: 'L1', tag: 2 },
       { kind: 'circle', line: 'L2', tag: 2 },
-      { kind: 'circle', line: 'L3', tag: 9 },
     ],
     known
   );
-  assert.deepEqual(out.map((m) => m.tag), [2, 1, 3]);
+  assert.deepEqual(out.map((m) => m.tag), [2, 1]);
+  assert.deepEqual(sanitizeMarks([{ kind: 'circle', line: 'L3', tag: 9 }], known).map((m) => m.tag), [1]);
 });
 
 test('a span is kept only when it is a real stretch; fractions are clamped', () => {
-  const out = sanitizeMarks(
-    [
-      { kind: 'circle', line: 'L1', from: 0.4, to: 0.7 },
-      { kind: 'highlight', line: 'L2', from: 0.5, to: 0.51 },
-      { kind: 'underline', line: 'L3', from: -2, to: 3 },
-      { kind: 'underline', line: 'L1', from: 'a', to: 1 },
-    ],
-    known
-  );
+  const out = [
+    ...sanitizeMarks([{ kind: 'circle', line: 'L1', from: 0.4, to: 0.7 }, { kind: 'highlight', line: 'L2', from: 0.5, to: 0.51 }], known),
+    ...sanitizeMarks([{ kind: 'underline', line: 'L3', from: -2, to: 3 }, { kind: 'underline', line: 'L1', from: 'a', to: 1 }], known),
+  ];
   assert.deepEqual(out[0], { kind: 'circle', line: 'L1', tag: 1, from: 0.4, to: 0.7 });
   assert.equal(out[1].from, undefined);
   assert.deepEqual([out[2].from, out[2].to], [0, 1]);

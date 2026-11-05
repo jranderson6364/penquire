@@ -843,7 +843,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         initialSnap = takeSnapshot(pageId, c.lines, c.strokes, Date.now());
       }
       const strokeBox = new Map((cap?.strokeList ?? []).map((st) => [st.i, st]));
-      const chunksByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, chunkLine(l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b))]));
+      const strokesByLine = Object.fromEntries((cap?.lines ?? []).map((l) => [l.id, l.strokes.map((i) => strokeBox.get(i)).filter((b): b is NonNullable<typeof b> => !!b)]));
+      const chunksByLine = Object.fromEntries(Object.entries(strokesByLine).map(([id, boxes]) => [id, chunkLine(boxes)]));
       // Has the ink changed since the latest check? Then the reply is told the check is history (src/check/stale.ts).
       const checkStale = cap
         ? checkOutOfDate(
@@ -889,7 +890,7 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
           ...(x.tutorMarks ?? {}),
           [pageId]: (() => {
             const sigs = cap ? signatures(cap.lines, cap.strokeList) : undefined;
-            return marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine } : null, x.chat.length + 1, () => newId('t_')).map((m) =>
+            return marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine, strokesByLine } : null, x.chat.length + 1, () => newId('t_')).map((m) =>
               sigs?.get(m.lineId) ? { ...m, sig: sigs.get(m.lineId) } : m
             );
           })(),
