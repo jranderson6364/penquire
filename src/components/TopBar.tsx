@@ -50,7 +50,7 @@ type Props = {
   help?: { items: { key: string; title: string }[]; disabled: boolean; onPick: (key: string) => void };
   /** extra rows at the end of the ⋯ menu; call `close` after acting */
   menuExtra?: (close: () => void) => React.ReactNode;
-  /** demo: only back, title, Help, Check and the panel. No pager, save line (unless saving failed), hands-free mic or count dot */
+  /** demo: only back, title, Help, Check, the hands-free mic and the panel. No pager, save line (unless saving failed) or count dot */
   minimal?: boolean;
   insetTop: number;
   insetLeft: number;
@@ -144,9 +144,9 @@ export function TopBar(p: Props) {
         </Pressable>
       )}
       <TutorButton {...p} />
-      {!p.minimal && <Pressable onPress={p.onToggleConversation} style={[styles.iconBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
+      <Pressable onPress={p.onToggleConversation} style={[styles.iconBtn, p.conversation && styles.convoOn]} accessibilityRole="switch" accessibilityState={{ checked: p.conversation }} accessibilityLabel={p.conversation ? 'End the spoken conversation' : 'Talk with the tutor hands-free'}>
         <Icon name="mic" size={19} color={p.conversation ? C.onPrimary : C.ink} />
-      </Pressable>}
+      </Pressable>
       <Pressable onPress={p.onTogglePanel} style={[styles.iconBtn, p.panelOpen && styles.on]} accessibilityRole="button" accessibilityLabel={p.panelOpen ? 'Hide the tutor chat' : 'Show the tutor chat'} accessibilityState={{ selected: p.panelOpen }}>
         <Icon name="sidebar" size={20} color={p.panelOpen ? C.primary : C.ink} />
         {attention && (
