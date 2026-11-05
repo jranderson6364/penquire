@@ -33,3 +33,8 @@ test('ask before you tell: the first move on an issue is a question about what t
   assert.match(TUTOR_RULES, /ASK BEFORE YOU TELL/);
   assert.match(TUTOR_RULES, /never the diagnosis/);
 });
+
+test('any consistent sign convention or origin is accepted; signs are judged against the student\'s own choice', () => {
+  assert.match(TUTOR_RULES, /Sign conventions and origins are the student's choice/);
+  assert.match(TUTOR_RULES, /check the line against THAT convention/);
+});

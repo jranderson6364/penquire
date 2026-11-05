@@ -137,7 +137,7 @@ const FALL_TEXT: Record<Pitfall, (h: string, restRight: boolean) => string> = {
     `Your first height equation started the ball at 0 instead of ${h} m up${rest ? ', so it found when the ball came back down to where it was thrown from, not when it hit the ground' : ''}.`,
   start_sign: (h) => `Your first height equation put the start below the ground. With up as positive, the ball starts at +${h} m.`,
   gravity_sign: () => 'Your first height equation had gravity pushing the ball up. With up as positive, the t² term has to be negative.',
-  wrong_root: () => 'You first gave the negative time as the answer, but that is before the ball was thrown.',
+  wrong_root: () => 'Your first answer kept the negative time too, but that is before the ball was thrown.',
   slip: () => 'Your first attempt had a step that did not follow from the one before it.',
 };
 
@@ -153,7 +153,7 @@ const REPEATED_TEXT: Record<Pitfall, (h: string) => string> = {
   start_height: (h) => `The same thing came back: the equation started at 0 instead of ${h} m up.`,
   start_sign: () => 'The same thing came back: the start was below the ground.',
   gravity_sign: () => 'The same thing came back: gravity pushed the ball up in the equation.',
-  wrong_root: () => 'The same thing came back: the negative time was given as the answer.',
+  wrong_root: () => 'The same thing came back: the negative time was kept as an answer.',
   slip: () => 'A step still did not follow.',
 };
 

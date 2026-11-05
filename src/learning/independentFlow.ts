@@ -190,6 +190,19 @@ export function followUpChoice(ep: Episode): { taskId: string; title: string } |
 export function outcomeFall(ep: Episode, findings?: readonly Pick<LineVerdict, 'reading' | 'verdict'>[]): FallSummary | undefined {
   const at = attemptOf(ep);
   if (!at?.assessment || !resultVisible(ep)) return undefined;
-  const readings = findings?.length ? findings.filter((l) => l.verdict !== 'context').map((l) => l.reading) : (at.readings ?? []).map(stripLineId);
+  const stored = at.checked?.length ? at.checked : undefined;
+  const readings = findings?.length
+    ? findings.filter((l) => l.verdict !== 'context').map((l) => l.reading)
+    : stored
+      ? stored.filter((l) => l.verdict !== 'context').map((l) => l.reading)
+      : (at.readings ?? []).map(stripLineId);
   return fallSummary(ep.fall, at.taskId, readings, at.assessment.result);
+}
+
+/** Stores the check's lines on the attempt whose snapshot they were read from (no-op for any other snapshot). */
+export function withCheckedLines(ep: Episode, attemptId: string, snapshotId: string, lines: readonly LineVerdict[]): Episode {
+  const at = ep.attempts[attemptId];
+  if (!at?.snapshot || at.snapshot.id !== snapshotId) return ep;
+  const checked = lines.slice(0, 40).map((l) => ({ id: l.id, reading: l.reading.slice(0, 300), verdict: l.verdict, ...(l.note ? { note: l.note.slice(0, 300) } : {}) }));
+  return { ...ep, attempts: { ...ep.attempts, [attemptId]: { ...at, checked } } };
 }

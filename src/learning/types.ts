@@ -39,6 +39,8 @@ export type Attempt = {
   allowedResources: string[];
   /** student-confirmed readings of the submitted lines */
   readings?: string[];
+  /** what the check read on the submitted snapshot (bounded), kept for the outcome and for review of the verdicts */
+  checked?: { id: string; reading: string; verdict: string; note?: string }[];
   assessment?: Assessment;
   /** set when work changed after assessment; the assessment no longer counts */
   invalidatedAt?: number;

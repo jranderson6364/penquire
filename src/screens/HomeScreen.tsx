@@ -6,7 +6,7 @@ import { Button } from '../components/Button';
 import { EpisodeCard } from '../components/EpisodeCard';
 import { Icon } from '../components/Icon';
 import { latestEpisode, resumeTarget } from '../components/episodeCardFormat';
-import { DEMO_ASSIGNMENT_ID, ensureDemo } from '../learning/seed';
+import { DEMO_ASSIGNMENT_ID, ensureDemo, resetDemo } from '../learning/seed';
 import { isDemoAssignmentId } from '../learning/seedData';
 import { deleteAssignment, getAssignments, getEpisodes, getSettings, subscribe } from '../store/db';
 import { ENV } from '../config';
@@ -93,7 +93,7 @@ export function HomeScreen({ onOpen, onNew, onSettings, onOpenIndependent }: Pro
 }
 
 /**
- * Start or resume the demo (Reset lives in Settings). Home is only mounted while no workspace/independent screen is open (App.tsx routes
+ * Start, resume or start over the demo (also in Settings). Home is only mounted while no workspace/independent screen is open (App.tsx routes
  * one screen at a time), so reset never deletes a page that an open screen could autosave over.
  */
 function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onOpenIndependent'>) {
@@ -121,6 +121,19 @@ function DemoPractice({ onOpen, onOpenIndependent }: Pick<Props, 'onOpen' | 'onO
         <EpisodeCard episode={episode}>
           <View style={styles.demoActions}>
             <Button title={episode.phase === 'outcome' ? 'Open' : 'Resume'} kind="primary" small disabled={blocked} onPress={resume} />
+            <Pressable
+              hitSlop={10}
+              accessibilityRole="button"
+              style={styles.resetLink}
+              onPress={() =>
+                Alert.alert('Start the demo over?', 'Deletes demo practice only. Your other assignments are untouched.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Start over', style: 'destructive', onPress: () => resetDemo(Date.now()) },
+                ])
+              }
+            >
+              <Text style={styles.resetText}>Start over</Text>
+            </Pressable>
           </View>
           {blocked && <Text style={styles.note}>The fresh problem opens from its own screen, which is not connected yet.</Text>}
         </EpisodeCard>
@@ -167,6 +180,8 @@ const styles = StyleSheet.create({
   demo: { gap: 12 },
   sectionLabel: { ...LABEL },
   note: { fontSize: T.caption, color: C.faint },
-  demoActions: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  demoActions: { flexDirection: 'row', gap: 16, marginTop: 6, alignItems: 'center' },
+  resetLink: { paddingVertical: 4 },
+  resetText: { color: C.sub, fontSize: T.body, fontWeight: '600' },
   progressText: { fontSize: T.caption, color: C.sub, fontFamily: F.mono },
 });

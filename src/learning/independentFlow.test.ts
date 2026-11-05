@@ -171,6 +171,8 @@ test('the fall is kept once, from the initial attempt, and never overwritten by 
   assert.deepEqual(ep.fall, { taskId: DEMO_TASK_IDS.recovery, readings: ['15t - 5t^2 = 0', 't = 3'], at: T0 + 1 });
   assert.equal(recordFall(ep, ['something else'], T0 + 2).fall?.readings[0], '15t - 5t^2 = 0');
   assert.equal(recordFall(repairEpisode(), ['x = 1'], T0 + 5).fall, undefined, 'not after the repair is verified');
+  const inRepair = recordAssistance(startEpisode({ id: 'e2', assignmentId: 'a1', skillId: DEMO_PACK.skillId, packVersion: DEMO_PACK.version, policy: DEMO_PACK.policy, taskId: DEMO_TASK_IDS.recovery, pageId: 'p1', rehearsal: false, now: T0 }), { attemptId: 'e2:initial', move: 'check', level: 0, channels: ['marks'], revealed: ['location'], at: T0 + 1 }, 'h9');
+  assert.equal(recordFall(inRepair, ['t = -1 s, 4 s'], T0 + 2).fall, undefined, 'a later check during the repair is not the first fall');
 });
 
 const outcomeEp = (result: Assessment['result']) => {

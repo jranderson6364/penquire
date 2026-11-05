@@ -201,10 +201,11 @@ export function outcomeLabels(ep: Episode): OutcomeLabel[] {
 
 /**
  * Keeps what the first check flagged on the initial attempt, so the outcome can name the fall after the fresh problem
- * is submitted. Only the first time, and only before a repair is verified; later checks never overwrite it.
+ * is submitted. Only on the episode's first check (phase 'attempt'): a later check during the repair sees a different,
+ * later issue, and an episode that started before this was recorded has no fall at all rather than the wrong one.
  */
 export function recordFall(ep: Episode, readings: readonly string[], now: number): Episode {
-  if (ep.fall || readings.length === 0 || (ep.phase !== 'attempt' && ep.phase !== 'repair')) return ep;
+  if (ep.fall || readings.length === 0 || ep.phase !== 'attempt') return ep;
   const initial = ep.initialAttemptId ? ep.attempts[ep.initialAttemptId] : undefined;
   if (!initial) return ep;
   return { ...ep, fall: { taskId: initial.taskId, readings: readings.slice(0, MAX_FALL_LINES).map((r) => r.slice(0, 300)), at: now }, updatedAt: now };

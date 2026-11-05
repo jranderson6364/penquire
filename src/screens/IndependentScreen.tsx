@@ -16,7 +16,7 @@ import { independentCheckInput } from '../learning/context';
 import { DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
 import { createGate } from '../learning/gate';
 import {
-  canSubmit, changedSinceSubmission, editInvalidates, followUpChoice, helpGuardLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
+  canSubmit, changedSinceSubmission, editInvalidates, followUpChoice, helpGuardLines, withCheckedLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
   withConfirmedReadings,
 } from '../learning/independentFlow';
 import {
@@ -292,7 +292,7 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
       });
     }
     const now = Date.now();
-    const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, check, snapshot.id, now, snapshot.lines.map((l) => l.id))));
+    const next = commit((x) => applyAssessment(withCheckedLines(x, at.id, snapshot.id, check.lines), at.id, assessSubmission(task, check, snapshot.id, now, snapshot.lines.map((l) => l.id))));
     if (next?.phase === 'outcome') commit((x) => scheduleReview(x, DEMO_TASK_IDS.review, Date.now()));
   };
 
@@ -370,7 +370,7 @@ export function IndependentScreen({ episodeId, onDone, onOpenEpisode }: Props) {
         const snapId = at.snapshot.id;
         const task = demoTask(at.taskId);
         setFindings(c.check.lines);
-        const next = commit((x) => applyAssessment(x, at.id, assessSubmission(task, c.check, snapId, Date.now(), at.snapshot!.lines.map((l) => l.id))));
+        const next = commit((x) => applyAssessment(withCheckedLines(x, at.id, snapId, c.check.lines), at.id, assessSubmission(task, c.check, snapId, Date.now(), at.snapshot!.lines.map((l) => l.id))));
         if (next?.phase === 'outcome') commit((x) => scheduleReview(x, DEMO_TASK_IDS.review, Date.now()));
       });
     }
