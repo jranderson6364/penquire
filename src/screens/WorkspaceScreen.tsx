@@ -40,7 +40,7 @@ import { isTransientViewError, mayAutosave, withViewRetry } from '../store/saveG
 import { readSource } from '../store/sources';
 import { findPart } from '../problems/flatten';
 import { chunkLine } from '../tutor/chunks';
-import { marksAfterCheck, marksAfterReply } from '../tutor/marks';
+import { marksAfterCheck, marksAfterReply, marksOnCurrentInk } from '../tutor/marks';
 import { escalate, issueKey, legacyIssueKey, pruneLadder, renameLadderKeys, rungFor } from '../tutor/ladder';
 import { getIssue, isRepeat, noteHelp, recordCheck, renameIssueKeys } from '../tutor/issues';
 import { HELP_LEVELS } from '../ai/prompts';
@@ -569,7 +569,8 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
     };
     updateAssignment(a.id, (x) => ({ ...x, blocks: { ...(x.blocks ?? {}), [pageId]: [...((x.blocks ?? {})[pageId] ?? []), block] } }));
   };
-  const tutorMarks = (a?.tutorMarks && a.tutorMarks[pageId]) || [];
+  // an underline or circle on a line the student has since changed points at old ink: hidden (device run, November 4)
+  const tutorMarks = marksOnCurrentInk((a?.tutorMarks && a.tutorMarks[pageId]) || [], liveSigs);
   const [focusTurn, setFocusTurn] = React.useState<number | undefined>(undefined);
   const [focusTag, setFocusTag] = React.useState<number | undefined>(undefined);
   const marksByTurn = React.useMemo(() => tutorMarks.reduce<Record<number, number[]>>((m, t) => ((m[t.turn] = [...(m[t.turn] ?? []), t.tag]), m), {}), [tutorMarks]);
@@ -882,7 +883,15 @@ export function WorkspaceScreen({ assignmentId, onBack, onStartIndependent }: Pr
         ...x,
         chat: [...x.chat, { role: 'user', text: message }, { role: 'assistant', text: reply.text, costUSD: spend.total }],
         // this reply's marks replace the earlier ones (none drawn: none left), on this capture's lines only
-        tutorMarks: { ...(x.tutorMarks ?? {}), [pageId]: marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine } : null, x.chat.length + 1, () => newId('t_')) },
+        tutorMarks: {
+          ...(x.tutorMarks ?? {}),
+          [pageId]: (() => {
+            const sigs = cap ? signatures(cap.lines, cap.strokeList) : undefined;
+            return marksAfterReply(reply.marks, cap ? { lines: cap.lines, chunksByLine } : null, x.chat.length + 1, () => newId('t_')).map((m) =>
+              sigs?.get(m.lineId) ? { ...m, sig: sigs.get(m.lineId) } : m
+            );
+          })(),
+        },
         events: [
           ...x.events,
           { t: Date.now(), type, page: pageIndex + 1, level, detail: intent === 'more_help' ? 'hint ladder' : type === 'start' ? activePart : spoken ? 'voice' : undefined, costUSD: spend.total },

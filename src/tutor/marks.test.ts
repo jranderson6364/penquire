@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { marksAfterCheck, marksAfterReply, parseTagged, pruneMarks, resolveMarks, sanitizeMarks, stripTags, tagColor } from './marks.ts';
+import { marksAfterCheck, marksAfterReply, marksOnCurrentInk, parseTagged, pruneMarks, resolveMarks, sanitizeMarks, stripTags, tagColor } from './marks.ts';
 
 const known = new Set(['L1', 'L2', 'L3']);
 
@@ -138,4 +138,10 @@ test('a quoted expression becomes the stretch of the line it sits in', async () 
   assert.equal(quoteSpan('', 'a'), undefined);
   const out = sanitizeMarks([{ kind: 'circle', line: 'L1', line_text: 'x = 2 + 3', quote: '2 + 3' }], known);
   assert.ok(out[0].from! > 0.3 && out[0].to === 1);
+});
+
+test('a tutor mark on a line that has since changed is hidden; unsigned marks and an unknown page keep showing', () => {
+  const marks = [{ id: 'a', sig: '3:abc' }, { id: 'b', sig: '4:def' }, { id: 'c' }];
+  assert.deepEqual(marksOnCurrentInk(marks, new Set(['3:abc'])).map((m) => m.id), ['a', 'c']);
+  assert.deepEqual(marksOnCurrentInk(marks, null).map((m) => m.id), ['a', 'b', 'c']);
 });

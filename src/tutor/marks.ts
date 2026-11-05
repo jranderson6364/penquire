@@ -40,7 +40,14 @@ export type TutorMark = {
   /** the marked stretch (a whole line, or the chunks inside it) in page points when the mark was drawn */
   box: Box;
   note?: string;
+  /** the marked line's ink signature when drawn: once it is gone from the page, the mark is hidden (older marks lack it) */
+  sig?: string;
 };
+
+/** Marks whose line is still on the page as it was drawn. Unknown signatures (older marks, no live reading) stay. */
+export function marksOnCurrentInk<M extends { sig?: string }>(marks: readonly M[], liveSigs: ReadonlySet<string> | null): M[] {
+  return liveSigs ? marks.filter((m) => !m.sig || liveSigs.has(m.sig)) : [...marks];
+}
 
 const MAX_MARKS = 4;
 const MAX_NOTE = 140;
