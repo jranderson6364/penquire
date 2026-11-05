@@ -16,7 +16,7 @@ import { independentCheckInput } from '../learning/context';
 import { DEMO_TASK_IDS, demoTask, learnerText } from '../learning/demoPack';
 import { createGate } from '../learning/gate';
 import {
-  canSubmit, changedSinceSubmission, editInvalidates, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
+  canSubmit, changedSinceSubmission, editInvalidates, helpGuardLines, helpReplyInput, independentAttemptId, independentView, linesToConfirm, liveMatchesSnapshot, resultVisible,
   withConfirmedReadings,
 } from '../learning/independentFlow';
 import {
@@ -409,7 +409,7 @@ export function IndependentScreen({ episodeId, onDone }: Props) {
         image = undefined; // the question still goes without the page
       }
       const task = demoTask(at.taskId);
-      const r = await gate.guard(provider().reply(helpReplyInput(task, message, clamp.level, helpTurns, image)), s);
+      const r = await gate.guard(provider().reply({ ...helpReplyInput(task, message, clamp.level, helpTurns, image), lines: helpGuardLines(task) }), s);
       if (!r.ok) return;
       const now = Date.now();
       commit((x) =>

@@ -3,7 +3,9 @@
 import type { CheckResult, HelpLevel, LineVerdict } from '../ai/types';
 import type { Line } from '../ink/lines';
 import type { Assignment } from '../store/types';
-import { TASK_EQUATIONS } from './demoPack.ts';
+import { TASK_GIVENS, type TaskGiven } from './demoPack.ts';
+import { finalMisfits } from './assess.ts';
+import type { LeakLine } from '../verify/leak.ts';
 import { clampMove, lineInkSig } from './session.ts';
 import type { Assistance, Episode, EpisodePolicy, HelpMove, Phase, Snapshot } from './types';
 
@@ -97,33 +99,45 @@ export const replacementValid = (flag: Flag, after: Line[], verdicts: LineVerdic
 
 // ---- the reply leak guard's view of the work ----------------------------------------------------------------
 
-type GuardLine = { id: string; reading: string; verdict: string };
+type GuardLine = LeakLine;
 
-/** The equation the episode's workspace task starts from (demo pack only; it is in the learner's prompt already). */
-export const givenEquation = (ep: Episode | undefined): string | undefined => {
-  const taskId = ep ? ep.attempts[workAttemptId(ep)]?.taskId : undefined;
-  return taskId ? TASK_EQUATIONS[taskId] : undefined;
+/** The workspace task of a demo episode (undefined outside the pack). */
+export const workTaskId = (ep: Episode | undefined): string | undefined => (ep ? ep.attempts[workAttemptId(ep)]?.taskId : undefined);
+
+/** What the guards know about the episode's workspace task (demo pack only; src/learning/demoPack.ts TASK_GIVENS). */
+export const givenFor = (ep: Episode | undefined): TaskGiven | undefined => {
+  const taskId = workTaskId(ep);
+  return taskId ? TASK_GIVENS[taskId] : undefined;
 };
 
-/** Sorts first (src/verify/guard.ts orders by line number) and reads sensibly in the guard's fallback question. */
-export const GIVEN_LINE_ID = 'the given equation';
+/** Sorts first (src/verify/guard.ts orders by line number); never named to the student (guard.ts fallbackFor). */
+export const GIVEN_LINE_ID = 'the task setup';
+export const REJECTED_LINE_ID = 'a rejected root';
 
 /**
- * What the reply leak guard judges a reply against: the latest check's lines, kept even when the page changed since
- * (with no lines the guard passes everything), plus the task's given equation as a valid line. The given is what makes
- * a stated final answer detectable: "x = 3" doesn't satisfy a wrong "6x − 4 = 10", but it solves "2(3x − 4) = 10".
- * Only for demo tasks: a physics given like "v = 3 m/s" would scrub a tutor restating it.
+ * What the leak guards judge tutor text against: the latest check's lines, kept even when the page changed since
+ * (with no lines the guard passes everything), plus the task's setup. The setup is what makes a stated final answer
+ * detectable: "t = 4" doesn't follow from a wrong "15t - 5t^2 = 0", but it solves "20 + 15t - 5t^2 = 0". Only for demo
+ * tasks: an imported physics given like "v = 3 m/s" would scrub a tutor restating it.
+ *
+ * The projectile setup is not printed in the prompt (`stated: false`), so it goes in as a hidden line (src/verify/leak.ts):
+ * the tutor restating it, or an equivalent form, is withheld unless the student wrote an equivalent line. Rejected
+ * roots go in as sayable lines, so "what does t = -1 mean?" stays a usable pointer (every pack task has that root).
  *
  * Order matters (src/verify/leak.ts reads a wrong line against the valid line before it). With a current check the
- * given comes first, so a corrected step ("it should be 6x − 8 = 10" under a wrong "6x − 4 = 10") is caught. With a
- * stale check the given goes last: the student may have written that very fix since, and it would be scrubbed from
- * the tutor's "the line with 6x - 8 = 10 is right". The final answer is caught either way.
+ * setup comes first, so a corrected setup ("it should be 20 + 15t - 5t^2 = 0" under a wrong "20 + 15t + 5t^2 = 0") is
+ * caught. With a stale check the setup goes last and is not hidden: the student may have written that very fix
+ * since, and the tutor's "the line with 20 + 15t - 5t^2 = 0 is right" must survive. The final answer is caught either way.
  */
-export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, given?: string, stale = false): GuardLine[] {
-  const lines = (checkLines ?? []).map(({ id, reading, verdict }) => ({ id, reading, verdict }));
+export function replyGuardLines(checkLines: readonly GuardLine[] | undefined, given?: TaskGiven, stale = false): GuardLine[] {
+  const lines: GuardLine[] = (checkLines ?? []).map(({ id, reading, verdict }) => ({ id, reading, verdict }));
   if (!given) return lines;
-  const g = { id: GIVEN_LINE_ID, reading: given, verdict: 'valid' };
-  return stale ? [...lines, g] : [g, ...lines];
+  const hidden = !given.stated && !stale;
+  const setup: GuardLine[] = [given.equation, ...(given.forms ?? [])].map((reading) => ({
+    id: GIVEN_LINE_ID, reading, verdict: 'valid', ...(hidden ? { role: 'hidden' as const } : {}),
+  }));
+  const sayable: GuardLine[] = (given.rejected ?? []).map((reading) => ({ id: REJECTED_LINE_ID, reading, verdict: 'valid', role: 'sayable' as const }));
+  return stale ? [...lines, ...setup, ...sayable] : [...setup, ...sayable, ...lines];
 }
 
 // ---- "am I done?": the real check, then a short verdict --------------------------------------------------------
@@ -198,7 +212,7 @@ export function checkSaysDone(r: CheckVerdicts): boolean {
  * The short verdict said (or written) after a done question's check. Plain words and the student's own lines only
  * (the check's marks and feedback carry the rest), so nothing here goes past a location reveal. undefined: say nothing.
  */
-export function doneVerdict(o: CheckOutcome, repairVerified = false): string | undefined {
+export function doneVerdict(o: CheckOutcome, repairVerified = false, taskId?: string): string | undefined {
   switch (o.kind) {
     case 'dropped':
       return undefined;
@@ -208,6 +222,9 @@ export function doneVerdict(o: CheckOutcome, repairVerified = false): string | u
       return "There's nothing on the page to check yet.";
   }
   const r = o.result;
+  // every line valid, but the final value doesn't fit the task (the time back at the cliff edge, a rejected root):
+  // the check is wrong to call it done, so say where to look, never what the value should be
+  if (checkSaysDone(r) && finalMisfits(r.lines, taskId)) return 'Not yet. Check your final answer against the situation in the problem.';
   if (checkSaysDone(r)) return repairVerified ? "That's correct. You're done with this one. When you're ready, tap Try a fresh problem." : "That's correct. You're done with this one.";
   const ordered = [...r.lines].sort((a, b) => lineNo(a.id) - lineNo(b.id));
   const flagged = ordered.find((l) => l.verdict === 'incorrect' || l.verdict === 'partial');

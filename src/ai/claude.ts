@@ -73,7 +73,7 @@ const CHECK_TOOL: Tool = {
             reading: {
               type: 'string',
               description:
-                'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose). Units exactly as written, each in \\mathrm{...} (e.g. 9.8\\,\\mathrm{m/s^2}); never add a unit the student did not write. Never correct, simplify or complete it.',
+                'EXACT transcription of what is written, mistakes included (LaTeX for math, one equation per line, no prose). Units exactly as written, each in \\mathrm{...} (e.g. 9.8\\,\\mathrm{m/s^2}); never add a unit the student did not write. Never correct, simplify or complete it. For a drawing (sketch, diagram, arrows, axis), a short bracketed description in words with no "=", e.g. [sketch: cliff 20 m high, ball thrown up, up positive, g down].',
             },
             read_confidence: {
               type: 'string',
@@ -89,7 +89,7 @@ const CHECK_TOOL: Tool = {
               type: 'string',
               enum: ['valid', 'partial', 'incorrect', 'unreadable', 'context'],
               description:
-                '"context" = headings, labels, restated givens, or diagrams with no claim to grade. "unreadable" = could not read confidently.',
+                '"context" = headings, labels, restated givens, or sketches/diagrams (always context: a drawing is never graded, never unreadable). "unreadable" = could not read confidently.',
             },
             note: {
               type: 'string',

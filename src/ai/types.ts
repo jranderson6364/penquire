@@ -127,7 +127,7 @@ export type ReplyInput = TutorContext & {
    * not, plus a demo task's given equation (src/learning/workspaceFlow.ts replyGuardLines). Guard input only, never
    * sent to the model. Without lines the guard passes everything through.
    */
-  lines?: { id: string; reading: string; verdict: string }[];
+  lines?: { id: string; reading: string; verdict: string; role?: 'hidden' | 'sayable' }[];
   /** set when the reply came from a button (Help me start, I think this is right, More help) */
   intent?: ReplyIntent;
   /** intent 'dispute': what a deterministic check (not the model) found on the disputed line, if anything */

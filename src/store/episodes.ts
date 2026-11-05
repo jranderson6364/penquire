@@ -64,3 +64,17 @@ export function demoScope(db: DB, assignmentId: string): { next: DB; pageIds: st
   };
   return { next, pageIds: [...pageIds], snapshotIds };
 }
+
+/** demoScope for several assignments in turn (the current demo and retired pack versions), merged. */
+export function demoScopes(db: DB, assignmentIds: readonly string[]): { next: DB; pageIds: string[]; snapshotIds: string[] } {
+  let next = db;
+  const pageIds: string[] = [];
+  const snapshotIds: string[] = [];
+  for (const id of assignmentIds) {
+    const s = demoScope(next, id);
+    next = s.next;
+    pageIds.push(...s.pageIds);
+    snapshotIds.push(...s.snapshotIds);
+  }
+  return { next, pageIds: [...new Set(pageIds)], snapshotIds: [...new Set(snapshotIds)] };
+}

@@ -73,9 +73,14 @@ export type DemoTask = {
   id: string; role: DemoTaskRole;
   /** learner-facing statement only */
   prompt: string;
+  /** what a complete answer must include, worded from the prompt (learner-facing, not a key) */
+  asksFor: string[];
   asksForExplanation: boolean;
-  /** answer key: never shown or sent as learner context before that task's submission */
-  expected: { finalAnswer: string; acceptedSteps: string[]; keyIdea: string; rubric: string[] };
+  /**
+   * answer key: never shown or sent as learner context before that task's submission. `acceptedSteps` are equations
+   * any equivalent of which shows the key step; `keyStep` names that step in a post-submission reason.
+   */
+  expected: { finalAnswer: string; acceptedSteps: string[]; keyStep: string; keyIdea: string; rubric: string[] };
   /** worked solution text, only for role 'example' */
   workedSolution?: string;
 };

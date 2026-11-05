@@ -6,10 +6,10 @@ import { lineInkSig, recordAssistance, startEpisode } from './session.ts';
 import type { Assistance, Snapshot } from './types';
 import {
   MOVE_TITLE, fallbackMove, flagFrom, levelMove, needsInitialSnap, phaseLabel, pivotPolicy, repairedAfter, replacementValid,
-  withSnapshot, workAttemptId, GIVEN_LINE_ID, givenEquation, replyGuardLines, isDoneQuestion, doneVerdict, checkSaysDone,
+  withSnapshot, workAttemptId, workTaskId, GIVEN_LINE_ID, REJECTED_LINE_ID, givenFor, replyGuardLines, isDoneQuestion, doneVerdict, checkSaysDone,
 } from './workspaceFlow.ts';
 import { applyReplyLeakGuard } from '../verify/guard.ts';
-import { DEMO_TASK_IDS } from './demoPack.ts';
+import { DEMO_TASK_IDS, TASK_GIVENS } from './demoPack.ts';
 import { speakable } from '../voice/text.ts';
 
 const line = (id: string, y: number, strokes: number[]): Line => ({ id, x: 10, y, w: 200, h: 30, strokes });
@@ -83,50 +83,60 @@ test('work attempt, initial snapshot, and snapshots are never replaced', () => {
 
 // ---- the reply leak guard on an out-of-date check ------------------------------------------------------------
 
-test('a stale-page reply stating the answer is still scrubbed: the guard keeps the old lines and gets the given', () => {
-  // T11 run 1: the only check read "6x - 4 = 10" (incorrect); the page had moved on to x = 3
-  const stale = [{ id: 'L1', reading: '6x - 4 = 10', verdict: 'incorrect' }];
-  const reply = 'Nice, the distribution is fixed now. So x = 3 is your answer.';
-  // the gap: x = 3 doesn't satisfy the wrong line, so the old lines alone let it through
-  assert.equal(applyReplyLeakGuard(reply, stale, 1), reply);
+const onRecovery = () => {
   const ep = ep0();
-  const lines = replyGuardLines(stale, givenEquation({ ...ep, attempts: { [ep.initialAttemptId!]: { ...ep.attempts[ep.initialAttemptId!], taskId: DEMO_TASK_IDS.recovery } } }), true);
-  assert.deepEqual(lines.map((l) => l.id), ['L1', GIVEN_LINE_ID]);
+  return { ...ep, attempts: { [ep.initialAttemptId!]: { ...ep.attempts[ep.initialAttemptId!], taskId: DEMO_TASK_IDS.recovery } } };
+};
+
+test('a stale-page reply stating the answer is still scrubbed: the guard keeps the old lines and gets the setup', () => {
+  // the only check read the forgotten-height line (incorrect); the page has moved on since
+  const stale = [{ id: 'L1', reading: '15t - 5t^2 = 0', verdict: 'incorrect' }];
+  const reply = 'Nice, you have the starting height in now. So t = 4 s is your answer.';
+  // the gap: t = 4 doesn't satisfy the wrong line, so the old lines alone let it through
+  assert.equal(applyReplyLeakGuard(reply, stale, 1), reply);
+  const lines = replyGuardLines(stale, givenFor(onRecovery()), true);
+  assert.deepEqual(lines.map((l) => l.id), ['L1', GIVEN_LINE_ID, GIVEN_LINE_ID, REJECTED_LINE_ID]);
   const out = applyReplyLeakGuard(reply, lines, 1);
-  assert.ok(!/x\s*=\s*3/.test(out), out);
-  assert.match(out, /distribution is fixed/);
+  assert.ok(!/t\s*=\s*4/.test(out), out);
+  assert.match(out, /starting height in now/);
   // spoken replies write plain symbols too, so the same guard sees them
-  assert.ok(!/x\s*=\s*3/.test(applyReplyLeakGuard('Yes. You get x = 3.', lines, 1)));
+  assert.ok(!/4/.test(applyReplyLeakGuard('Yes. It lands after 4 seconds.', lines, 1)));
 });
 
-test("stale: the student's own fix survives in a reply, the answer does not; current: a corrected step is still caught", () => {
-  const old = [{ id: 'L1', reading: '6x - 4 = 10', verdict: 'incorrect' }];
-  const given = '2(3x - 4) = 10';
+test("stale: the student's own fix survives in a reply, the answer does not; current: a corrected setup is still caught", () => {
+  const old = [{ id: 'L1', reading: '20 + 15t + 5t^2 = 0', verdict: 'incorrect' }];
+  const given = TASK_GIVENS[DEMO_TASK_IDS.recovery];
   const stale = replyGuardLines(old, given, true);
-  const fix = 'Yes, the line with 6x - 8 = 10 is right. What comes next?';
+  const fix = 'Yes, the line with 20 + 15t - 5t^2 = 0 is right. What comes next?';
   assert.equal(applyReplyLeakGuard(fix, stale, 1), fix);
-  // with a Unicode minus it survives too, but only because extractMath doesn't take "−" as maths (it sees "8 = 10"):
-  // a blind spot of the guard, which is why SPOKEN_RULES asks for ASCII
-  assert.equal(applyReplyLeakGuard(fix.replace('-', '−'), stale, 1), fix.replace('-', '−'));
-  assert.ok(!/xs*=s*3/.test(applyReplyLeakGuard('Right. So x = 3.', stale, 1)));
-  // the page hasn't changed: "6x - 8 = 10" is not on it, and saying it is the corrected step
+  // Unicode minus and superscript are read as maths too (T15), so this is the same fix, and it survives
+  assert.equal(applyReplyLeakGuard('Yes, the line with 20 + 15t − 5t² = 0 is right.', stale, 1), 'Yes, the line with 20 + 15t − 5t² = 0 is right.');
+  assert.ok(!/t\s*=\s*4/.test(applyReplyLeakGuard('Right. So t = 4.', stale, 1)));
+  // the page hasn't changed: the fix is not on it, and saying it is the corrected setup
   const current = replyGuardLines(old, given, false);
-  assert.deepEqual(current.map((l) => l.id), [GIVEN_LINE_ID, 'L1']);
-  assert.ok(!applyReplyLeakGuard('Close. It should be 6x - 8 = 10. Check the two.', current, 1).includes('6x - 8 = 10'));
+  assert.deepEqual(current.map((l) => l.id), [GIVEN_LINE_ID, GIVEN_LINE_ID, REJECTED_LINE_ID, 'L1']);
+  assert.deepEqual(current.map((l) => l.role), ['hidden', 'hidden', 'sayable', undefined]);
+  assert.ok(!applyReplyLeakGuard('Close. It should be 20 + 15t - 5t^2 = 0. Check the sign.', current, 1).includes('20 + 15t - 5t^2'));
 });
 
 test('spoken replies use ASCII maths, which the voice reads as words', () => {
-  assert.equal(speakable('Look at the line with 6x - 8 = 10.'), 'Look at the line with 6x minus 8 equals 10.');
+  assert.equal(speakable('Look at the line with 15t - 5t^2 = 0.'), 'Look at the line with 15t minus 5t squared equals 0.');
 });
 
-test('with no check yet the given alone keeps the guard on; outside the demo pack there is no given', () => {
-  const lines = replyGuardLines(undefined, '2(3x - 4) = 10');
-  assert.ok(!/x\s*=\s*3/.test(applyReplyLeakGuard('The answer is x = 3.', lines, 1)));
-  // the given itself and other talk pass
-  assert.equal(applyReplyLeakGuard('Start from 2(3x - 4) = 10 and look at the two.', lines, 1), 'Start from 2(3x - 4) = 10 and look at the two.');
-  assert.equal(givenEquation(ep0()), undefined);
-  assert.equal(givenEquation(undefined), undefined);
+test('with no check yet the setup alone keeps the guard on; outside the demo pack there is no setup', () => {
+  const lines = replyGuardLines(undefined, TASK_GIVENS[DEMO_TASK_IDS.recovery]);
+  assert.ok(!/t\s*=\s*4/.test(applyReplyLeakGuard('The answer is t = 4 s.', lines, 1)));
+  // talk about the situation and the prompt's own numbers passes
+  const talk = 'Start from the ground: the ball begins 20 m up with 15 m/s, and g = 10 m/s^2 pulls it down.';
+  assert.equal(applyReplyLeakGuard(talk, lines, 1), talk);
+  assert.equal(givenFor(ep0()), undefined);
+  assert.equal(givenFor(undefined), undefined);
+  assert.equal(workTaskId(onRecovery()), DEMO_TASK_IDS.recovery);
   assert.deepEqual(replyGuardLines(undefined), []);
+  // a setup printed in the prompt (stated) is quotable, as before T15
+  const stated = replyGuardLines(undefined, { equation: '2(3x - 4) = 10', stated: true });
+  assert.equal(stated[0].role, undefined);
+  assert.equal(applyReplyLeakGuard('Start from 2(3x - 4) = 10.', stated, 1), 'Start from 2(3x - 4) = 10.');
 });
 
 // ---- done questions ----------------------------------------------------------------------------------------------
@@ -175,7 +185,7 @@ const done = (lines: LineVerdict[], parts: { status: 'complete' | 'in_progress' 
 });
 
 test('a check that is all valid and complete says plainly that the work is done, with no question', () => {
-  const t = doneVerdict(done([vd('L1', 'context', '2(3x-4)=10'), vd('L2', 'valid', '6x-8=10'), vd('L3', 'valid', 'x=3')]));
+  const t = doneVerdict(done([vd('L1', 'context', '[sketch: cliff 20 m, ball thrown up, up positive]'), vd('L2', 'valid', '20 + 15t - 5t^2 = 0'), vd('L3', 'valid', 't = 4 s')]), false, DEMO_TASK_IDS.recovery);
   assert.equal(t, "That's correct. You're done with this one.");
   assert.ok(!t!.includes('?'));
   // the same check found again (nothing changed since) gives the same answer
@@ -186,8 +196,8 @@ test('a check that is all valid and complete says plainly that the work is done,
 });
 
 test('otherwise the verdict points at the earliest open line by what it says, never by its number', () => {
-  const t = doneVerdict(done([vd('L2', 'incorrect', 'x=14/6'), vd('L1', 'incorrect', '6x-4=10')], [{ status: 'in_progress' }], ['distribution']));
-  assert.equal(t, 'Not yet. Take another look at the line with 6x-4=10.');
+  const t = doneVerdict(done([vd('L2', 'incorrect', 't = 3 s'), vd('L1', 'incorrect', '15t - 5t^2 = 0')], [{ status: 'in_progress' }], ['starting height']));
+  assert.equal(t, 'Not yet. Take another look at the line with 15t - 5t^2 = 0.');
   assert.doesNotMatch(t!, /\bL\d|line \d/);
   assert.match(doneVerdict(done([vd('L1', 'valid', '6x-8=10'), vd('L2', 'unreadable')]))!, /couldn't read/);
   // correct so far but not finished, or a part not complete: not done
@@ -201,4 +211,22 @@ test('a dropped check says nothing; a failed or empty one says so', () => {
   assert.equal(doneVerdict({ kind: 'dropped' }), undefined);
   assert.match(doneVerdict({ kind: 'error' })!, /couldn't finish/);
   assert.match(doneVerdict({ kind: 'empty' })!, /nothing on the page/);
+});
+
+test('a sketch never blocks done: context lines with or without a reading', () => {
+  const lines = [vd('L1', 'context', '[sketch: cliff 20 m, +y up, g down]'), vd('L2', 'context', ''), vd('L3', 'valid', '20 + 15t - 5t^2 = 0'), vd('L4', 'valid', 't = 4 s')];
+  assert.equal(checkSaysDone(done(lines).result), true);
+  assert.equal(doneVerdict(done(lines), false, DEMO_TASK_IDS.recovery), "That's correct. You're done with this one.");
+});
+
+test('"done" on a page whose final value does not fit the task is not done, whatever the verdicts (T15)', () => {
+  // the "thought I was done" moment: the model called the forgotten-height work valid
+  const edge = [vd('L1', 'valid', '15t - 5t^2 = 0'), vd('L2', 'valid', String.raw`t = 3\,\mathrm{s}`)];
+  const t = doneVerdict(done(edge), false, DEMO_TASK_IDS.recovery);
+  assert.equal(t, 'Not yet. Check your final answer against the situation in the problem.');
+  assert.doesNotMatch(t!, /4|20|height|zero/);
+  // keeping the rejected root as the last value
+  assert.match(doneVerdict(done([vd('L1', 'valid', '20 + 15t - 5t^2 = 0'), vd('L2', 'valid', 't = -1 s')]), true, DEMO_TASK_IDS.recovery)!, /^Not yet/);
+  // outside the pack the verdicts are all there is
+  assert.equal(doneVerdict(done(edge)), "That's correct. You're done with this one.");
 });

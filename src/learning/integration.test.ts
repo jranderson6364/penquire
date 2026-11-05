@@ -29,22 +29,22 @@ const result = (lines: LineVerdict[], parts: PartStatus[] = [{ label: '1', statu
 const ink = (id: string, y: number, strokes: number[], w = 300): Line => ({ id, x: 40, y, w, h: 40, strokes });
 const snapOf = (id: string, pageId: string, lines: Line[], at: number): Snapshot => ({ id, pageFile: `snapshots/${id}.pk`, strokeCount: lines.reduce((n, l) => n + l.strokes.length, 0), lines, at });
 const PAGE = { base64: 'AAAA', mediaType: 'image/png' as const };
-const EXPLAIN = 'The 3 multiplies both the 2y and the 1 inside the parentheses.';
+const EXPLAIN = 'The other solution, t = −1 s, is a time before the ball was thrown, so it is rejected.';
 
 const help = (ep: Episode, move: Assistance['move'], level: Assistance['level'], at: number, over: Partial<Assistance> = {}) =>
   recordAssistance(ep, { attemptId: workAttemptId(ep), move, level, channels: ['text'], revealed: 'unknown', at, ...over }, `h${at}`);
 
 const independentTask = demoTask(DEMO_TASK_IDS.independent);
 
-/** The deliberate first error from docs/12: L2 distributes to one term only. */
+/** The built-in fall from docs/12: L2 drops the 20 m starting height (15t − 5t² = 0 is the time back at the cliff edge). */
 const firstAttempt = [ink('L1', 100, [0, 1, 2]), ink('L2', 160, [3, 4, 5])];
-const firstCheck = result([v('L1', '2(3x - 4) = 10'), v('L2', '6x - 4 = 10', 'incorrect')]);
+const firstCheck = result([v('L1', 'y = 20 + 15t - 5t^2'), v('L2', '15t - 5t^2 = 0', 'incorrect')]);
 /** L2 erased and rewritten in the same place (new strokes, so a new signature), then the rest of the solution. */
 const repairedPage = [ink('L1', 100, [0, 1, 2]), ink('L2', 162, [6, 7, 8, 9]), ink('L3', 220, [10, 11]), ink('L4', 280, [12])];
-const repairedCheck = result([v('L1', '2(3x - 4) = 10'), v('L2', '6x - 8 = 10'), v('L3', '6x = 18'), v('L4', 'x = 3')]);
+const repairedCheck = result([v('L1', 'y = 20 + 15t - 5t^2'), v('L2', '20 + 15t - 5t^2 = 0'), v('L3', '(t - 4)(t + 1) = 0'), v('L4', String.raw`t = 4\,\mathrm{s}`)]);
 
 const freshLines = [ink('F1', 100, [0]), ink('F2', 160, [1]), ink('F3', 220, [2]), ink('F4', 280, [3]), ink('F5', 340, [4, 5, 6], 600)];
-const freshCorrect = result([v('F1', '3(2y + 1) = 33'), v('F2', '6y + 3 = 33'), v('F3', '6y = 30'), v('F4', 'y = 5'), v('F5', EXPLAIN)]);
+const freshCorrect = result([v('F1', '15 + 10t - 5t^2 = 0'), v('F2', 't^2 - 2t - 3 = 0'), v('F3', '(t - 3)(t + 1) = 0'), v('F4', String.raw`t = 3\,\mathrm{s}`), v('F5', EXPLAIN)]);
 
 const start = (): Episode =>
   buildDemoEpisode(demoContent(DEMO_PACK, learnerText), { id: 'e1', pageId: 'p-demo', now: 1000 });
@@ -53,7 +53,7 @@ const start = (): Episode =>
 function recover(): Episode {
   let ep = start();
   const flag = flagFrom(firstAttempt, firstCheck.lines);
-  assert.ok(flag, 'the distribution error is flagged');
+  assert.ok(flag, 'the forgotten height is flagged');
   ep = help(ep, 'pointer', 1, 2000, { channels: ['marks', 'text'] });
   assert.equal(ep.phase, 'repair');
   ep = help(ep, 'explain', 2, 3000);
@@ -118,11 +118,11 @@ test('error → pointer → explain → repair verified → independent → subm
 
 // ---- docs/09 release-blocking cases (the device-free ones) ----------------------------------------------
 
-test('deliberate distribution error: flagged, never validated by the repair check', () => {
+test('deliberate forgotten-height error: flagged, never validated by the repair check', () => {
   const flag = flagFrom(firstAttempt, firstCheck.lines)!;
   assert.equal(flag.sig.endsWith('#3'), true);
   // the same wrong step rewritten is new ink but not valid → no repair
-  const stillWrong = result([v('L1', '2(3x - 4) = 10'), v('L2', '6x - 4 = 10', 'incorrect')]);
+  const stillWrong = result([v('L1', 'y = 20 + 15t - 5t^2'), v('L2', '15t - 5t^2 = 0', 'incorrect')]);
   assert.equal(replacementValid(flag, repairedPage, stillWrong.lines), false);
   assert.equal(repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: repairedPage, nowValid: false }).verified, false);
 });
@@ -132,48 +132,48 @@ test('fully correct work: no flag, so nothing to repair and no manufactured issu
 });
 
 test('correct final answer with invalid reasoning: no independent pass', () => {
-  const bogus = result([v('F1', '3(2y + 1) = 33'), v('F2', '6y + 1 = 33'), v('F3', 'y = 5'), v('F5', EXPLAIN)]);
+  const bogus = result([v('F1', '15 + 10t - 5t^2 = 0'), v('F2', 't^2 - 2t - 5 = 0'), v('F3', 't = 3 s'), v('F5', EXPLAIN)]);
   const { ep, as } = independent(recover(), bogus);
   assert.equal(as.result, 'needs_practice', 'the model called the bogus step valid; checkStep still catches it');
   assert.deepEqual(outcomeLabels(ep), ['repair_verified', 'needs_practice']);
-  const bare = independent(recover(), result([v('F1', 'y = 5')]));
+  const bare = independent(recover(), result([v('F1', 't = 3 s')]));
   assert.equal(bare.as.result, 'needs_practice');
 });
 
 test('wrong answer: needs practice', () => {
-  const wrong = result([v('F1', '3(2y + 1) = 33'), v('F2', '6y + 1 = 33', 'incorrect'), v('F3', 'y = 16/3', 'incorrect'), v('F5', EXPLAIN)]);
+  const wrong = result([v('F1', '10t - 5t^2 = 0', 'incorrect'), v('F2', '5t(2 - t) = 0', 'incorrect'), v('F3', 't = 2 s', 'incorrect'), v('F5', EXPLAIN)]);
   assert.deepEqual(outcomeLabels(independent(recover(), wrong).ep), ['repair_verified', 'needs_practice']);
 });
 
 test('ambiguous symbol: unassessable, never a pass', () => {
-  const unsure = result([v('F1', '3(2y + 1) = 33'), v('F2', '6y + 3 = 33', 'valid', { readConfidence: 'low' }), v('F3', 'y = 5'), v('F5', EXPLAIN)]);
+  const unsure = result([v('F1', '15 + 10t - 5t^2 = 0'), v('F2', 't^2 - 2t - 3 = 0', 'valid', { readConfidence: 'low' }), v('F3', 't = 3 s'), v('F5', EXPLAIN)]);
   const { ep, as } = independent(recover(), unsure);
   assert.equal(as.result, 'unassessable');
   assert.deepEqual(outcomeLabels(ep), ['repair_verified', 'could_not_assess']);
 });
 
-test('valid alternative approach (divide by 3 first): accepted', () => {
-  const alt = result([v('F1', '3(2y + 1) = 33'), v('F2', '2y + 1 = 11'), v('F3', '2y = 10'), v('F4', 'y = 5'), v('F5', 'Dividing both sides by 3 first undoes the multiplication on the whole bracket.')]);
+test('valid alternative approach (the quadratic formula): accepted', () => {
+  const alt = result([v('F1', '5t^2 - 10t - 15 = 0'), v('F2', String.raw`t = \frac{10 \pm \sqrt{100 + 300}}{10}`), v('F3', String.raw`t = \frac{10 + 20}{10} = 3\,\mathrm{s}`), v('F5', 'The minus sign gives a negative time, before the throw, so I keep t = 3 s.')]);
   assert.deepEqual(outcomeLabels(independent(recover(), alt).ep), ['repair_verified', 'passed_independent']);
 });
 
 test('missing explanation when the task asks for one: needs practice', () => {
-  const noWords = result([v('F1', '3(2y + 1) = 33'), v('F2', '6y + 3 = 33'), v('F3', '6y = 30'), v('F4', 'y = 5')]);
+  const noWords = result(freshCorrect.lines.filter((l) => l.id !== 'F5'));
   assert.equal(independent(recover(), noWords).as.result, 'needs_practice');
 });
 
 test('bad line erased: no repair label', () => {
   const flag = flagFrom(firstAttempt, firstCheck.lines)!;
   const erased = [ink('L1', 100, [0, 1, 2])];
-  assert.equal(repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: erased, nowValid: replacementValid(flag, erased, [v('L1', '2(3x - 4) = 10')]) }).verified, false);
+  assert.equal(repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: erased, nowValid: replacementValid(flag, erased, [v('L1', 'y = 20 + 15t - 5t^2')]) }).verified, false);
   // new ink elsewhere on the page does not count either
   const elsewhere = [...firstAttempt.filter((l) => l.id === 'L1'), ink('L9', 600, [9, 10])];
-  assert.equal(repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: elsewhere, nowValid: replacementValid(flag, elsewhere, [v('L1', 'x'), v('L9', 'x = 3')]) }).verified, false);
+  assert.equal(repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: elsewhere, nowValid: replacementValid(flag, elsewhere, [v('L1', 't'), v('L9', 't = 4 s')]) }).verified, false);
 });
 
 test('tutor reversal on unchanged ink: a correction, not a repair', () => {
   const flag = flagFrom(firstAttempt, firstCheck.lines)!;
-  const reversed = result([v('L1', '2(3x - 4) = 10'), v('L2', '6x - 4 = 10')]); // now called valid, ink untouched
+  const reversed = result([v('L1', 'y = 20 + 15t - 5t^2'), v('L2', '15t - 5t^2 = 0')]); // now called valid, ink untouched
   assert.equal(replacementValid(flag, firstAttempt, reversed.lines), false);
   const ev = repairEvidence({ flaggedSig: flag.sig, before: flag.before, after: firstAttempt, nowValid: true });
   assert.deepEqual(ev, { verified: false, reason: 'flagged ink is unchanged' });
@@ -210,7 +210,7 @@ test('prior reply completes after the switch to independent: stale', async () =>
   const late = gate.guard(new Promise<string>((r) => (resolve = r)), s);
   gate.enter({ episodeId: ep.id, attemptId: workAttemptId(ep), phase: 'independent' }); // "Try a fresh problem"
   gate.enter({ episodeId: ep.id, attemptId: independentAttemptId(ep.id), phase: 'independent' }); // the screen's own entry
-  resolve('x = 3');
+  resolve('t = 4 s');
   assert.deepEqual(await late, { ok: false, stale: true });
   assert.equal(gate.isCurrent(s), false);
 });
@@ -237,7 +237,7 @@ test('duplicate submit and duplicate assessment: one piece of evidence', () => {
   const snap = snapOf('s-fresh', 'p-fresh', freshLines, 6000);
   ep = submitIndependent(ep, snap, [], 6000);
   assert.equal(submitIndependent(ep, snap, [], 6100), ep);
-  const needs = assessSubmission(independentTask, result([v('F1', 'y = 5')]), snap.id, 7000);
+  const needs = assessSubmission(independentTask, result([v('F1', 't = 3 s')]), snap.id, 7000);
   ep = applyAssessment(ep, ep.independentAttemptId!, needs);
   const pass = assessSubmission(independentTask, freshCorrect, snap.id, 7100);
   assert.equal(applyAssessment(ep, ep.independentAttemptId!, pass), ep, 'the first result wins');
@@ -283,7 +283,7 @@ test('the flag survives a relaunch only through the latest check (documented lim
   // After relaunch WorkspaceScreen rebuilds the flag from the page's latest stored check. An erase-only check in
   // between stores a check with no flag, so the original flag is gone: the rewrite then cannot verify the repair.
   const erased = [ink('L1', 100, [0, 1, 2])];
-  const afterErase = result([v('L1', '2(3x - 4) = 10')]);
+  const afterErase = result([v('L1', 'y = 20 + 15t - 5t^2')]);
   const rebuilt: Flag | null = flagFrom(erased, afterErase.lines);
   assert.equal(rebuilt, null);
 });
